@@ -31,7 +31,7 @@ export default function CopyId({ value, truncate }) {
     : value
 
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
       <span className="copyable-id">{display}</span>
       <button
         type="button"

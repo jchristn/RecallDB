@@ -225,7 +225,7 @@ export default function DataTable({
                 className={onRowClick ? 'clickable' : ''}
               >
                 {columns.map((col) => (
-                  <td key={col.key}>
+                  <td key={col.key} style={col.width ? { minWidth: col.width } : undefined}>
                     {col.render ? col.render(item) : item[col.key]}
                   </td>
                 ))}

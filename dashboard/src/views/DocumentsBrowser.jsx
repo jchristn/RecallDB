@@ -197,7 +197,7 @@ export default function DocumentsBrowser() {
     {
       key: 'DocumentKey',
       label: 'Key',
-      width: '180px',
+      width: '220px',
       render: (d) => <CopyId value={d.DocumentKey} truncate={16} />,
       filterValue: (d) => d.DocumentKey
     },

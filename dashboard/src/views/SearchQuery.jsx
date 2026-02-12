@@ -491,8 +491,8 @@ function QueryTab({ tenantId, collectionId }) {
   const [createdBefore, setCreatedBefore] = useState('')
   const [createdAfter, setCreatedAfter] = useState('')
   const [documentIds, setDocumentIds] = useState('')
-  const [requiredLabels, setRequiredLabels] = useState('')
-  const [excludedLabels, setExcludedLabels] = useState('')
+  const [requiredLabels, setRequiredLabels] = useState([])
+  const [excludedLabels, setExcludedLabels] = useState([])
   const [requiredTags, setRequiredTags] = useState([])
   const [excludedTags, setExcludedTags] = useState([])
   const [requiredTerms, setRequiredTerms] = useState('')
@@ -502,6 +502,9 @@ function QueryTab({ tenantId, collectionId }) {
   const [loading, setLoading] = useState(false)
   const [jsonModal, setJsonModal] = useState(null)
 
+  const addLabel = (setter) => setter(prev => [...prev, ''])
+  const updateLabel = (setter, index, value) => setter(prev => prev.map((v, i) => i === index ? value : v))
+  const removeLabel = (setter, index) => setter(prev => prev.filter((_, i) => i !== index))
   const addTagRow = (setter) => setter(prev => [...prev, { Key: '', Condition: 'Equals', Value: '' }])
   const updateTagRow = (setter, index, field, value) => setter(prev => prev.map((row, i) => i === index ? { ...row, [field]: value } : row))
   const removeTagRow = (setter, index) => setter(prev => prev.filter((_, i) => i !== index))
@@ -520,8 +523,8 @@ function QueryTab({ tenantId, collectionId }) {
     const docIds = parseCommaSep(documentIds)
     if (docIds.length > 0) query.DocumentIds = docIds
 
-    const reqLabels = parseCommaSep(requiredLabels)
-    const excLabels = parseCommaSep(excludedLabels)
+    const reqLabels = requiredLabels.filter(l => l.trim())
+    const excLabels = excludedLabels.filter(l => l.trim())
     if (reqLabels.length > 0 || excLabels.length > 0) {
       query.LabelFilter = {}
       if (reqLabels.length > 0) query.LabelFilter.Required = reqLabels
@@ -635,13 +638,31 @@ function QueryTab({ tenantId, collectionId }) {
           </div>
 
           <CollapsibleSection title="Label Filter">
-            <div className="form-group">
-              <label>Required Labels (comma-separated)</label>
-              <textarea value={requiredLabels} onChange={(e) => setRequiredLabels(e.target.value)} rows={2} placeholder="label1, label2" />
-            </div>
-            <div className="form-group">
-              <label>Excluded Labels (comma-separated)</label>
-              <textarea value={excludedLabels} onChange={(e) => setExcludedLabels(e.target.value)} rows={2} placeholder="label3, label4" />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Required Labels</label>
+                {requiredLabels.map((label, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+                    <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                      <input type="text" value={label} onChange={(e) => updateLabel(setRequiredLabels, i, e.target.value)} placeholder="Label" />
+                    </div>
+                    <button type="button" className="btn btn-sm btn-danger" onClick={() => removeLabel(setRequiredLabels, i)}>X</button>
+                  </div>
+                ))}
+                <button type="button" className="add-row-btn" onClick={() => addLabel(setRequiredLabels)}>+ Add Label</button>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Excluded Labels</label>
+                {excludedLabels.map((label, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+                    <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                      <input type="text" value={label} onChange={(e) => updateLabel(setExcludedLabels, i, e.target.value)} placeholder="Label" />
+                    </div>
+                    <button type="button" className="btn btn-sm btn-danger" onClick={() => removeLabel(setExcludedLabels, i)}>X</button>
+                  </div>
+                ))}
+                <button type="button" className="add-row-btn" onClick={() => addLabel(setExcludedLabels)}>+ Add Label</button>
+              </div>
             </div>
           </CollapsibleSection>
 
