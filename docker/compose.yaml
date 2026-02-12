@@ -1,0 +1,56 @@
+services:
+  pgvector:
+    image: ankane/pgvector:latest
+    container_name: recalldb-pgvector
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: recalldb
+      POSTGRES_USER: recalldb
+      POSTGRES_PASSWORD: recalldb
+    volumes:
+      - pgvector-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recalldb -d recalldb"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+      start_period: 10s
+
+  recalldb-server:
+    image: jchristn77/recalldb-server:latest
+    container_name: recalldb-server
+    ports:
+      - "8600:8600"
+    environment:
+      RECALLDB_DB_HOST: pgvector
+      RECALLDB_DB_PORT: "5432"
+      RECALLDB_DB_NAME: recalldb
+      RECALLDB_DB_USER: recalldb
+      RECALLDB_DB_PASS: recalldb
+    volumes:
+      - ./recalldb.json:/app/recalldb.json:ro
+    depends_on:
+      pgvector:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8600/"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+      start_period: 10s
+
+  recalldb-dashboard:
+    image: jchristn77/recalldb-dashboard:latest
+    container_name: recalldb-dashboard
+    ports:
+      - "8601:8601"
+    depends_on:
+      recalldb-server:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgvector-data:

@@ -1,0 +1,74 @@
+.action-menu {
+  position: relative;
+  display: inline-block;
+}
+
+.action-menu-trigger {
+  background: transparent;
+  border: none;
+  padding: 6px;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.action-menu-trigger:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.action-menu-dropdown {
+  position: fixed;
+  min-width: 160px;
+  transform: translateX(-100%);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 9999;
+  overflow: hidden;
+}
+
+.action-menu-item {
+  display: block;
+  width: 100%;
+  padding: 10px 16px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  cursor: pointer;
+  color: var(--text);
+  border-radius: 0;
+}
+
+.action-menu-item:hover {
+  background: var(--bg);
+}
+
+.action-menu-item.danger {
+  color: var(--danger);
+  background: transparent;
+}
+
+.action-menu-item.danger:hover {
+  background: var(--bg);
+}
+
+.action-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.action-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.action-icon {
+  margin-right: 8px;
+}

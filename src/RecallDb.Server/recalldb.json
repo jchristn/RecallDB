@@ -1,0 +1,34 @@
+{
+  "Webserver": {
+    "Hostname": "localhost",
+    "Port": 8600,
+    "Ssl": false
+  },
+  "Database": {
+    "Hostname": "localhost",
+    "Port": 5432,
+    "DatabaseName": "recalldb",
+    "Username": "recalldb",
+    "Password": "recalldb",
+    "Schema": "public",
+    "RequireEncryption": false,
+    "LogQueries": false
+  },
+  "Logging": {
+    "ConsoleLogging": true,
+    "EnableColors": true,
+    "MinimumSeverity": 0,
+    "LogDirectory": "./logs/",
+    "LogFilename": "recalldb.log",
+    "Servers": []
+  },
+  "Debug": {
+    "Authentication": false,
+    "Exceptions": true,
+    "Requests": false,
+    "DatabaseQueries": false
+  },
+  "AdminApiKeys": [
+    "recalldbadmin"
+  ]
+}

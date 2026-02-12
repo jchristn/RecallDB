@@ -1,0 +1,15 @@
+**/.git
+**/.vs
+**/bin
+**/obj
+**/node_modules
+**/dist
+**/.env
+**/.env.local
+**/logs
+**/*.db
+**/*.log
+**/Thumbs.db
+**/.DS_Store
+**/.idea
+**/.vscode

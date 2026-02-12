@@ -1,0 +1,99 @@
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 24px;
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border);
+  min-height: 48px;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topbar-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.topbar-badge svg {
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+
+.server-badge {
+  background: rgba(100, 116, 139, 0.12);
+  color: var(--text-secondary);
+}
+
+.email-badge {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--primary);
+}
+
+.tenant-badge {
+  background: rgba(34, 197, 94, 0.12);
+  color: var(--success);
+}
+
+.admin-badge {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
+}
+
+.tenant-admin-badge {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warning);
+}
+
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+
+.theme-toggle:hover {
+  background: var(--bg);
+  color: var(--text);
+  border-color: var(--text-secondary);
+}
+
+.topbar-logout {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+
+.topbar-logout:hover {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}

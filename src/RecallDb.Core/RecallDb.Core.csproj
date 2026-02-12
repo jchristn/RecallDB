@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="*" />
+    <PackageReference Include="PrettyId" Version="2.0.0" />
+    <PackageReference Include="SyslogLogging" Version="*" />
+    <PackageReference Include="Timestamps" Version="*" />
+  </ItemGroup>
+
+</Project>

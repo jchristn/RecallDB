@@ -1,0 +1,72 @@
+# .NET
+bin/
+obj/
+*.dll
+*.exe
+*.pdb
+*.user
+*.suo
+*.cache
+.vs/
+
+*.nupkg
+packages/
+
+# Rider
+.idea/
+
+# VS Code
+.vscode/
+
+# Build
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+build/
+bld/
+
+# NuGet
+*.nuget.props
+*.nuget.targets
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-*.log*
+.npm
+
+# Dashboard
+dashboard/dist/
+
+# Logs
+logs/
+*.log
+
+# Database
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# RecallDB
+recalldb.db
+recalldb.log

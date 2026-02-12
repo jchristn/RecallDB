@@ -1,0 +1,16 @@
+{
+  "name": "recalldb-sdk",
+  "version": "1.0.0",
+  "description": "RecallDB JavaScript SDK",
+  "main": "recalldb-sdk.js",
+  "scripts": {
+    "test": "node test-harness.js"
+  },
+  "keywords": [
+    "recalldb",
+    "vector",
+    "database",
+    "sdk"
+  ],
+  "license": "MIT"
+}
