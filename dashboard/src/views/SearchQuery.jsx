@@ -284,8 +284,8 @@ function SearchTab({ tenantId, collectionId }) {
 
   const resultColumns = [
     {
-      key: 'DocumentKey', label: 'Key', width: '180px',
-      render: (d) => <CopyId value={d.DocumentKey} truncate={16} />,
+      key: 'DocumentKey', label: 'Key',
+      render: (d) => <CopyId value={d.DocumentKey} />,
       filterValue: (d) => d.DocumentKey
     },
     { key: 'DocumentId', label: 'Doc ID', render: (d) => d.DocumentId ? <CopyId value={d.DocumentId} truncate={16} /> : '-' },
@@ -582,8 +582,8 @@ function QueryTab({ tenantId, collectionId }) {
 
   const resultColumns = [
     {
-      key: 'DocumentKey', label: 'Key', width: '180px',
-      render: (d) => <CopyId value={d.DocumentKey} truncate={16} />,
+      key: 'DocumentKey', label: 'Key',
+      render: (d) => <CopyId value={d.DocumentKey} />,
       filterValue: (d) => d.DocumentKey
     },
     { key: 'DocumentId', label: 'Doc ID', render: (d) => d.DocumentId ? <CopyId value={d.DocumentId} truncate={16} /> : '-' },
