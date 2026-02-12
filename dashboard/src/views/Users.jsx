@@ -14,7 +14,7 @@ export default function Users() {
   const { tenantId } = useParams()
   const [users, setUsers] = useState([])
   const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ Email: '', FirstName: '', LastName: '', Password: '' })
+  const [form, setForm] = useState({ Email: '', FirstName: '', LastName: '', Password: '', IsAdmin: false, IsTenantAdmin: false })
   const [createTenantId, setCreateTenantId] = useState(tenantId)
   const [error, setError] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
@@ -35,7 +35,7 @@ export default function Users() {
     e.preventDefault()
     try {
       await api.createUser(createTenantId, { ...form, TenantId: createTenantId })
-      setForm({ Email: '', FirstName: '', LastName: '', Password: '' })
+      setForm({ Email: '', FirstName: '', LastName: '', Password: '', IsAdmin: false, IsTenantAdmin: false })
       setShowCreate(false)
       loadUsers()
     } catch (err) { setError(err) }
@@ -129,6 +129,18 @@ export default function Users() {
               <div className="form-group"><label>First Name</label><input type="text" value={form.FirstName} onChange={(e) => setForm({...form, FirstName: e.target.value})} /></div>
               <div className="form-group"><label>Last Name</label><input type="text" value={form.LastName} onChange={(e) => setForm({...form, LastName: e.target.value})} /></div>
               <div className="form-group"><label>Password</label><input type="password" value={form.Password} onChange={(e) => setForm({...form, Password: e.target.value})} required /></div>
+              <div className="form-group">
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="checkbox" checked={form.IsAdmin} onChange={(e) => setForm({...form, IsAdmin: e.target.checked})} style={{ width: 'auto' }} />
+                  Global Admin
+                </label>
+              </div>
+              <div className="form-group">
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="checkbox" checked={form.IsTenantAdmin} onChange={(e) => setForm({...form, IsTenantAdmin: e.target.checked})} style={{ width: 'auto' }} />
+                  Tenant Admin
+                </label>
+              </div>
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(false)}>Cancel</button>
                 <button type="submit" className="btn btn-primary">Create</button>

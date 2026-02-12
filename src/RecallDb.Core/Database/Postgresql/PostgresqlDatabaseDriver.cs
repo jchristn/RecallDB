@@ -316,5 +316,25 @@ namespace RecallDb.Core.Database.Postgresql
         }
 
         #endregion
+
+        #region IDisposable
+
+        private bool _Disposed = false;
+
+        /// <summary>
+        /// Dispose of resources.
+        /// </summary>
+        /// <param name="disposing">Whether managed resources should be disposed.</param>
+        protected override void Dispose(bool disposing)
+        {
+            if (!_Disposed)
+            {
+                _Disposed = true;
+            }
+
+            base.Dispose(disposing);
+        }
+
+        #endregion
     }
 }

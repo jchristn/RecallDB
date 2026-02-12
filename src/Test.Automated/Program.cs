@@ -222,7 +222,7 @@ namespace Test.Automated
         private static async Task<HttpResponseMessage> PutAsync(HttpClient client, string path, object body)
         {
             string json = JsonSerializer.Serialize(body, _JsonOptions);
-            StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
+            using StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
             HttpResponseMessage response = await client.PutAsync(path, content).ConfigureAwait(false);
             return response;
         }
@@ -230,7 +230,7 @@ namespace Test.Automated
         private static async Task<HttpResponseMessage> PostAsync(HttpClient client, string path, object body)
         {
             string json = JsonSerializer.Serialize(body, _JsonOptions);
-            StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
+            using StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
             HttpResponseMessage response = await client.PostAsync(path, content).ConfigureAwait(false);
             return response;
         }
@@ -243,7 +243,7 @@ namespace Test.Automated
 
         private static async Task<HttpResponseMessage> HeadAsync(HttpClient client, string path)
         {
-            HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Head, path);
+            using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Head, path);
             HttpResponseMessage response = await client.SendAsync(request).ConfigureAwait(false);
             return response;
         }
@@ -305,7 +305,7 @@ namespace Test.Automated
 
         private static async Task TestConnectivityGet()
         {
-            HttpResponseMessage response = await GetAsync(_AdminClient, "/").ConfigureAwait(false);
+            using HttpResponseMessage response = await GetAsync(_AdminClient, "/").ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -315,7 +315,7 @@ namespace Test.Automated
 
         private static async Task TestConnectivityHead()
         {
-            HttpResponseMessage response = await HeadAsync(_AdminClient, "/").ConfigureAwait(false);
+            using HttpResponseMessage response = await HeadAsync(_AdminClient, "/").ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
         }
 
@@ -326,7 +326,7 @@ namespace Test.Automated
         private static async Task TestAuthenticateBearer()
         {
             object body = new { BearerToken = "default" };
-            HttpResponseMessage response = await PostAsync(_AdminClient, "/v1.0/authenticate", body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PostAsync(_AdminClient, "/v1.0/authenticate", body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -337,7 +337,7 @@ namespace Test.Automated
         private static async Task TestAuthenticateEmailPassword()
         {
             object body = new { TenantId = "default", Email = "admin@recall", Password = "password" };
-            HttpResponseMessage response = await PostAsync(_AdminClient, "/v1.0/authenticate", body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PostAsync(_AdminClient, "/v1.0/authenticate", body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -352,7 +352,7 @@ namespace Test.Automated
         private static async Task TestTenantCreate()
         {
             object body = new { Name = "IntegrationTestTenant" };
-            HttpResponseMessage response = await PutAsync(_AdminClient, "/v1.0/tenants", body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PutAsync(_AdminClient, "/v1.0/tenants", body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.Created);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -366,7 +366,7 @@ namespace Test.Automated
 
         private static async Task TestTenantRead()
         {
-            HttpResponseMessage response = await GetAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId).ConfigureAwait(false);
+            using HttpResponseMessage response = await GetAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -377,7 +377,7 @@ namespace Test.Automated
         private static async Task TestTenantUpdate()
         {
             object body = new { Name = "IntegrationTestTenantUpdated" };
-            HttpResponseMessage response = await PutAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId, body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PutAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId, body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -388,7 +388,7 @@ namespace Test.Automated
         private static async Task TestTenantEnumerate()
         {
             object body = new { MaxResults = 100 };
-            HttpResponseMessage response = await PostAsync(_AdminClient, "/v1.0/tenants/enumerate", body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PostAsync(_AdminClient, "/v1.0/tenants/enumerate", body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -400,7 +400,7 @@ namespace Test.Automated
 
         private static async Task TestTenantExists()
         {
-            HttpResponseMessage response = await HeadAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId).ConfigureAwait(false);
+            using HttpResponseMessage response = await HeadAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
         }
 
@@ -420,7 +420,7 @@ namespace Test.Automated
                 IsTenantAdmin = false,
                 Active = true
             };
-            HttpResponseMessage response = await PutAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/users", body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PutAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/users", body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.Created);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -431,7 +431,7 @@ namespace Test.Automated
 
         private static async Task TestUserRead()
         {
-            HttpResponseMessage response = await GetAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/users/" + _TestUserId).ConfigureAwait(false);
+            using HttpResponseMessage response = await GetAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/users/" + _TestUserId).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -449,7 +449,7 @@ namespace Test.Automated
                 FirstName = "TestUpdated",
                 LastName = "UserUpdated"
             };
-            HttpResponseMessage response = await PutAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/users/" + _TestUserId, body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PutAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/users/" + _TestUserId, body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -460,7 +460,7 @@ namespace Test.Automated
         private static async Task TestUserEnumerate()
         {
             object body = new { MaxResults = 100 };
-            HttpResponseMessage response = await PostAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/users/enumerate", body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PostAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/users/enumerate", body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -470,7 +470,7 @@ namespace Test.Automated
 
         private static async Task TestUserExists()
         {
-            HttpResponseMessage response = await HeadAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/users/" + _TestUserId).ConfigureAwait(false);
+            using HttpResponseMessage response = await HeadAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/users/" + _TestUserId).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
         }
 
@@ -486,7 +486,7 @@ namespace Test.Automated
                 Name = "IntegrationTestCredential",
                 Active = true
             };
-            HttpResponseMessage response = await PutAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/credentials", body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PutAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/credentials", body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.Created);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -504,7 +504,7 @@ namespace Test.Automated
 
         private static async Task TestCredentialRead()
         {
-            HttpResponseMessage response = await GetAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/credentials/" + _TestCredentialId).ConfigureAwait(false);
+            using HttpResponseMessage response = await GetAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/credentials/" + _TestCredentialId).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -515,7 +515,7 @@ namespace Test.Automated
         private static async Task TestCredentialEnumerate()
         {
             object body = new { MaxResults = 100 };
-            HttpResponseMessage response = await PostAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/credentials/enumerate", body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PostAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/credentials/enumerate", body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -525,7 +525,7 @@ namespace Test.Automated
 
         private static async Task TestCredentialExists()
         {
-            HttpResponseMessage response = await HeadAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/credentials/" + _TestCredentialId).ConfigureAwait(false);
+            using HttpResponseMessage response = await HeadAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/credentials/" + _TestCredentialId).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
         }
 
@@ -541,7 +541,7 @@ namespace Test.Automated
                 Description = "Test collection for integration tests",
                 Dimensionality = 3
             };
-            HttpResponseMessage response = await PutAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/collections", body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PutAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/collections", body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.Created);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -555,7 +555,7 @@ namespace Test.Automated
 
         private static async Task TestCollectionRead()
         {
-            HttpResponseMessage response = await GetAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId).ConfigureAwait(false);
+            using HttpResponseMessage response = await GetAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -571,7 +571,7 @@ namespace Test.Automated
                 Description = "Updated description",
                 Dimensionality = 3
             };
-            HttpResponseMessage response = await PutAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId, body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PutAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId, body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -582,7 +582,7 @@ namespace Test.Automated
         private static async Task TestCollectionEnumerate()
         {
             object body = new { MaxResults = 100 };
-            HttpResponseMessage response = await PostAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/collections/enumerate", body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PostAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/collections/enumerate", body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -592,7 +592,7 @@ namespace Test.Automated
 
         private static async Task TestCollectionExists()
         {
-            HttpResponseMessage response = await HeadAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId).ConfigureAwait(false);
+            using HttpResponseMessage response = await HeadAsync(_AdminClient, "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
         }
 
@@ -614,7 +614,7 @@ namespace Test.Automated
             };
 
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents";
-            HttpResponseMessage response = await PutAsync(_AdminClient, path, body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PutAsync(_AdminClient, path, body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.Created);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -626,7 +626,7 @@ namespace Test.Automated
         private static async Task TestDocumentRead()
         {
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/" + _TestDocumentKey;
-            HttpResponseMessage response = await GetAsync(_AdminClient, path).ConfigureAwait(false);
+            using HttpResponseMessage response = await GetAsync(_AdminClient, path).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -649,7 +649,7 @@ namespace Test.Automated
             };
 
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/" + _TestDocumentKey;
-            HttpResponseMessage response = await PutAsync(_AdminClient, path, body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PutAsync(_AdminClient, path, body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -684,7 +684,7 @@ namespace Test.Automated
             }
 
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/batch";
-            HttpResponseMessage response = await PostAsync(_AdminClient, path, docs).ConfigureAwait(false);
+            using HttpResponseMessage response = await PostAsync(_AdminClient, path, docs).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.Created);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -695,7 +695,7 @@ namespace Test.Automated
             foreach (string batchKey in _TestBatchDocumentKeys)
             {
                 string readPath = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/" + batchKey;
-                HttpResponseMessage readResp = await GetAsync(_AdminClient, readPath).ConfigureAwait(false);
+                using HttpResponseMessage readResp = await GetAsync(_AdminClient, readPath).ConfigureAwait(false);
                 AssertStatusCode(readResp, HttpStatusCode.OK);
             }
         }
@@ -713,7 +713,7 @@ namespace Test.Automated
             };
 
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/labels";
-            HttpResponseMessage response = await PutAsync(_AdminClient, path, body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PutAsync(_AdminClient, path, body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.Created);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -728,7 +728,7 @@ namespace Test.Automated
         private static async Task TestLabelList()
         {
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/labels";
-            HttpResponseMessage response = await GetAsync(_AdminClient, path).ConfigureAwait(false);
+            using HttpResponseMessage response = await GetAsync(_AdminClient, path).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -750,7 +750,7 @@ namespace Test.Automated
             };
 
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/tags";
-            HttpResponseMessage response = await PutAsync(_AdminClient, path, body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PutAsync(_AdminClient, path, body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.Created);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -765,7 +765,7 @@ namespace Test.Automated
         private static async Task TestTagList()
         {
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/tags";
-            HttpResponseMessage response = await GetAsync(_AdminClient, path).ConfigureAwait(false);
+            using HttpResponseMessage response = await GetAsync(_AdminClient, path).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -790,7 +790,7 @@ namespace Test.Automated
             };
 
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/search";
-            HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -823,7 +823,7 @@ namespace Test.Automated
             };
 
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/search";
-            HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -846,7 +846,7 @@ namespace Test.Automated
             };
 
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/search";
-            HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -877,7 +877,7 @@ namespace Test.Automated
             };
 
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/search";
-            HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -913,7 +913,7 @@ namespace Test.Automated
             };
 
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/search";
-            HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -942,7 +942,7 @@ namespace Test.Automated
             };
 
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/search";
-            HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.OK);
 
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
@@ -965,7 +965,7 @@ namespace Test.Automated
             for (int i = 0; i < totalToCreate; i++)
             {
                 object body = new { Name = "PaginationTestTenant_" + i };
-                HttpResponseMessage createResp = await PutAsync(_AdminClient, "/v1.0/tenants", body).ConfigureAwait(false);
+                using HttpResponseMessage createResp = await PutAsync(_AdminClient, "/v1.0/tenants", body).ConfigureAwait(false);
                 AssertStatusCode(createResp, HttpStatusCode.Created);
 
                 JsonElement createJson = await ReadResponse<JsonElement>(createResp).ConfigureAwait(false);
@@ -1001,7 +1001,7 @@ namespace Test.Automated
                     };
                 }
 
-                HttpResponseMessage enumResp = await PostAsync(_AdminClient, "/v1.0/tenants/enumerate", enumBody).ConfigureAwait(false);
+                using HttpResponseMessage enumResp = await PostAsync(_AdminClient, "/v1.0/tenants/enumerate", enumBody).ConfigureAwait(false);
                 AssertStatusCode(enumResp, HttpStatusCode.OK);
 
                 JsonElement enumJson = await ReadResponse<JsonElement>(enumResp).ConfigureAwait(false);
@@ -1034,7 +1034,7 @@ namespace Test.Automated
             AssertNotNull(_UserClient, "UserClient should be initialized");
 
             object body = new { Name = "UnauthorizedTenantAttempt" };
-            HttpResponseMessage response = await PutAsync(_UserClient, "/v1.0/tenants", body).ConfigureAwait(false);
+            using HttpResponseMessage response = await PutAsync(_UserClient, "/v1.0/tenants", body).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.Forbidden);
         }
 
@@ -1047,7 +1047,7 @@ namespace Test.Automated
             if (string.IsNullOrEmpty(_TestLabelId) || string.IsNullOrEmpty(_TestCollectionId)) return;
 
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/labels/" + _TestLabelId;
-            HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
+            using HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.NoContent);
         }
 
@@ -1056,7 +1056,7 @@ namespace Test.Automated
             if (string.IsNullOrEmpty(_TestTagId) || string.IsNullOrEmpty(_TestCollectionId)) return;
 
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/tags/" + _TestTagId;
-            HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
+            using HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.NoContent);
         }
 
@@ -1068,7 +1068,7 @@ namespace Test.Automated
             if (!string.IsNullOrEmpty(_TestDocumentKey))
             {
                 string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/" + _TestDocumentKey;
-                HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
+                using HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
                 AssertStatusCode(response, HttpStatusCode.NoContent);
             }
 
@@ -1076,7 +1076,7 @@ namespace Test.Automated
             foreach (string batchKey in _TestBatchDocumentKeys)
             {
                 string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/" + batchKey;
-                HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
+                using HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
                 AssertStatusCode(response, HttpStatusCode.NoContent);
             }
         }
@@ -1086,7 +1086,7 @@ namespace Test.Automated
             if (string.IsNullOrEmpty(_TestCollectionId)) return;
 
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId;
-            HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
+            using HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.NoContent);
         }
 
@@ -1095,7 +1095,7 @@ namespace Test.Automated
             if (string.IsNullOrEmpty(_TestCredentialId)) return;
 
             string path = "/v1.0/tenants/" + _TestTenantId + "/credentials/" + _TestCredentialId;
-            HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
+            using HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.NoContent);
         }
 
@@ -1104,7 +1104,7 @@ namespace Test.Automated
             if (string.IsNullOrEmpty(_TestUserId)) return;
 
             string path = "/v1.0/tenants/" + _TestTenantId + "/users/" + _TestUserId;
-            HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
+            using HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.NoContent);
         }
 
@@ -1113,7 +1113,7 @@ namespace Test.Automated
             if (string.IsNullOrEmpty(_TestTenantId)) return;
 
             string path = "/v1.0/tenants/" + _TestTenantId + "?force";
-            HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
+            using HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.NoContent);
         }
 
@@ -1122,7 +1122,7 @@ namespace Test.Automated
             foreach (string tenantId in _PaginationTenantIds)
             {
                 string path = "/v1.0/tenants/" + tenantId + "?force";
-                HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
+                using HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
                 AssertStatusCode(response, HttpStatusCode.NoContent);
             }
         }

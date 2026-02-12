@@ -245,7 +245,7 @@ namespace RecallDb.Core.Models
         #region Private-Members
 
         private long _Id = 0;
-        private string _DocumentKey = Guid.NewGuid().ToString();
+        private string _DocumentKey = IdGenerator.NewDocumentKey();
         private string _DocumentId = null;
         private long _ContentLength = 0;
         private string _Etag = null;

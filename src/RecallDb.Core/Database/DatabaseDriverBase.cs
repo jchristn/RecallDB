@@ -11,7 +11,7 @@ namespace RecallDb.Core.Database
     /// <summary>
     /// Abstract base class for database driver implementations.
     /// </summary>
-    public abstract class DatabaseDriverBase
+    public abstract class DatabaseDriverBase : IDisposable
     {
         #region Public-Members
 
@@ -152,6 +152,33 @@ namespace RecallDb.Core.Database
         {
             if (string.IsNullOrEmpty(value)) return "NULL";
             return "'" + Sanitize(value) + "'";
+        }
+
+        #endregion
+
+        #region IDisposable
+
+        private bool _Disposed = false;
+
+        /// <summary>
+        /// Dispose of resources.
+        /// </summary>
+        /// <param name="disposing">Whether managed resources should be disposed.</param>
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_Disposed)
+            {
+                _Disposed = true;
+            }
+        }
+
+        /// <summary>
+        /// Dispose of resources.
+        /// </summary>
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
 
         #endregion

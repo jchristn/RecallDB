@@ -764,36 +764,36 @@ namespace RecallDb.Sdk
 
         private async Task<T> GetAsync<T>(string path, CancellationToken token)
         {
-            HttpResponseMessage response = await _HttpClient.GetAsync(_Endpoint + path, token).ConfigureAwait(false);
+            using HttpResponseMessage response = await _HttpClient.GetAsync(_Endpoint + path, token).ConfigureAwait(false);
             return await HandleResponseAsync<T>(response).ConfigureAwait(false);
         }
 
         private async Task<bool> HeadAsync(string path, CancellationToken token)
         {
-            HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Head, _Endpoint + path);
-            HttpResponseMessage response = await _HttpClient.SendAsync(request, token).ConfigureAwait(false);
+            using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Head, _Endpoint + path);
+            using HttpResponseMessage response = await _HttpClient.SendAsync(request, token).ConfigureAwait(false);
             return response.StatusCode == HttpStatusCode.OK;
         }
 
         private async Task<T> PostAsync<T>(string path, object body, CancellationToken token)
         {
             string json = JsonSerializer.Serialize(body, _JsonOptions);
-            StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
-            HttpResponseMessage response = await _HttpClient.PostAsync(_Endpoint + path, content, token).ConfigureAwait(false);
+            using StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
+            using HttpResponseMessage response = await _HttpClient.PostAsync(_Endpoint + path, content, token).ConfigureAwait(false);
             return await HandleResponseAsync<T>(response).ConfigureAwait(false);
         }
 
         private async Task<T> PutAsync<T>(string path, object body, CancellationToken token)
         {
             string json = JsonSerializer.Serialize(body, _JsonOptions);
-            StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
-            HttpResponseMessage response = await _HttpClient.PutAsync(_Endpoint + path, content, token).ConfigureAwait(false);
+            using StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
+            using HttpResponseMessage response = await _HttpClient.PutAsync(_Endpoint + path, content, token).ConfigureAwait(false);
             return await HandleResponseAsync<T>(response).ConfigureAwait(false);
         }
 
         private async Task DeleteAsync(string path, CancellationToken token)
         {
-            HttpResponseMessage response = await _HttpClient.DeleteAsync(_Endpoint + path, token).ConfigureAwait(false);
+            using HttpResponseMessage response = await _HttpClient.DeleteAsync(_Endpoint + path, token).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode && response.StatusCode != HttpStatusCode.NoContent)
             {
                 string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);

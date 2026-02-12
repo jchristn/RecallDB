@@ -14,12 +14,12 @@ export default function Tenants() {
   const navigate = useNavigate()
   const [tenants, setTenants] = useState([])
   const [showCreate, setShowCreate] = useState(false)
-  const [newName, setNewName] = useState('')
+  const [createForm, setCreateForm] = useState({ Name: '', Labels: [], Tags: [{ key: '', value: '' }] })
   const [error, setError] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [jsonModal, setJsonModal] = useState(null)
   const [editTarget, setEditTarget] = useState(null)
-  const [editForm, setEditForm] = useState({ Name: '', Active: true })
+  const [editForm, setEditForm] = useState({ Name: '', Active: true, Labels: [], Tags: [{ key: '', value: '' }] })
 
   useEffect(() => { loadTenants() }, [])
 
@@ -33,8 +33,15 @@ export default function Tenants() {
   const handleCreate = async (e) => {
     e.preventDefault()
     try {
-      await api.createTenant({ Name: newName })
-      setNewName('')
+      const labels = createForm.Labels.filter(l => l.trim())
+      const tags = {}
+      createForm.Tags.forEach(t => { if (t.key.trim()) tags[t.key.trim()] = t.value })
+      await api.createTenant({
+        Name: createForm.Name,
+        Labels: labels.length > 0 ? labels : null,
+        Tags: Object.keys(tags).length > 0 ? tags : null
+      })
+      setCreateForm({ Name: '', Labels: [], Tags: [{ key: '', value: '' }] })
       setShowCreate(false)
       loadTenants()
     } catch (err) { setError(err) }
@@ -50,14 +57,27 @@ export default function Tenants() {
   }
 
   const openEdit = (t) => {
-    setEditForm({ Name: t.Name || '', Active: t.Active })
+    const labels = Array.isArray(t.Labels) ? [...t.Labels] : []
+    const tags = t.Tags && typeof t.Tags === 'object' && Object.keys(t.Tags).length > 0
+      ? Object.entries(t.Tags).map(([key, value]) => ({ key, value: value || '' }))
+      : [{ key: '', value: '' }]
+    setEditForm({ Name: t.Name || '', Active: t.Active, Labels: labels, Tags: tags })
     setEditTarget(t)
   }
 
   const handleEdit = async (e) => {
     e.preventDefault()
     try {
-      await api.updateTenant(editTarget.Id, { ...editTarget, ...editForm })
+      const labels = editForm.Labels.filter(l => l.trim())
+      const tags = {}
+      editForm.Tags.forEach(t => { if (t.key.trim()) tags[t.key.trim()] = t.value })
+      await api.updateTenant(editTarget.Id, {
+        ...editTarget,
+        Name: editForm.Name,
+        Active: editForm.Active,
+        Labels: labels.length > 0 ? labels : null,
+        Tags: Object.keys(tags).length > 0 ? tags : null
+      })
       setEditTarget(null)
       loadTenants()
     } catch (err) { setError(err) }
@@ -126,7 +146,28 @@ export default function Tenants() {
             <form onSubmit={handleCreate}>
               <div className="form-group">
                 <label>Name</label>
-                <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} required />
+                <input type="text" value={createForm.Name} onChange={(e) => setCreateForm({...createForm, Name: e.target.value})} required />
+              </div>
+              <div className="form-group">
+                <label>Labels</label>
+                {createForm.Labels.map((label, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4, alignItems: 'center' }}>
+                    <input type="text" value={label} onChange={(e) => { const labels = [...createForm.Labels]; labels[i] = e.target.value; setCreateForm({...createForm, Labels: labels}) }} placeholder="Label" style={{ flex: 1 }} />
+                    <button type="button" className="btn btn-secondary" style={{ padding: '4px 8px' }} onClick={() => { const labels = createForm.Labels.filter((_, j) => j !== i); setCreateForm({...createForm, Labels: labels}) }}>×</button>
+                  </div>
+                ))}
+                <button type="button" className="btn btn-secondary" style={{ marginTop: 4, fontSize: 12 }} onClick={() => setCreateForm({...createForm, Labels: [...createForm.Labels, '']})}>+ Add Label</button>
+              </div>
+              <div className="form-group">
+                <label>Tags</label>
+                {createForm.Tags.map((tag, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+                    <input type="text" placeholder="Key" value={tag.key} onChange={(e) => { const tags = [...createForm.Tags]; tags[i] = { ...tags[i], key: e.target.value }; setCreateForm({...createForm, Tags: tags}) }} style={{ flex: 1 }} />
+                    <input type="text" placeholder="Value" value={tag.value} onChange={(e) => { const tags = [...createForm.Tags]; tags[i] = { ...tags[i], value: e.target.value }; setCreateForm({...createForm, Tags: tags}) }} style={{ flex: 1 }} />
+                    <button type="button" className="btn btn-secondary" style={{ padding: '4px 8px' }} onClick={() => { const tags = createForm.Tags.filter((_, j) => j !== i); setCreateForm({...createForm, Tags: tags.length ? tags : [{ key: '', value: '' }]}) }}>×</button>
+                  </div>
+                ))}
+                <button type="button" className="btn btn-secondary" style={{ marginTop: 4, fontSize: 12 }} onClick={() => setCreateForm({...createForm, Tags: [...createForm.Tags, { key: '', value: '' }]})}>+ Add Tag</button>
               </div>
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(false)}>Cancel</button>
@@ -159,6 +200,27 @@ export default function Tenants() {
                   <input type="checkbox" checked={editForm.Active} onChange={(e) => setEditForm({...editForm, Active: e.target.checked})} style={{ width: 'auto' }} />
                   Active
                 </label>
+              </div>
+              <div className="form-group">
+                <label>Labels</label>
+                {editForm.Labels.map((label, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4, alignItems: 'center' }}>
+                    <input type="text" value={label} onChange={(e) => { const labels = [...editForm.Labels]; labels[i] = e.target.value; setEditForm({...editForm, Labels: labels}) }} placeholder="Label" style={{ flex: 1 }} />
+                    <button type="button" className="btn btn-secondary" style={{ padding: '4px 8px' }} onClick={() => { const labels = editForm.Labels.filter((_, j) => j !== i); setEditForm({...editForm, Labels: labels}) }}>×</button>
+                  </div>
+                ))}
+                <button type="button" className="btn btn-secondary" style={{ marginTop: 4, fontSize: 12 }} onClick={() => setEditForm({...editForm, Labels: [...editForm.Labels, '']})}>+ Add Label</button>
+              </div>
+              <div className="form-group">
+                <label>Tags</label>
+                {editForm.Tags.map((tag, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+                    <input type="text" placeholder="Key" value={tag.key} onChange={(e) => { const tags = [...editForm.Tags]; tags[i] = { ...tags[i], key: e.target.value }; setEditForm({...editForm, Tags: tags}) }} style={{ flex: 1 }} />
+                    <input type="text" placeholder="Value" value={tag.value} onChange={(e) => { const tags = [...editForm.Tags]; tags[i] = { ...tags[i], value: e.target.value }; setEditForm({...editForm, Tags: tags}) }} style={{ flex: 1 }} />
+                    <button type="button" className="btn btn-secondary" style={{ padding: '4px 8px' }} onClick={() => { const tags = editForm.Tags.filter((_, j) => j !== i); setEditForm({...editForm, Tags: tags.length ? tags : [{ key: '', value: '' }]}) }}>×</button>
+                  </div>
+                ))}
+                <button type="button" className="btn btn-secondary" style={{ marginTop: 4, fontSize: 12 }} onClick={() => setEditForm({...editForm, Tags: [...editForm.Tags, { key: '', value: '' }]})}>+ Add Tag</button>
               </div>
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setEditTarget(null)}>Cancel</button>

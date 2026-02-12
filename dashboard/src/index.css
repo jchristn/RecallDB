@@ -366,6 +366,7 @@ table tr:hover {
   font-size: 12px;
   color: var(--text-secondary);
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .copyable-id:hover {
@@ -468,6 +469,7 @@ table tr:hover {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   font-size: 14px;
+  white-space: nowrap;
 }
 
 .data-table tbody tr:hover {

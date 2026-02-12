@@ -41,6 +41,11 @@ namespace RecallDb.Core.Helpers
         public const string TagPrefix = "tag_";
 
         /// <summary>
+        /// Document key prefix.
+        /// </summary>
+        public const string DocumentKeyPrefix = "doc_";
+
+        /// <summary>
         /// Default ID length.
         /// </summary>
         public const int DefaultIdLength = 40;
@@ -113,6 +118,15 @@ namespace RecallDb.Core.Helpers
         public static string NewTagId()
         {
             return _Generator.GenerateKSortable(TagPrefix, DefaultIdLength);
+        }
+
+        /// <summary>
+        /// Generate a new document key.
+        /// </summary>
+        /// <returns>K-sortable document key with prefix doc_.</returns>
+        public static string NewDocumentKey()
+        {
+            return _Generator.GenerateKSortable(DocumentKeyPrefix, DefaultIdLength);
         }
 
         /// <summary>

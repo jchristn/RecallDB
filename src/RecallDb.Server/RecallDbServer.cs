@@ -180,16 +180,22 @@ namespace RecallDb.Server
             Console.WriteLine("Press CTRL+C to exit");
             Console.WriteLine("");
 
-            ManualResetEvent waitHandle = new ManualResetEvent(false);
-            Console.CancelKeyPress += (sender, e) =>
+            using (ManualResetEvent waitHandle = new ManualResetEvent(false))
             {
-                e.Cancel = true;
-                _TokenSource.Cancel();
-                waitHandle.Set();
-            };
-            waitHandle.WaitOne();
+                Console.CancelKeyPress += (sender, e) =>
+                {
+                    e.Cancel = true;
+                    _TokenSource.Cancel();
+                    waitHandle.Set();
+                };
+                waitHandle.WaitOne();
+            }
 
             _Logging.Info(_Header + "shutting down");
+
+            if (_Database != null) _Database.Dispose();
+            if (_Logging != null) _Logging.Dispose();
+            if (_TokenSource != null) _TokenSource.Dispose();
 
             #endregion
         }

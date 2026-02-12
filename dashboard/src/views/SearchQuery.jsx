@@ -235,14 +235,37 @@ function SearchTab({ tenantId, collectionId }) {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
   const [jsonModal, setJsonModal] = useState(null)
+  const [dimensionality, setDimensionality] = useState(null)
+
+  useEffect(() => {
+    if (tenantId && collectionId) {
+      api.getCollection(tenantId, collectionId)
+        .then(col => setDimensionality(col?.Dimensionality || null))
+        .catch(() => setDimensionality(null))
+    }
+  }, [tenantId, collectionId])
 
   const addTagRow = (setter) => setter(prev => [...prev, { Key: '', Condition: 'Equals', Value: '' }])
   const updateTagRow = (setter, index, field, value) => setter(prev => prev.map((row, i) => i === index ? { ...row, [field]: value } : row))
   const removeTagRow = (setter, index) => setter(prev => prev.filter((_, i) => i !== index))
 
+  const parsedEmbeddings = embeddings.trim()
+    ? embeddings.split(',').map(v => v.trim()).filter(v => v && !isNaN(parseFloat(v)))
+    : []
+  const embeddingsEmpty = parsedEmbeddings.length === 0
+  const embeddingsMismatch = dimensionality && parsedEmbeddings.length > 0 && parsedEmbeddings.length !== dimensionality
+
   const handleSearch = async (e) => {
     e.preventDefault()
     setError(null)
+    if (embeddingsEmpty) {
+      setError(new Error('Embeddings are required. Please provide a comma-separated list of floats matching the collection dimensionality' + (dimensionality ? ` (${dimensionality})` : '') + '.'))
+      return
+    }
+    if (embeddingsMismatch) {
+      setError(new Error(`Embeddings count (${parsedEmbeddings.length}) does not match the collection dimensionality (${dimensionality}).`))
+      return
+    }
     setLoading(true)
     try {
       const query = buildQuery({
@@ -265,7 +288,7 @@ function SearchTab({ tenantId, collectionId }) {
       render: (d) => <CopyId value={d.DocumentKey} truncate={16} />,
       filterValue: (d) => d.DocumentKey
     },
-    { key: 'DocumentId', label: 'Doc ID', render: (d) => d.DocumentId || '-' },
+    { key: 'DocumentId', label: 'Doc ID', render: (d) => d.DocumentId ? <CopyId value={d.DocumentId} truncate={16} /> : '-' },
     { key: 'Position', label: 'Pos', width: '60px' },
     { key: 'ContentType', label: 'Type', width: '70px' },
     {
@@ -294,7 +317,7 @@ function SearchTab({ tenantId, collectionId }) {
         <form onSubmit={handleSearch}>
           {/* Vector Search */}
           <div className="form-group">
-            <label>Embeddings (comma-separated floats)</label>
+            <label>Embeddings (comma-separated floats){dimensionality ? ` — collection dimensionality: ${dimensionality}` : ''}</label>
             <textarea value={embeddings} onChange={(e) => setEmbeddings(e.target.value)} rows={3} placeholder="0.1, 0.2, 0.3, ..." />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
@@ -560,7 +583,7 @@ function QueryTab({ tenantId, collectionId }) {
       render: (d) => <CopyId value={d.DocumentKey} truncate={16} />,
       filterValue: (d) => d.DocumentKey
     },
-    { key: 'DocumentId', label: 'Doc ID', render: (d) => d.DocumentId || '-' },
+    { key: 'DocumentId', label: 'Doc ID', render: (d) => d.DocumentId ? <CopyId value={d.DocumentId} truncate={16} /> : '-' },
     { key: 'Position', label: 'Pos', width: '60px' },
     { key: 'ContentType', label: 'Type', width: '70px' },
     {

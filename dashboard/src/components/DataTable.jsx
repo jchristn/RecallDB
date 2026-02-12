@@ -185,7 +185,7 @@ export default function DataTable({
                 key={col.key}
                 onClick={() => !col.isAction && handleSort(col.key)}
                 className={col.sortable !== false && !col.isAction ? 'sortable' : ''}
-                style={col.width ? { width: col.width } : {}}
+                style={col.width ? { width: col.width, minWidth: col.width } : {}}
                 title={col.tooltip || ''}
               >
                 <div className="th-content">
