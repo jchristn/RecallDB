@@ -311,7 +311,7 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
         }
 
         /// <summary>
-        /// Enumerate document records within a collection with pagination.
+        /// Enumerate document records within a collection with pagination and optional filtering.
         /// </summary>
         /// <param name="collectionId">Collection ID.</param>
         /// <param name="query">Enumeration query parameters.</param>
@@ -323,6 +323,8 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
             if (query == null) throw new ArgumentNullException(nameof(query));
 
             string tableName = "collection_" + SanitizeTableName(collectionId);
+            string labelsTableName = tableName + "_labels";
+            string tagsTableName = tableName + "_tags";
 
             int offset = 0;
 
@@ -334,16 +336,125 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                 }
             }
 
+            // Build WHERE clause
+            List<string> conditions = new List<string>();
+
+            if (query.CreatedBefore.HasValue)
+            {
+                conditions.Add("created_utc < '" + _Driver.FormatDateTime(query.CreatedBefore.Value) + "'");
+            }
+
+            if (query.CreatedAfter.HasValue)
+            {
+                conditions.Add("created_utc > '" + _Driver.FormatDateTime(query.CreatedAfter.Value) + "'");
+            }
+
+            if (query.DocumentIds != null && query.DocumentIds.Count > 0)
+            {
+                List<string> sanitizedIds = new List<string>();
+                foreach (string docId in query.DocumentIds)
+                {
+                    sanitizedIds.Add("'" + _Driver.Sanitize(docId) + "'");
+                }
+                conditions.Add("document_id IN (" + string.Join(",", sanitizedIds) + ")");
+            }
+
+            if (query.LabelFilter != null)
+            {
+                if (query.LabelFilter.Required != null && query.LabelFilter.Required.Count > 0)
+                {
+                    List<string> sanitizedLabels = new List<string>();
+                    foreach (string label in query.LabelFilter.Required)
+                    {
+                        sanitizedLabels.Add("'" + _Driver.Sanitize(label) + "'");
+                    }
+                    conditions.Add(
+                        "document_key IN (" +
+                        "SELECT document_key FROM " + labelsTableName + " " +
+                        "WHERE label IN (" + string.Join(",", sanitizedLabels) + ")" +
+                        ")");
+                }
+
+                if (query.LabelFilter.Excluded != null && query.LabelFilter.Excluded.Count > 0)
+                {
+                    List<string> sanitizedLabels = new List<string>();
+                    foreach (string label in query.LabelFilter.Excluded)
+                    {
+                        sanitizedLabels.Add("'" + _Driver.Sanitize(label) + "'");
+                    }
+                    conditions.Add(
+                        "document_key NOT IN (" +
+                        "SELECT document_key FROM " + labelsTableName + " " +
+                        "WHERE label IN (" + string.Join(",", sanitizedLabels) + ")" +
+                        ")");
+                }
+            }
+
+            if (query.TagFilter != null)
+            {
+                if (query.TagFilter.Required != null && query.TagFilter.Required.Count > 0)
+                {
+                    foreach (TagCondition tagCondition in query.TagFilter.Required)
+                    {
+                        string tagClause = BuildTagConditionClause(tagsTableName, tagCondition, false);
+                        if (!string.IsNullOrEmpty(tagClause))
+                        {
+                            conditions.Add(tagClause);
+                        }
+                    }
+                }
+
+                if (query.TagFilter.Excluded != null && query.TagFilter.Excluded.Count > 0)
+                {
+                    foreach (TagCondition tagCondition in query.TagFilter.Excluded)
+                    {
+                        string tagClause = BuildTagConditionClause(tagsTableName, tagCondition, true);
+                        if (!string.IsNullOrEmpty(tagClause))
+                        {
+                            conditions.Add(tagClause);
+                        }
+                    }
+                }
+            }
+
+            if (query.Terms != null)
+            {
+                if (query.Terms.Required != null && query.Terms.Required.Count > 0)
+                {
+                    foreach (string term in query.Terms.Required)
+                    {
+                        string sanitized = _Driver.Sanitize(term).Replace("%", "\\%").Replace("_", "\\_");
+                        conditions.Add("content ILIKE '%" + sanitized + "%'");
+                    }
+                }
+
+                if (query.Terms.Excluded != null && query.Terms.Excluded.Count > 0)
+                {
+                    foreach (string term in query.Terms.Excluded)
+                    {
+                        string sanitized = _Driver.Sanitize(term).Replace("%", "\\%").Replace("_", "\\_");
+                        conditions.Add("content NOT ILIKE '%" + sanitized + "%'");
+                    }
+                }
+            }
+
+            string whereClause = "";
+            if (conditions.Count > 0)
+            {
+                whereClause = " WHERE " + string.Join(" AND ", conditions);
+            }
+
             string orderDirection = query.Ordering == EnumerationOrderEnum.CreatedAscending ? "ASC" : "DESC";
 
             string selectQuery =
-                "SELECT " + _SelectColumns + " FROM " + tableName + " " +
-                "ORDER BY created_utc " + orderDirection + " " +
-                "LIMIT " + query.MaxResults.ToString(CultureInfo.InvariantCulture) + " " +
-                "OFFSET " + offset.ToString(CultureInfo.InvariantCulture);
+                "SELECT " + _SelectColumns + " FROM " + tableName +
+                whereClause +
+                " ORDER BY created_utc " + orderDirection +
+                " LIMIT " + query.MaxResults.ToString(CultureInfo.InvariantCulture) +
+                " OFFSET " + offset.ToString(CultureInfo.InvariantCulture);
 
             string countQuery =
-                "SELECT COUNT(*) AS count FROM " + tableName;
+                "SELECT COUNT(*) AS count FROM " + tableName + whereClause;
 
             DataTable selectResult = await _Driver.ExecuteQueryAsync(selectQuery, false, token).ConfigureAwait(false);
             DataTable countResult = await _Driver.ExecuteQueryAsync(countQuery, false, token).ConfigureAwait(false);
@@ -367,6 +478,82 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
         {
             if (string.IsNullOrEmpty(collectionId)) return "unknown";
             return collectionId.Replace("-", "_").Replace(".", "_");
+        }
+
+        private string BuildTagConditionClause(string tagsTableName, TagCondition tagCondition, bool excluded)
+        {
+            if (tagCondition == null) return null;
+            if (string.IsNullOrEmpty(tagCondition.Key)) return null;
+
+            string sanitizedKey = _Driver.Sanitize(tagCondition.Key);
+            string sanitizedValue = tagCondition.Value != null ? _Driver.Sanitize(tagCondition.Value) : "";
+            string inOrNotIn = excluded ? "NOT IN" : "IN";
+
+            switch (tagCondition.Condition)
+            {
+                case TagConditionEnum.Equals:
+                    return "document_key " + inOrNotIn + " (" +
+                        "SELECT document_key FROM " + tagsTableName + " " +
+                        "WHERE key = '" + sanitizedKey + "' AND value = '" + sanitizedValue + "'" +
+                        ")";
+
+                case TagConditionEnum.NotEquals:
+                    return "document_key " + (excluded ? "IN" : "NOT IN") + " (" +
+                        "SELECT document_key FROM " + tagsTableName + " " +
+                        "WHERE key = '" + sanitizedKey + "' AND value = '" + sanitizedValue + "'" +
+                        ")";
+
+                case TagConditionEnum.GreaterThan:
+                    return "document_key " + inOrNotIn + " (" +
+                        "SELECT document_key FROM " + tagsTableName + " " +
+                        "WHERE key = '" + sanitizedKey + "' AND value > '" + sanitizedValue + "'" +
+                        ")";
+
+                case TagConditionEnum.LessThan:
+                    return "document_key " + inOrNotIn + " (" +
+                        "SELECT document_key FROM " + tagsTableName + " " +
+                        "WHERE key = '" + sanitizedKey + "' AND value < '" + sanitizedValue + "'" +
+                        ")";
+
+                case TagConditionEnum.Contains:
+                    return "document_key " + inOrNotIn + " (" +
+                        "SELECT document_key FROM " + tagsTableName + " " +
+                        "WHERE key = '" + sanitizedKey + "' AND value LIKE '%" + sanitizedValue + "%'" +
+                        ")";
+
+                case TagConditionEnum.ContainsNot:
+                    return "document_key " + inOrNotIn + " (" +
+                        "SELECT document_key FROM " + tagsTableName + " " +
+                        "WHERE key = '" + sanitizedKey + "' AND value NOT LIKE '%" + sanitizedValue + "%'" +
+                        ")";
+
+                case TagConditionEnum.StartsWith:
+                    return "document_key " + inOrNotIn + " (" +
+                        "SELECT document_key FROM " + tagsTableName + " " +
+                        "WHERE key = '" + sanitizedKey + "' AND value LIKE '" + sanitizedValue + "%'" +
+                        ")";
+
+                case TagConditionEnum.EndsWith:
+                    return "document_key " + inOrNotIn + " (" +
+                        "SELECT document_key FROM " + tagsTableName + " " +
+                        "WHERE key = '" + sanitizedKey + "' AND value LIKE '%" + sanitizedValue + "'" +
+                        ")";
+
+                case TagConditionEnum.IsNull:
+                    return "document_key " + inOrNotIn + " (" +
+                        "SELECT document_key FROM " + tagsTableName + " " +
+                        "WHERE key = '" + sanitizedKey + "' AND (value IS NULL OR value = '')" +
+                        ")";
+
+                case TagConditionEnum.IsNotNull:
+                    return "document_key " + inOrNotIn + " (" +
+                        "SELECT document_key FROM " + tagsTableName + " " +
+                        "WHERE key = '" + sanitizedKey + "' AND value IS NOT NULL AND value != ''" +
+                        ")";
+
+                default:
+                    return null;
+            }
         }
 
         private string FormatEmbeddings(List<float> embeddings)

@@ -457,18 +457,17 @@ function SearchTab({ tenantId, collectionId }) {
   )
 }
 
+const ENUMERATION_ORDERS = [
+  { value: 'CreatedDescending', label: 'Created Descending' },
+  { value: 'CreatedAscending', label: 'Created Ascending' }
+]
+
 function QueryTab({ tenantId, collectionId }) {
-  const [sortOrder, setSortOrder] = useState('ScoreDescending')
-  const [maxResults, setMaxResults] = useState(10)
+  const [ordering, setOrdering] = useState('CreatedDescending')
+  const [maxResults, setMaxResults] = useState(100)
   const [createdBefore, setCreatedBefore] = useState('')
   const [createdAfter, setCreatedAfter] = useState('')
   const [documentIds, setDocumentIds] = useState('')
-  const [searchType, setSearchType] = useState('CosineSimilarity')
-  const [embeddings, setEmbeddings] = useState('')
-  const [minScore, setMinScore] = useState('')
-  const [maxScore, setMaxScore] = useState('')
-  const [minDistance, setMinDistance] = useState('')
-  const [maxDistance, setMaxDistance] = useState('')
   const [requiredLabels, setRequiredLabels] = useState('')
   const [excludedLabels, setExcludedLabels] = useState('')
   const [requiredTags, setRequiredTags] = useState([])
@@ -484,17 +483,69 @@ function QueryTab({ tenantId, collectionId }) {
   const updateTagRow = (setter, index, field, value) => setter(prev => prev.map((row, i) => i === index ? { ...row, [field]: value } : row))
   const removeTagRow = (setter, index) => setter(prev => prev.filter((_, i) => i !== index))
 
-  const handleSearch = async (e) => {
+  const buildEnumerationQuery = (continuationToken) => {
+    const query = {
+      MaxResults: parseInt(maxResults) || 100,
+      Ordering: ordering
+    }
+
+    if (continuationToken) query.ContinuationToken = continuationToken
+
+    if (createdBefore) query.CreatedBefore = new Date(createdBefore).toISOString()
+    if (createdAfter) query.CreatedAfter = new Date(createdAfter).toISOString()
+
+    const docIds = parseCommaSep(documentIds)
+    if (docIds.length > 0) query.DocumentIds = docIds
+
+    const reqLabels = parseCommaSep(requiredLabels)
+    const excLabels = parseCommaSep(excludedLabels)
+    if (reqLabels.length > 0 || excLabels.length > 0) {
+      query.LabelFilter = {}
+      if (reqLabels.length > 0) query.LabelFilter.Required = reqLabels
+      if (excLabels.length > 0) query.LabelFilter.Excluded = excLabels
+    }
+
+    const validReqTags = requiredTags.filter(t => t.Key.trim())
+    const validExcTags = excludedTags.filter(t => t.Key.trim())
+    if (validReqTags.length > 0 || validExcTags.length > 0) {
+      query.TagFilter = {}
+      if (validReqTags.length > 0) query.TagFilter.Required = validReqTags
+      if (validExcTags.length > 0) query.TagFilter.Excluded = validExcTags
+    }
+
+    const reqTerms = parseCommaSep(requiredTerms)
+    const excTerms = parseCommaSep(excludedTerms)
+    if (reqTerms.length > 0 || excTerms.length > 0) {
+      query.Terms = {}
+      if (reqTerms.length > 0) query.Terms.Required = reqTerms
+      if (excTerms.length > 0) query.Terms.Excluded = excTerms
+    }
+
+    return query
+  }
+
+  const handleEnumerate = async (e) => {
     e.preventDefault()
     setError(null)
     setLoading(true)
     try {
-      const query = buildQuery({
-        embeddings, searchType, minScore, maxScore, minDistance, maxDistance,
-        requiredLabels, excludedLabels, requiredTags, excludedTags, requiredTerms, excludedTerms,
-        sortOrder, maxResults, createdBefore, createdAfter, documentIds
-      })
-      const result = await api.search(tenantId, collectionId, query)
+      const query = buildEnumerationQuery(null)
+      const result = await api.enumerateDocuments(tenantId, collectionId, query)
+      setResults(result)
+    } catch (err) {
+      setError(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleNextPage = async () => {
+    if (!results?.ContinuationToken) return
+    setError(null)
+    setLoading(true)
+    try {
+      const query = buildEnumerationQuery(results.ContinuationToken)
+      const result = await api.enumerateDocuments(tenantId, collectionId, query)
       setResults(result)
     } catch (err) {
       setError(err)
@@ -513,11 +564,6 @@ function QueryTab({ tenantId, collectionId }) {
     { key: 'Position', label: 'Pos', width: '60px' },
     { key: 'ContentType', label: 'Type', width: '70px' },
     {
-      key: 'Score', label: 'Score', width: '90px',
-      render: (d) => d.Score != null ? <span className="score-badge">{d.Score.toFixed(4)}</span> : '-',
-      sortValue: (d) => d.Score
-    },
-    {
       key: 'Content', label: 'Content',
       render: (d) => {
         const text = d.Content || '(no content)'
@@ -535,12 +581,12 @@ function QueryTab({ tenantId, collectionId }) {
     <div>
       <ErrorModal error={error} onClose={() => setError(null)} />
       <div className="card">
-        <form onSubmit={handleSearch}>
+        <form onSubmit={handleEnumerate}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
             <div className="form-group">
-              <label>Sort Order</label>
-              <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)}>
-                {SORT_ORDERS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              <label>Ordering</label>
+              <select value={ordering} onChange={(e) => setOrdering(e.target.value)}>
+                {ENUMERATION_ORDERS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
             <div className="form-group">
@@ -551,12 +597,12 @@ function QueryTab({ tenantId, collectionId }) {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
             <div className="form-group">
-              <label>Created Before</label>
-              <input type="datetime-local" value={createdBefore} onChange={(e) => setCreatedBefore(e.target.value)} />
-            </div>
-            <div className="form-group">
               <label>Created After</label>
               <input type="datetime-local" value={createdAfter} onChange={(e) => setCreatedAfter(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label>Created Before</label>
+              <input type="datetime-local" value={createdBefore} onChange={(e) => setCreatedBefore(e.target.value)} />
             </div>
           </div>
 
@@ -564,37 +610,6 @@ function QueryTab({ tenantId, collectionId }) {
             <label>Document IDs (comma-separated)</label>
             <textarea value={documentIds} onChange={(e) => setDocumentIds(e.target.value)} rows={2} placeholder="doc-id-1, doc-id-2" />
           </div>
-
-          <CollapsibleSection title="Vector Search">
-            <div className="form-group">
-              <label>Embeddings (comma-separated floats)</label>
-              <textarea value={embeddings} onChange={(e) => setEmbeddings(e.target.value)} rows={3} placeholder="0.1, 0.2, 0.3, ..." />
-            </div>
-            <div className="form-group">
-              <label>Search Type</label>
-              <select value={searchType} onChange={(e) => setSearchType(e.target.value)}>
-                {SEARCH_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <div className="form-group">
-                <label>Min Score</label>
-                <input type="number" step="any" value={minScore} onChange={(e) => setMinScore(e.target.value)} placeholder="0.0" />
-              </div>
-              <div className="form-group">
-                <label>Max Score</label>
-                <input type="number" step="any" value={maxScore} onChange={(e) => setMaxScore(e.target.value)} placeholder="1.0" />
-              </div>
-              <div className="form-group">
-                <label>Min Distance</label>
-                <input type="number" step="any" value={minDistance} onChange={(e) => setMinDistance(e.target.value)} placeholder="0.0" />
-              </div>
-              <div className="form-group">
-                <label>Max Distance</label>
-                <input type="number" step="any" value={maxDistance} onChange={(e) => setMaxDistance(e.target.value)} placeholder="1.0" />
-              </div>
-            </div>
-          </CollapsibleSection>
 
           <CollapsibleSection title="Label Filter">
             <div className="form-group">
@@ -665,18 +680,27 @@ function QueryTab({ tenantId, collectionId }) {
           </CollapsibleSection>
 
           <button type="submit" className="btn btn-primary" disabled={loading || !tenantId || !collectionId} style={{ marginTop: 8 }}>
-            {loading ? 'Searching...' : 'Search'}
+            {loading ? 'Enumerating...' : 'Enumerate'}
           </button>
         </form>
       </div>
 
       {results && (
         <div style={{ marginTop: 24 }}>
-          <p style={{ marginBottom: 12, color: 'var(--text-secondary)' }}>
-            {results.TotalRecords || 0} total results {results.EndOfResults ? '' : `(showing first ${results.Documents?.length || 0})`}
-          </p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
+              {results.TotalRecords || 0} total records
+              {results.RecordsRemaining > 0 ? ` (${results.RecordsRemaining} remaining)` : ''}
+              {results.EndOfResults ? ' — end of results' : ''}
+            </p>
+            {!results.EndOfResults && results.ContinuationToken && (
+              <button type="button" className="btn btn-secondary" onClick={handleNextPage} disabled={loading}>
+                {loading ? 'Loading...' : 'Next Page'}
+              </button>
+            )}
+          </div>
           <div className="card">
-            <DataTable data={results.Documents || []} columns={resultColumns} />
+            <DataTable data={results.Objects || []} columns={resultColumns} />
           </div>
         </div>
       )}
@@ -693,7 +717,7 @@ export default function SearchQuery({ mode = 'search' }) {
   return (
     <div>
       <div className="page-header">
-        <h1>{mode === 'search' ? 'Search' : 'Query Builder'}</h1>
+        <h1>{mode === 'search' ? 'Search' : 'Enumerate Documents'}</h1>
       </div>
 
       <TenantCollectionPicker
@@ -705,7 +729,7 @@ export default function SearchQuery({ mode = 'search' }) {
 
       {!selectedTenant || !selectedCollection ? (
         <div className="card" style={{ textAlign: 'center', padding: 40, color: 'var(--text-secondary)' }}>
-          Select a tenant and collection to begin {mode === 'search' ? 'searching' : 'querying'}.
+          Select a tenant and collection to begin {mode === 'search' ? 'searching' : 'enumerating documents'}.
         </div>
       ) : mode === 'search' ? (
         <SearchTab tenantId={selectedTenant} collectionId={selectedCollection} />

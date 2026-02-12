@@ -142,6 +142,9 @@ class RecallDbApi {
 
   // Search
   async search(tid, cid, query) { return this.request('POST', `/v1.0/tenants/${tid}/collections/${cid}/search`, query); }
+
+  // Enumerate documents
+  async enumerateDocuments(tid, cid, query) { return this.request('POST', `/v1.0/tenants/${tid}/collections/${cid}/documents/enumerate`, query); }
 }
 
 const api = new RecallDbApi();
