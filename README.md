@@ -194,16 +194,16 @@ Server settings live in `recalldb.json`. Environment variables override database
 ## Architecture
 
 ```
-┌─────────────┐     ┌─────────────────┐     ┌──────────────────────────┐
-│  Your App   │────▶│  RecallDB API   │────▶│  PostgreSQL + pgvector   │
-│  (SDK)      │     │  (REST, Auth)   │     │                          │
-└─────────────┘     └─────────────────┘     │  tenants                 │
-                    ┌─────────────────┐     │  users / credentials     │
-                    │   Dashboard     │────▶│  collections             │
-                    │   (React SPA)   │     │  collection_{id}  [HNSW] │
-                    └─────────────────┘     │  collection_{id}_labels  │
-                                            │  collection_{id}_tags    │
-                                            └──────────────────────────┘
+┌─────────────┐      ┌─────────────────┐      ┌──────────────────────────┐
+│  Your App   │────> |  RecallDB API   │────> │  PostgreSQL + pgvector   │
+│  (SDK)      │      │  (REST, Auth)   │      │                          │
+└─────────────┘      └─────────────────┘      │  tenants                 │
+                     ┌─────────────────┐      │  users / credentials     │
+                     │   Dashboard     │────> │  collections             │
+                     │   (React SPA)   │      │  collection_{id}  [HNSW] │
+                     └─────────────────┘      │  collection_{id}_labels  │
+                                              │  collection_{id}_tags    │
+                                              └──────────────────────────┘
 ```
 
 Each collection creates its own Postgres tables with a dedicated HNSW vector index. Labels and tags are stored in separate relational tables and joined at query time, keeping the vector index lean and the metadata queryable.
