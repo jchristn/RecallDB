@@ -21,14 +21,17 @@ export default function Users() {
   const [jsonModal, setJsonModal] = useState(null)
   const [editTarget, setEditTarget] = useState(null)
   const [editForm, setEditForm] = useState({ Email: '', FirstName: '', LastName: '', IsAdmin: false, IsTenantAdmin: false, Active: true })
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => { loadUsers() }, [tenantId])
 
   const loadUsers = async () => {
     try {
+      setLoading(true)
       const result = await api.listUsers(tenantId)
       setUsers(result?.Objects || [])
     } catch (err) { setError(err) }
+    finally { setLoading(false) }
   }
 
   const handleCreate = async (e) => {
@@ -116,7 +119,7 @@ export default function Users() {
       </div>
       <ErrorModal error={error} onClose={() => setError(null)} />
       <div className="card">
-        <DataTable data={users} columns={columns} />
+        <DataTable data={users} columns={columns} onRefresh={loadUsers} refreshing={loading} />
       </div>
 
       {showCreate && (

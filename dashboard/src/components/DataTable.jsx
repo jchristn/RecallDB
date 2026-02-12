@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react'
+import React, { useState, useMemo, useEffect, useRef } from 'react'
 
 export default function DataTable({
   data = [],
@@ -6,13 +6,26 @@ export default function DataTable({
   loading = false,
   pageSize: defaultPageSize = 10,
   onRowClick = null,
-  hidePagination = false
+  hidePagination = false,
+  onRefresh = null,
+  refreshing = false
 }) {
   const [currentPage, setCurrentPage] = useState(0)
   const [pageSize, setPageSize] = useState(defaultPageSize)
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' })
   const [filters, setFilters] = useState({})
   const [pageInput, setPageInput] = useState('1')
+  const [refreshDone, setRefreshDone] = useState(false)
+  const prevRefreshing = useRef(false)
+
+  useEffect(() => {
+    if (prevRefreshing.current && !refreshing) {
+      setRefreshDone(true)
+      const timer = setTimeout(() => setRefreshDone(false), 1500)
+      return () => clearTimeout(timer)
+    }
+    prevRefreshing.current = refreshing
+  }, [refreshing])
 
   const filteredAndSortedData = useMemo(() => {
     let result = [...data]
@@ -174,6 +187,26 @@ export default function DataTable({
             <button onClick={() => goToPage(totalPages - 1)} disabled={currentPage >= totalPages - 1}>
               Last
             </button>
+
+            {onRefresh && (
+              <button
+                className={`refresh-btn${refreshing ? ' spinning' : ''}${refreshDone ? ' done' : ''}`}
+                onClick={onRefresh}
+                disabled={refreshing}
+                title="Refresh"
+              >
+                {refreshDone ? (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="23 4 23 10 17 10" />
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                  </svg>
+                )}
+              </button>
+            )}
           </div>
         </div>
       )}

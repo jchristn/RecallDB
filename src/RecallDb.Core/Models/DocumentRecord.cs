@@ -257,8 +257,8 @@ namespace RecallDb.Core.Models
         private List<float> _Embeddings = null;
         private DateTime _CreatedUtc = DateTime.UtcNow;
         private double _Score = 0;
-        private List<string> _Labels = null;
-        private Dictionary<string, string> _Tags = null;
+        private List<string> _Labels = new List<string>();
+        private Dictionary<string, string> _Tags = new Dictionary<string, string>();
 
         #endregion
 

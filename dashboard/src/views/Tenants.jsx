@@ -20,14 +20,17 @@ export default function Tenants() {
   const [jsonModal, setJsonModal] = useState(null)
   const [editTarget, setEditTarget] = useState(null)
   const [editForm, setEditForm] = useState({ Name: '', Active: true, Labels: [], Tags: [{ key: '', value: '' }] })
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => { loadTenants() }, [])
 
   const loadTenants = async () => {
     try {
+      setLoading(true)
       const result = await api.listTenants()
       setTenants(result?.Objects || [])
     } catch (err) { setError(err) }
+    finally { setLoading(false) }
   }
 
   const handleCreate = async (e) => {
@@ -136,7 +139,7 @@ export default function Tenants() {
       <ErrorModal error={error} onClose={() => setError(null)} />
 
       <div className="card">
-        <DataTable data={tenants} columns={columns} />
+        <DataTable data={tenants} columns={columns} onRefresh={loadTenants} refreshing={loading} />
       </div>
 
       {showCreate && (

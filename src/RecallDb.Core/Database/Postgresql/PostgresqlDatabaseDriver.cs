@@ -68,6 +68,7 @@ namespace RecallDb.Core.Database.Postgresql
             List<string> queries = new List<string>
             {
                 TableQueries.CreateVectorExtension,
+                TableQueries.CreateTrgmExtension,
                 TableQueries.CreateTenantsTable,
                 TableQueries.CreateTenantsNameIndex,
                 TableQueries.CreateTenantsCreatedIndex,

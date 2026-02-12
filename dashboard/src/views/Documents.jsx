@@ -27,14 +27,17 @@ export default function Documents() {
   const [statsLoading, setStatsLoading] = useState(false)
   const [editTarget, setEditTarget] = useState(null)
   const [editForm, setEditForm] = useState({ Content: '', ContentType: 'Text', DocumentId: '', Position: 0, Labels: [], Tags: [{ key: '', value: '' }] })
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => { loadDocuments() }, [tenantId, collectionId])
 
   const loadDocuments = async () => {
     try {
+      setLoading(true)
       const result = await api.listDocuments(tenantId, collectionId)
       setDocuments(result?.Objects || [])
     } catch (err) { setError(err) }
+    finally { setLoading(false) }
   }
 
   const handleCreate = async (e) => {
@@ -167,7 +170,7 @@ export default function Documents() {
       </div>
       <ErrorModal error={error} onClose={() => setError(null)} />
       <div className="card">
-        <DataTable data={documents} columns={columns} />
+        <DataTable data={documents} columns={columns} onRefresh={loadDocuments} refreshing={loading} />
       </div>
 
       {showCreate && (

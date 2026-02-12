@@ -300,7 +300,7 @@ export default function DocumentsBrowser() {
           {loadingDocuments ? (
             <div className="data-table-loading"><div className="spinner" />Loading documents...</div>
           ) : (
-            <DataTable data={documents} columns={columns} />
+            <DataTable data={documents} columns={columns} onRefresh={loadDocuments} refreshing={loadingDocuments} />
           )}
         </div>
       )}

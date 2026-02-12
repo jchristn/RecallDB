@@ -44,6 +44,11 @@ namespace Test.Automated
         private static string _TestTagId = null;
         private static List<string> _PaginationTenantIds = new List<string>();
 
+        // Search/enumeration test dataset
+        private static List<string> _SearchTestDocKeys = new List<string>();
+        private static List<string> _SearchTestLabelIds = new List<string>();
+        private static List<string> _SearchTestTagIds = new List<string>();
+
         #endregion
 
         #region Entry-Point
@@ -118,23 +123,122 @@ namespace Test.Automated
             await RunTest("Tag: PUT create", TestTagCreate);
             await RunTest("Tag: GET list", TestTagList);
 
-            // 11. Vector Search
+            // 11. Search Data Setup
+            await RunTest("Search data: setup test documents, labels, and tags", TestSearchDataSetup);
+
+            // 12. Vector Search
             await RunTest("Search: cosine similarity", TestSearchCosineSimilarity);
+            await RunTest("Search: cosine distance", TestSearchCosineDistance);
+            await RunTest("Search: euclidean similarity", TestSearchEuclideanSimilarity);
             await RunTest("Search: euclidean distance", TestSearchEuclideanDistance);
             await RunTest("Search: inner product", TestSearchInnerProduct);
 
-            // 12. Search Filters
-            await RunTest("Search: label filter", TestSearchLabelFilter);
-            await RunTest("Search: tag filter", TestSearchTagFilter);
-            await RunTest("Search: date range filter", TestSearchDateRangeFilter);
+            // 13. Search Sort Orders
+            await RunTest("Search sort: score descending", TestSearchSortScoreDescending);
+            await RunTest("Search sort: score ascending", TestSearchSortScoreAscending);
+            await RunTest("Search sort: distance ascending", TestSearchSortDistanceAscending);
+            await RunTest("Search sort: distance descending", TestSearchSortDistanceDescending);
+            await RunTest("Search sort: created ascending", TestSearchSortCreatedAscending);
+            await RunTest("Search sort: created descending", TestSearchSortCreatedDescending);
 
-            // 13. Enumeration Pagination
-            await RunTest("Enumeration: pagination", TestEnumerationPagination);
+            // 14. Search Thresholds
+            await RunTest("Search threshold: minimum score", TestSearchMinimumScore);
+            await RunTest("Search threshold: maximum score", TestSearchMaximumScore);
+            await RunTest("Search threshold: min and max score", TestSearchMinMaxScore);
+            await RunTest("Search threshold: minimum distance", TestSearchMinimumDistance);
+            await RunTest("Search threshold: maximum distance", TestSearchMaximumDistance);
 
-            // 14. Authorization
+            // 15. Search Label Filters
+            await RunTest("Search label: required", TestSearchLabelRequired);
+            await RunTest("Search label: excluded", TestSearchLabelExcluded);
+            await RunTest("Search label: required multiple", TestSearchLabelRequiredMultiple);
+            await RunTest("Search label: required and excluded", TestSearchLabelRequiredAndExcluded);
+            await RunTest("Search label: no match", TestSearchLabelNoMatch);
+
+            // 16. Search Tag Filters
+            await RunTest("Search tag: equals", TestSearchTagEquals);
+            await RunTest("Search tag: not equals", TestSearchTagNotEquals);
+            await RunTest("Search tag: contains", TestSearchTagContains);
+            await RunTest("Search tag: contains not", TestSearchTagContainsNot);
+            await RunTest("Search tag: starts with", TestSearchTagStartsWith);
+            await RunTest("Search tag: ends with", TestSearchTagEndsWith);
+            await RunTest("Search tag: greater than", TestSearchTagGreaterThan);
+            await RunTest("Search tag: less than", TestSearchTagLessThan);
+            await RunTest("Search tag: is not null", TestSearchTagIsNotNull);
+            await RunTest("Search tag: is null", TestSearchTagIsNull);
+            await RunTest("Search tag: excluded", TestSearchTagExcluded);
+
+            // 17. Search Terms Filters
+            await RunTest("Search terms: required", TestSearchTermsRequired);
+            await RunTest("Search terms: excluded", TestSearchTermsExcluded);
+            await RunTest("Search terms: required multiple", TestSearchTermsRequiredMultiple);
+            await RunTest("Search terms: required and excluded", TestSearchTermsRequiredAndExcluded);
+            await RunTest("Search terms: case insensitive", TestSearchTermsCaseInsensitive);
+
+            // 18. Search Date Range
+            await RunTest("Search date: created after", TestSearchCreatedAfter);
+            await RunTest("Search date: created before", TestSearchCreatedBefore);
+            await RunTest("Search date: created before none", TestSearchCreatedBeforeNone);
+            await RunTest("Search date: range combined", TestSearchDateRangeCombined);
+
+            // 19. Search DocumentIds
+            await RunTest("Search docids: filter by document ids", TestSearchDocumentIds);
+            await RunTest("Search docids: no match", TestSearchDocumentIdsNoMatch);
+
+            // 20. Search Pagination
+            await RunTest("Search pagination: page through results", TestSearchPagination);
+            await RunTest("Search pagination: max results", TestSearchMaxResults);
+
+            // 21. Search Combined Filters
+            await RunTest("Search combined: label and tag", TestSearchCombinedLabelAndTag);
+            await RunTest("Search combined: terms and label", TestSearchCombinedTermsAndLabel);
+            await RunTest("Search combined: all filters", TestSearchCombinedAllFilters);
+
+            // 22. Search Result Validation
+            await RunTest("Search validation: result fields", TestSearchResultFields);
+            await RunTest("Search validation: document fields", TestSearchDocumentFields);
+
+            // 23. Document Enumeration
+            await RunTest("Enum docs: basic", TestEnumDocumentsBasic);
+            await RunTest("Enum docs: created ascending", TestEnumDocumentsCreatedAscending);
+            await RunTest("Enum docs: created descending", TestEnumDocumentsCreatedDescending);
+            await RunTest("Enum docs: pagination", TestEnumDocumentsPagination);
+            await RunTest("Enum docs: max results", TestEnumDocumentsMaxResults);
+            await RunTest("Enum docs: created after", TestEnumDocumentsCreatedAfter);
+            await RunTest("Enum docs: created before", TestEnumDocumentsCreatedBefore);
+            await RunTest("Enum docs: date range none", TestEnumDocumentsDateRangeNone);
+            await RunTest("Enum docs: document ids", TestEnumDocumentsDocumentIds);
+            await RunTest("Enum docs: document ids no match", TestEnumDocumentsDocumentIdsNoMatch);
+            await RunTest("Enum docs: label required", TestEnumDocumentsLabelRequired);
+            await RunTest("Enum docs: label excluded", TestEnumDocumentsLabelExcluded);
+            await RunTest("Enum docs: label no match", TestEnumDocumentsLabelNoMatch);
+            await RunTest("Enum docs: tag equals", TestEnumDocumentsTagEquals);
+            await RunTest("Enum docs: tag not equals", TestEnumDocumentsTagNotEquals);
+            await RunTest("Enum docs: tag contains", TestEnumDocumentsTagContains);
+            await RunTest("Enum docs: tag starts with", TestEnumDocumentsTagStartsWith);
+            await RunTest("Enum docs: tag ends with", TestEnumDocumentsTagEndsWith);
+            await RunTest("Enum docs: tag greater than", TestEnumDocumentsTagGreaterThan);
+            await RunTest("Enum docs: tag less than", TestEnumDocumentsTagLessThan);
+            await RunTest("Enum docs: tag is not null", TestEnumDocumentsTagIsNotNull);
+            await RunTest("Enum docs: tag is null", TestEnumDocumentsTagIsNull);
+            await RunTest("Enum docs: tag contains not", TestEnumDocumentsTagContainsNot);
+            await RunTest("Enum docs: terms required", TestEnumDocumentsTermsRequired);
+            await RunTest("Enum docs: terms excluded", TestEnumDocumentsTermsExcluded);
+            await RunTest("Enum docs: combined label and tag", TestEnumDocumentsCombinedLabelAndTag);
+            await RunTest("Enum docs: combined all filters", TestEnumDocumentsCombinedAllFilters);
+            await RunTest("Enum docs: result fields", TestEnumDocumentsResultFields);
+            await RunTest("Enum docs: object fields", TestEnumDocumentsObjectFields);
+
+            // 24. Tenant Enumeration Pagination
+            await RunTest("Enumeration: tenant pagination", TestEnumerationPagination);
+
+            // 25. Authorization
             await RunTest("Authorization: non-admin cannot create tenant", TestAuthorizationNonAdmin);
 
-            // 15. Cleanup
+            // 26. Cleanup
+            await RunTest("Cleanup: delete search labels", TestCleanupSearchLabels);
+            await RunTest("Cleanup: delete search tags", TestCleanupSearchTags);
+            await RunTest("Cleanup: delete search documents", TestCleanupSearchDocuments);
             await RunTest("Cleanup: delete labels", TestCleanupLabels);
             await RunTest("Cleanup: delete tags", TestCleanupTags);
             await RunTest("Cleanup: delete documents", TestCleanupDocuments);
@@ -297,6 +401,80 @@ namespace Test.Automated
                 throw new Exception(
                     "Expected " + expected + " but got " + actual + " for " + name);
             }
+        }
+
+        private static void AssertEqual(long expected, long actual, string name)
+        {
+            if (expected != actual)
+            {
+                throw new Exception(
+                    "Expected " + expected + " but got " + actual + " for " + name);
+            }
+        }
+
+        private static void AssertGreaterThanOrEqual(double value, double threshold, string name)
+        {
+            if (value < threshold)
+                throw new Exception("Expected " + name + " (" + value + ") >= " + threshold);
+        }
+
+        private static void AssertLessThanOrEqual(double value, double threshold, string name)
+        {
+            if (value > threshold)
+                throw new Exception("Expected " + name + " (" + value + ") <= " + threshold);
+        }
+
+        private static string SearchPath()
+        {
+            return "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/search";
+        }
+
+        private static string EnumDocPath()
+        {
+            return "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/enumerate";
+        }
+
+        private static string DocBasePath()
+        {
+            return "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents";
+        }
+
+        private static string LabelBasePath()
+        {
+            return "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/labels";
+        }
+
+        private static string TagBasePath()
+        {
+            return "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/tags";
+        }
+
+        private static async Task<JsonElement> DoSearch(object body)
+        {
+            using HttpResponseMessage response = await PostAsync(_AdminClient, SearchPath(), body).ConfigureAwait(false);
+            AssertStatusCode(response, HttpStatusCode.OK);
+            JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
+            AssertTrue(json.GetProperty("Success").GetBoolean(), "Search should succeed");
+            return json;
+        }
+
+        private static async Task<JsonElement> DoEnumDocs(object body)
+        {
+            using HttpResponseMessage response = await PostAsync(_AdminClient, EnumDocPath(), body).ConfigureAwait(false);
+            AssertStatusCode(response, HttpStatusCode.OK);
+            JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
+            AssertTrue(json.GetProperty("Success").GetBoolean(), "Enumeration should succeed");
+            return json;
+        }
+
+        private static JsonElement GetDocs(JsonElement json)
+        {
+            return json.GetProperty("Documents");
+        }
+
+        private static JsonElement GetObjects(JsonElement json)
+        {
+            return json.GetProperty("Objects");
         }
 
         #endregion
@@ -775,187 +953,823 @@ namespace Test.Automated
 
         #endregion
 
-        #region Test-11-Vector-Search
+        #region Test-11-Search-Data-Setup
+
+        private static async Task TestSearchDataSetup()
+        {
+            // 1. Create 10 documents via batch
+            List<object> docs = new List<object>
+            {
+                new { DocumentKey = "srch-doc-0", DocumentId = "grp-alpha", Content = "Machine learning is transforming industries worldwide", ContentType = "Text", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } },
+                new { DocumentKey = "srch-doc-1", DocumentId = "grp-alpha", Content = "Deep learning neural networks for image recognition", ContentType = "Code", Embeddings = new List<float> { 0.8f, 0.15f, 0.1f } },
+                new { DocumentKey = "srch-doc-2", DocumentId = "grp-beta", Content = "Quantum computing breakthroughs in 2024", ContentType = "Text", Embeddings = new List<float> { 0.1f, 0.9f, 0.05f } },
+                new { DocumentKey = "srch-doc-3", DocumentId = "grp-beta", Content = "Classical physics and thermodynamics overview", ContentType = "Text", Embeddings = new List<float> { 0.05f, 0.85f, 0.15f } },
+                new { DocumentKey = "srch-doc-4", DocumentId = "grp-gamma", Content = "Cooking recipes from Mediterranean cuisine", ContentType = "Text", Embeddings = new List<float> { 0.1f, 0.1f, 0.9f } },
+                new { DocumentKey = "srch-doc-5", DocumentId = "grp-gamma", Content = "Travel guide to Southeast Asia for beginners", ContentType = "Text", Embeddings = new List<float> { 0.05f, 0.15f, 0.85f } },
+                new { DocumentKey = "srch-doc-6", DocumentId = "grp-delta", Content = "Financial markets analysis and stock trading strategies", ContentType = "Text", Embeddings = new List<float> { 0.5f, 0.5f, 0.1f } },
+                new { DocumentKey = "srch-doc-7", DocumentId = "grp-delta", Content = "Startup funding and venture capital trends", ContentType = "Text", Embeddings = new List<float> { 0.45f, 0.55f, 0.05f } },
+                new { DocumentKey = "srch-doc-8", DocumentId = "grp-epsilon", Content = "Health benefits of regular exercise and nutrition", ContentType = "Text", Embeddings = new List<float> { 0.3f, 0.3f, 0.5f } },
+                new { DocumentKey = "srch-doc-9", DocumentId = "grp-epsilon", Content = "Mental health awareness and meditation techniques", ContentType = "Text", Embeddings = new List<float> { 0.25f, 0.35f, 0.45f } }
+            };
+
+            using HttpResponseMessage batchResp = await PostAsync(_AdminClient, DocBasePath() + "/batch", docs).ConfigureAwait(false);
+            AssertStatusCode(batchResp, HttpStatusCode.Created);
+            JsonElement batchJson = await ReadResponse<JsonElement>(batchResp).ConfigureAwait(false);
+            AssertTrue(batchJson.ValueKind == JsonValueKind.Array, "Batch response should be an array");
+            AssertEqual(10, batchJson.GetArrayLength(), "Batch should create 10 documents");
+
+            _SearchTestDocKeys = new List<string> { "srch-doc-0", "srch-doc-1", "srch-doc-2", "srch-doc-3", "srch-doc-4", "srch-doc-5", "srch-doc-6", "srch-doc-7", "srch-doc-8", "srch-doc-9" };
+
+            // 2. Create labels
+            string[][] labelMap = new string[][]
+            {
+                new[] { "science", "tech" },
+                new[] { "science", "tech", "featured" },
+                new[] { "science" },
+                new[] { "science", "educational" },
+                new[] { "lifestyle" },
+                new[] { "lifestyle", "featured" },
+                new[] { "business" },
+                new[] { "business", "featured" },
+                new[] { "lifestyle", "science" },
+                new[] { "lifestyle", "educational" }
+            };
+
+            for (int i = 0; i < 10; i++)
+            {
+                foreach (string label in labelMap[i])
+                {
+                    object labelBody = new { DocumentKey = _SearchTestDocKeys[i], Label = label };
+                    using HttpResponseMessage labelResp = await PutAsync(_AdminClient, LabelBasePath(), labelBody).ConfigureAwait(false);
+                    AssertStatusCode(labelResp, HttpStatusCode.Created);
+                    JsonElement labelJson = await ReadResponse<JsonElement>(labelResp).ConfigureAwait(false);
+                    _SearchTestLabelIds.Add(labelJson.GetProperty("Id").GetString());
+                }
+            }
+
+            // 3. Create tags
+            string[][][] tagMap = new string[][][]
+            {
+                new[] { new[] { "category", "ai" }, new[] { "priority", "high" }, new[] { "year", "2024" } },
+                new[] { new[] { "category", "ai" }, new[] { "priority", "medium" }, new[] { "year", "2024" } },
+                new[] { new[] { "category", "physics" }, new[] { "priority", "high" }, new[] { "year", "2024" } },
+                new[] { new[] { "category", "physics" }, new[] { "priority", "low" }, new[] { "year", "2023" } },
+                new[] { new[] { "category", "cooking" }, new[] { "priority", "medium" }, new[] { "year", "2023" } },
+                new[] { new[] { "category", "travel" }, new[] { "priority", "low" }, new[] { "year", "2022" } },
+                new[] { new[] { "category", "finance" }, new[] { "priority", "high" }, new[] { "year", "2024" } },
+                new[] { new[] { "category", "finance" }, new[] { "priority", "medium" }, new[] { "year", "2023" } },
+                new[] { new[] { "category", "health" }, new[] { "priority", "high" }, new[] { "year", "2024" } },
+                new[] { new[] { "category", "health" }, new[] { "priority", "low" }, new[] { "year", "2022" } }
+            };
+
+            for (int i = 0; i < 10; i++)
+            {
+                foreach (string[] kv in tagMap[i])
+                {
+                    object tagBody = new { DocumentKey = _SearchTestDocKeys[i], Key = kv[0], Value = kv[1] };
+                    using HttpResponseMessage tagResp = await PutAsync(_AdminClient, TagBasePath(), tagBody).ConfigureAwait(false);
+                    AssertStatusCode(tagResp, HttpStatusCode.Created);
+                    JsonElement tagJson = await ReadResponse<JsonElement>(tagResp).ConfigureAwait(false);
+                    _SearchTestTagIds.Add(tagJson.GetProperty("Id").GetString());
+                }
+            }
+        }
+
+        #endregion
+
+        #region Test-12-Vector-Search
 
         private static async Task TestSearchCosineSimilarity()
         {
-            object body = new
-            {
-                Vector = new
-                {
-                    SearchType = "CosineSimilarity",
-                    Embeddings = new List<float> { 0.1f, 0.2f, 0.3f }
-                },
-                MaxResults = 10
-            };
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, MaxResults = 10 }).ConfigureAwait(false);
+            var docsElem = GetDocs(json);
+            AssertTrue(docsElem.GetArrayLength() > 0, "Cosine similarity search should return results");
 
-            string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/search";
-            using HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
-            AssertStatusCode(response, HttpStatusCode.OK);
-
-            JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
-            AssertTrue(json.TryGetProperty("Success", out JsonElement successElem), "Response should contain Success");
-            AssertTrue(successElem.GetBoolean(), "Search should succeed");
-            AssertTrue(json.TryGetProperty("Documents", out JsonElement docsElem), "Response should contain Documents");
-            AssertTrue(docsElem.GetArrayLength() > 0, "Search should return results");
-
-            // Verify results are ordered by score descending (cosine similarity)
-            double previousScore = double.MaxValue;
+            double prev = double.MaxValue;
             foreach (JsonElement doc in docsElem.EnumerateArray())
             {
                 double score = doc.GetProperty("Score").GetDouble();
-                AssertTrue(score <= previousScore, "Cosine similarity results should be ordered by score descending");
-                previousScore = score;
+                AssertTrue(score <= prev, "Cosine similarity results should be ordered by score descending");
+                prev = score;
+            }
+        }
+
+        private static async Task TestSearchCosineDistance()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineDistance", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, SortOrder = "DistanceAscending", MaxResults = 10 }).ConfigureAwait(false);
+            var docsElem = GetDocs(json);
+            AssertTrue(docsElem.GetArrayLength() > 0, "Cosine distance search should return results");
+
+            double prev = -1;
+            foreach (JsonElement doc in docsElem.EnumerateArray())
+            {
+                double score = doc.GetProperty("Score").GetDouble();
+                AssertTrue(score >= prev, "Cosine distance results should be ordered by score ascending");
+                prev = score;
+            }
+        }
+
+        private static async Task TestSearchEuclideanSimilarity()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "EuclideanSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, MaxResults = 10 }).ConfigureAwait(false);
+            var docsElem = GetDocs(json);
+            AssertTrue(docsElem.GetArrayLength() > 0, "Euclidean similarity search should return results");
+
+            foreach (JsonElement doc in docsElem.EnumerateArray())
+            {
+                AssertTrue(doc.TryGetProperty("Score", out _), "Each document should have a Score property");
             }
         }
 
         private static async Task TestSearchEuclideanDistance()
         {
-            object body = new
+            var json = await DoSearch(new { Vector = new { SearchType = "EuclideanDistance", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, SortOrder = "DistanceAscending", MaxResults = 10 }).ConfigureAwait(false);
+            var docsElem = GetDocs(json);
+            AssertTrue(docsElem.GetArrayLength() > 0, "Euclidean distance search should return results");
+
+            double prev = -1;
+            foreach (JsonElement doc in docsElem.EnumerateArray())
             {
-                Vector = new
-                {
-                    SearchType = "EuclideanDistance",
-                    Embeddings = new List<float> { 0.1f, 0.2f, 0.3f }
-                },
-                SortOrder = "DistanceAscending",
-                MaxResults = 10
-            };
-
-            string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/search";
-            using HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
-            AssertStatusCode(response, HttpStatusCode.OK);
-
-            JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
-            AssertTrue(json.TryGetProperty("Success", out JsonElement successElem), "Response should contain Success");
-            AssertTrue(successElem.GetBoolean(), "Search should succeed");
-            AssertTrue(json.TryGetProperty("Documents", out JsonElement docsElem), "Response should contain Documents");
-            AssertTrue(docsElem.GetArrayLength() > 0, "Search should return results");
+                double score = doc.GetProperty("Score").GetDouble();
+                AssertTrue(score >= prev, "Euclidean distance results should be ordered by score ascending");
+                prev = score;
+            }
         }
 
         private static async Task TestSearchInnerProduct()
         {
-            object body = new
+            var json = await DoSearch(new { Vector = new { SearchType = "InnerProduct", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, MaxResults = 10 }).ConfigureAwait(false);
+            var docsElem = GetDocs(json);
+            AssertTrue(docsElem.GetArrayLength() > 0, "Inner product search should return results");
+
+            foreach (JsonElement doc in docsElem.EnumerateArray())
             {
-                Vector = new
-                {
-                    SearchType = "InnerProduct",
-                    Embeddings = new List<float> { 0.1f, 0.2f, 0.3f }
-                },
-                MaxResults = 10
-            };
-
-            string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/search";
-            using HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
-            AssertStatusCode(response, HttpStatusCode.OK);
-
-            JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
-            AssertTrue(json.TryGetProperty("Success", out JsonElement successElem), "Response should contain Success");
-            AssertTrue(successElem.GetBoolean(), "Search should succeed");
-            AssertTrue(json.TryGetProperty("Documents", out JsonElement docsElem), "Response should contain Documents");
-            AssertTrue(docsElem.GetArrayLength() > 0, "Search should return results");
+                AssertTrue(doc.TryGetProperty("Score", out _), "Each document should have a Score property");
+            }
         }
 
         #endregion
 
-        #region Test-12-Search-Filters
+        #region Test-13-Search-Sort-Orders
 
-        private static async Task TestSearchLabelFilter()
+        private static async Task TestSearchSortScoreDescending()
         {
-            object body = new
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, SortOrder = "ScoreDescending", MaxResults = 10 }).ConfigureAwait(false);
+            var docsElem = GetDocs(json);
+            double prev = double.MaxValue;
+            foreach (JsonElement doc in docsElem.EnumerateArray())
             {
-                Vector = new
-                {
-                    SearchType = "CosineSimilarity",
-                    Embeddings = new List<float> { 0.1f, 0.2f, 0.3f }
-                },
-                LabelFilter = new
-                {
-                    Required = new List<string> { "integration-test-label" }
-                },
-                MaxResults = 10
-            };
-
-            string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/search";
-            using HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
-            AssertStatusCode(response, HttpStatusCode.OK);
-
-            JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
-            AssertTrue(json.TryGetProperty("Success", out JsonElement successElem), "Response should contain Success");
-            AssertTrue(successElem.GetBoolean(), "Search should succeed");
-            AssertTrue(json.TryGetProperty("Documents", out JsonElement docsElem), "Response should contain Documents");
-            // The labeled document should appear in results
-            AssertTrue(docsElem.GetArrayLength() >= 1, "Label filter search should return at least 1 result");
+                double score = doc.GetProperty("Score").GetDouble();
+                AssertTrue(score <= prev, "ScoreDescending: score[i] >= score[i+1]");
+                prev = score;
+            }
         }
 
-        private static async Task TestSearchTagFilter()
+        private static async Task TestSearchSortScoreAscending()
         {
-            object body = new
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, SortOrder = "ScoreAscending", MaxResults = 10 }).ConfigureAwait(false);
+            var docsElem = GetDocs(json);
+            double prev = -1;
+            foreach (JsonElement doc in docsElem.EnumerateArray())
             {
-                Vector = new
-                {
-                    SearchType = "CosineSimilarity",
-                    Embeddings = new List<float> { 0.1f, 0.2f, 0.3f }
-                },
-                TagFilter = new
-                {
-                    Required = new List<object>
-                    {
-                        new
-                        {
-                            Key = "environment",
-                            Condition = "Equals",
-                            Value = "integration-test"
-                        }
-                    }
-                },
-                MaxResults = 10
-            };
-
-            string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/search";
-            using HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
-            AssertStatusCode(response, HttpStatusCode.OK);
-
-            JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
-            AssertTrue(json.TryGetProperty("Success", out JsonElement successElem), "Response should contain Success");
-            AssertTrue(successElem.GetBoolean(), "Search should succeed");
-            AssertTrue(json.TryGetProperty("Documents", out JsonElement docsElem), "Response should contain Documents");
-            AssertTrue(docsElem.GetArrayLength() >= 1, "Tag filter search should return at least 1 result");
+                double score = doc.GetProperty("Score").GetDouble();
+                AssertTrue(score >= prev, "ScoreAscending: score[i] <= score[i+1]");
+                prev = score;
+            }
         }
 
-        private static async Task TestSearchDateRangeFilter()
+        private static async Task TestSearchSortDistanceAscending()
         {
-            DateTime now = DateTime.UtcNow;
-            string createdAfter = now.AddHours(-1).ToString("o");
-            string createdBefore = now.AddHours(1).ToString("o");
-
-            object body = new
+            var json = await DoSearch(new { Vector = new { SearchType = "EuclideanDistance", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, SortOrder = "DistanceAscending", MaxResults = 10 }).ConfigureAwait(false);
+            var docsElem = GetDocs(json);
+            double prev = -1;
+            foreach (JsonElement doc in docsElem.EnumerateArray())
             {
-                Vector = new
-                {
-                    SearchType = "CosineSimilarity",
-                    Embeddings = new List<float> { 0.1f, 0.2f, 0.3f }
-                },
-                CreatedAfter = createdAfter,
-                CreatedBefore = createdBefore,
-                MaxResults = 10
-            };
+                double score = doc.GetProperty("Score").GetDouble();
+                AssertTrue(score >= prev, "DistanceAscending: score[i] <= score[i+1]");
+                prev = score;
+            }
+        }
 
-            string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/search";
-            using HttpResponseMessage response = await PostAsync(_AdminClient, path, body).ConfigureAwait(false);
-            AssertStatusCode(response, HttpStatusCode.OK);
+        private static async Task TestSearchSortDistanceDescending()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "EuclideanDistance", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, SortOrder = "DistanceDescending", MaxResults = 10 }).ConfigureAwait(false);
+            var docsElem = GetDocs(json);
+            double prev = double.MaxValue;
+            foreach (JsonElement doc in docsElem.EnumerateArray())
+            {
+                double score = doc.GetProperty("Score").GetDouble();
+                AssertTrue(score <= prev, "DistanceDescending: score[i] >= score[i+1]");
+                prev = score;
+            }
+        }
 
-            JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
-            AssertTrue(json.TryGetProperty("Success", out JsonElement successElem), "Response should contain Success");
-            AssertTrue(successElem.GetBoolean(), "Search should succeed");
-            AssertTrue(json.TryGetProperty("Documents", out JsonElement docsElem), "Response should contain Documents");
-            // Documents were created just now, so they should fall within the date range
-            AssertTrue(docsElem.GetArrayLength() >= 1, "Date range search should return at least 1 result");
+        private static async Task TestSearchSortCreatedAscending()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, SortOrder = "CreatedAscending", MaxResults = 10 }).ConfigureAwait(false);
+            var docsElem = GetDocs(json);
+            DateTime prev = DateTime.MinValue;
+            foreach (JsonElement doc in docsElem.EnumerateArray())
+            {
+                DateTime created = DateTime.Parse(doc.GetProperty("CreatedUtc").GetString());
+                AssertTrue(created >= prev, "CreatedAscending: CreatedUtc[i] <= CreatedUtc[i+1]");
+                prev = created;
+            }
+        }
+
+        private static async Task TestSearchSortCreatedDescending()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, SortOrder = "CreatedDescending", MaxResults = 10 }).ConfigureAwait(false);
+            var docsElem = GetDocs(json);
+            DateTime prev = DateTime.MaxValue;
+            foreach (JsonElement doc in docsElem.EnumerateArray())
+            {
+                DateTime created = DateTime.Parse(doc.GetProperty("CreatedUtc").GetString());
+                AssertTrue(created <= prev, "CreatedDescending: CreatedUtc[i] >= CreatedUtc[i+1]");
+                prev = created;
+            }
         }
 
         #endregion
 
-        #region Test-13-Enumeration-Pagination
+        #region Test-14-Search-Thresholds
+
+        private static async Task TestSearchMinimumScore()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, MinimumScore = 0.9, MaxResults = 10 }).ConfigureAwait(false);
+            foreach (JsonElement doc in GetDocs(json).EnumerateArray())
+            {
+                AssertGreaterThanOrEqual(doc.GetProperty("Score").GetDouble(), 0.9, "Score");
+            }
+        }
+
+        private static async Task TestSearchMaximumScore()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, MaximumScore = 0.5, MaxResults = 10 }).ConfigureAwait(false);
+            foreach (JsonElement doc in GetDocs(json).EnumerateArray())
+            {
+                AssertLessThanOrEqual(doc.GetProperty("Score").GetDouble(), 0.5, "Score");
+            }
+        }
+
+        private static async Task TestSearchMinMaxScore()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, MinimumScore = 0.3, MaximumScore = 0.7, MaxResults = 10 }).ConfigureAwait(false);
+            foreach (JsonElement doc in GetDocs(json).EnumerateArray())
+            {
+                double score = doc.GetProperty("Score").GetDouble();
+                AssertGreaterThanOrEqual(score, 0.3, "Score");
+                AssertLessThanOrEqual(score, 0.7, "Score");
+            }
+        }
+
+        private static async Task TestSearchMinimumDistance()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "EuclideanDistance", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, SortOrder = "DistanceAscending", MinimumDistance = 0.5, MaxResults = 10 }).ConfigureAwait(false);
+            foreach (JsonElement doc in GetDocs(json).EnumerateArray())
+            {
+                AssertGreaterThanOrEqual(doc.GetProperty("Score").GetDouble(), 0.5, "Score");
+            }
+        }
+
+        private static async Task TestSearchMaximumDistance()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "EuclideanDistance", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, SortOrder = "DistanceAscending", MaximumDistance = 1.5, MaxResults = 10 }).ConfigureAwait(false);
+            foreach (JsonElement doc in GetDocs(json).EnumerateArray())
+            {
+                AssertLessThanOrEqual(doc.GetProperty("Score").GetDouble(), 1.5, "Score");
+            }
+        }
+
+        #endregion
+
+        #region Test-15-Search-Label-Filters
+
+        private static async Task TestSearchLabelRequired()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, LabelFilter = new { Required = new List<string> { "science" } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Label required filter should return results");
+        }
+
+        private static async Task TestSearchLabelExcluded()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, LabelFilter = new { Excluded = new List<string> { "lifestyle" } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Label excluded filter should return results");
+        }
+
+        private static async Task TestSearchLabelRequiredMultiple()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, LabelFilter = new { Required = new List<string> { "science", "tech" } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Label required multiple filter should return results");
+        }
+
+        private static async Task TestSearchLabelRequiredAndExcluded()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, LabelFilter = new { Required = new List<string> { "science" }, Excluded = new List<string> { "tech" } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Label required and excluded filter should return results");
+        }
+
+        private static async Task TestSearchLabelNoMatch()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, LabelFilter = new { Required = new List<string> { "nonexistent-label-xyz" } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertEqual(0, GetDocs(json).GetArrayLength(), "Label no match should return 0 results");
+        }
+
+        #endregion
+
+        #region Test-16-Search-Tag-Filters
+
+        private static async Task TestSearchTagEquals()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TagFilter = new { Required = new List<object> { new { Key = "category", Condition = "Equals", Value = "ai" } } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Tag Equals filter should return results");
+        }
+
+        private static async Task TestSearchTagNotEquals()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TagFilter = new { Required = new List<object> { new { Key = "category", Condition = "NotEquals", Value = "ai" } } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Tag NotEquals filter should return results");
+        }
+
+        private static async Task TestSearchTagContains()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TagFilter = new { Required = new List<object> { new { Key = "category", Condition = "Contains", Value = "heal" } } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Tag Contains filter should return results");
+        }
+
+        private static async Task TestSearchTagContainsNot()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TagFilter = new { Required = new List<object> { new { Key = "category", Condition = "ContainsNot", Value = "ai" } } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Tag ContainsNot filter should return results");
+        }
+
+        private static async Task TestSearchTagStartsWith()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TagFilter = new { Required = new List<object> { new { Key = "category", Condition = "StartsWith", Value = "fin" } } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Tag StartsWith filter should return results");
+        }
+
+        private static async Task TestSearchTagEndsWith()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TagFilter = new { Required = new List<object> { new { Key = "category", Condition = "EndsWith", Value = "ics" } } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Tag EndsWith filter should return results");
+        }
+
+        private static async Task TestSearchTagGreaterThan()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TagFilter = new { Required = new List<object> { new { Key = "year", Condition = "GreaterThan", Value = "2023" } } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Tag GreaterThan filter should return results");
+        }
+
+        private static async Task TestSearchTagLessThan()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TagFilter = new { Required = new List<object> { new { Key = "year", Condition = "LessThan", Value = "2023" } } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Tag LessThan filter should return results");
+        }
+
+        private static async Task TestSearchTagIsNotNull()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TagFilter = new { Required = new List<object> { new { Key = "priority", Condition = "IsNotNull" } } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() >= 10, "Tag IsNotNull filter should return >= 10 results");
+        }
+
+        private static async Task TestSearchTagIsNull()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TagFilter = new { Required = new List<object> { new { Key = "nonexistent-tag-xyz", Condition = "IsNull" } } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() >= 10, "Tag IsNull filter should return >= 10 results");
+        }
+
+        private static async Task TestSearchTagExcluded()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TagFilter = new { Excluded = new List<object> { new { Key = "priority", Condition = "Equals", Value = "low" } } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Tag Excluded filter should return results");
+        }
+
+        #endregion
+
+        #region Test-17-Search-Terms-Filters
+
+        private static async Task TestSearchTermsRequired()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TermsFilter = new { Required = new List<string> { "machine learning" } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Terms required filter should return results");
+        }
+
+        private static async Task TestSearchTermsExcluded()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TermsFilter = new { Excluded = new List<string> { "quantum" } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Terms excluded filter should return results");
+        }
+
+        private static async Task TestSearchTermsRequiredMultiple()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TermsFilter = new { Required = new List<string> { "learning", "neural" } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Terms required multiple filter should return results");
+        }
+
+        private static async Task TestSearchTermsRequiredAndExcluded()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TermsFilter = new { Required = new List<string> { "health" }, Excluded = new List<string> { "meditation" } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Terms required and excluded filter should return results");
+        }
+
+        private static async Task TestSearchTermsCaseInsensitive()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TermsFilter = new { Required = new List<string> { "MACHINE LEARNING" } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Terms case insensitive filter should return results");
+        }
+
+        #endregion
+
+        #region Test-18-Search-Date-Range
+
+        private static async Task TestSearchCreatedAfter()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, CreatedAfter = DateTime.UtcNow.AddHours(-1).ToString("o"), MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "CreatedAfter filter should return results");
+        }
+
+        private static async Task TestSearchCreatedBefore()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, CreatedBefore = DateTime.UtcNow.AddHours(1).ToString("o"), MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "CreatedBefore filter should return results");
+        }
+
+        private static async Task TestSearchCreatedBeforeNone()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, CreatedBefore = DateTime.UtcNow.AddHours(-1).ToString("o"), MaxResults = 20 }).ConfigureAwait(false);
+            AssertEqual(0, GetDocs(json).GetArrayLength(), "CreatedBefore in past should return 0 results");
+        }
+
+        private static async Task TestSearchDateRangeCombined()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, CreatedAfter = DateTime.UtcNow.AddHours(-1).ToString("o"), CreatedBefore = DateTime.UtcNow.AddHours(1).ToString("o"), MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Date range combined filter should return results");
+        }
+
+        #endregion
+
+        #region Test-19-Search-DocumentIds
+
+        private static async Task TestSearchDocumentIds()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, DocumentIds = new List<string> { "grp-alpha", "grp-beta" }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "DocumentIds filter should return results");
+        }
+
+        private static async Task TestSearchDocumentIdsNoMatch()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, DocumentIds = new List<string> { "nonexistent-docid-xyz" }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertEqual(0, GetDocs(json).GetArrayLength(), "DocumentIds no match should return 0 results");
+        }
+
+        #endregion
+
+        #region Test-20-Search-Pagination
+
+        private static async Task TestSearchPagination()
+        {
+            int totalFetched = 0;
+            string ct = null;
+            bool eor = false;
+            while (!eor)
+            {
+                object body;
+                if (ct != null)
+                    body = new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, MaxResults = 3, ContinuationToken = ct };
+                else
+                    body = new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, MaxResults = 3 };
+                var json = await DoSearch(body).ConfigureAwait(false);
+                eor = json.GetProperty("EndOfResults").GetBoolean();
+                totalFetched += GetDocs(json).GetArrayLength();
+                if (!eor) { ct = json.GetProperty("ContinuationToken").GetString(); AssertNotNullOrEmpty(ct, "ContinuationToken"); }
+            }
+            AssertTrue(totalFetched >= 10, "Should page through all search docs");
+        }
+
+        private static async Task TestSearchMaxResults()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, MaxResults = 2 }).ConfigureAwait(false);
+            AssertEqual(2, GetDocs(json).GetArrayLength(), "MaxResults should limit to 2");
+        }
+
+        #endregion
+
+        #region Test-21-Search-Combined-Filters
+
+        private static async Task TestSearchCombinedLabelAndTag()
+        {
+            var json = await DoSearch(new
+            {
+                Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } },
+                LabelFilter = new { Required = new List<string> { "science" } },
+                TagFilter = new { Required = new List<object> { new { Key = "category", Condition = "Equals", Value = "ai" } } },
+                MaxResults = 20
+            }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Combined label and tag filter should return results");
+        }
+
+        private static async Task TestSearchCombinedTermsAndLabel()
+        {
+            var json = await DoSearch(new
+            {
+                Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } },
+                TermsFilter = new { Required = new List<string> { "exercise" } },
+                LabelFilter = new { Required = new List<string> { "lifestyle" } },
+                MaxResults = 20
+            }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Combined terms and label filter should return results");
+        }
+
+        private static async Task TestSearchCombinedAllFilters()
+        {
+            var json = await DoSearch(new
+            {
+                Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } },
+                LabelFilter = new { Required = new List<string> { "science" } },
+                TagFilter = new { Required = new List<object> { new { Key = "year", Condition = "Equals", Value = "2024" } } },
+                TermsFilter = new { Required = new List<string> { "learning" } },
+                CreatedAfter = DateTime.UtcNow.AddHours(-1).ToString("o"),
+                CreatedBefore = DateTime.UtcNow.AddHours(1).ToString("o"),
+                MaxResults = 20
+            }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Combined all filters should return results");
+        }
+
+        #endregion
+
+        #region Test-22-Search-Result-Validation
+
+        private static async Task TestSearchResultFields()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, MaxResults = 10 }).ConfigureAwait(false);
+            AssertTrue(json.GetProperty("Success").GetBoolean(), "Success should be true");
+            AssertTrue(json.TryGetProperty("MaxResults", out _), "Response should contain MaxResults");
+            AssertTrue(json.TryGetProperty("EndOfResults", out _), "Response should contain EndOfResults");
+            AssertTrue(json.GetProperty("TotalRecords").GetInt64() > 0, "TotalRecords should be > 0");
+            AssertTrue(json.TryGetProperty("RecordsRemaining", out _), "Response should contain RecordsRemaining");
+            AssertTrue(json.TryGetProperty("Documents", out _), "Response should contain Documents");
+        }
+
+        private static async Task TestSearchDocumentFields()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, MaxResults = 10 }).ConfigureAwait(false);
+            var docsElem = GetDocs(json);
+            AssertTrue(docsElem.GetArrayLength() > 0, "Should have at least one document");
+
+            JsonElement doc = docsElem[0];
+            AssertNotNullOrEmpty(doc.GetProperty("DocumentKey").GetString(), "DocumentKey");
+            AssertNotNullOrEmpty(doc.GetProperty("DocumentId").GetString(), "DocumentId");
+            AssertNotNullOrEmpty(doc.GetProperty("Content").GetString(), "Content");
+            AssertNotNullOrEmpty(doc.GetProperty("ContentType").GetString(), "ContentType");
+            AssertTrue(doc.GetProperty("ContentLength").GetInt32() > 0, "ContentLength should be > 0");
+            AssertNotNullOrEmpty(doc.GetProperty("CreatedUtc").GetString(), "CreatedUtc");
+            AssertTrue(doc.TryGetProperty("Score", out _), "Document should have Score");
+            AssertTrue(doc.TryGetProperty("Labels", out _), "Document should have Labels");
+            AssertTrue(doc.TryGetProperty("Tags", out _), "Document should have Tags");
+        }
+
+        #endregion
+
+        #region Test-23-Document-Enumeration
+
+        private static async Task TestEnumDocumentsBasic()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending" }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() >= 10, "Basic enumeration should return >= 10 results");
+        }
+
+        private static async Task TestEnumDocumentsCreatedAscending()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedAscending" }).ConfigureAwait(false);
+            var objects = GetObjects(json);
+            DateTime prev = DateTime.MinValue;
+            foreach (JsonElement obj in objects.EnumerateArray())
+            {
+                DateTime created = DateTime.Parse(obj.GetProperty("CreatedUtc").GetString());
+                AssertTrue(created >= prev, "CreatedAscending: CreatedUtc[i] <= CreatedUtc[i+1]");
+                prev = created;
+            }
+        }
+
+        private static async Task TestEnumDocumentsCreatedDescending()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending" }).ConfigureAwait(false);
+            var objects = GetObjects(json);
+            DateTime prev = DateTime.MaxValue;
+            foreach (JsonElement obj in objects.EnumerateArray())
+            {
+                DateTime created = DateTime.Parse(obj.GetProperty("CreatedUtc").GetString());
+                AssertTrue(created <= prev, "CreatedDescending: CreatedUtc[i] >= CreatedUtc[i+1]");
+                prev = created;
+            }
+        }
+
+        private static async Task TestEnumDocumentsPagination()
+        {
+            int totalFetched = 0;
+            string ct = null;
+            bool eor = false;
+            while (!eor)
+            {
+                object body;
+                if (ct != null)
+                    body = new { MaxResults = 3, Ordering = "CreatedAscending", ContinuationToken = ct };
+                else
+                    body = new { MaxResults = 3, Ordering = "CreatedAscending" };
+                var json = await DoEnumDocs(body).ConfigureAwait(false);
+                eor = json.GetProperty("EndOfResults").GetBoolean();
+                AssertTrue(json.GetProperty("TotalRecords").GetInt64() >= 10, "TotalRecords should be >= 10");
+                totalFetched += GetObjects(json).GetArrayLength();
+                if (!eor) { ct = json.GetProperty("ContinuationToken").GetString(); AssertNotNullOrEmpty(ct, "ContinuationToken"); }
+            }
+            AssertTrue(totalFetched >= 10, "Should page through all enumeration docs");
+        }
+
+        private static async Task TestEnumDocumentsMaxResults()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 2, Ordering = "CreatedDescending" }).ConfigureAwait(false);
+            AssertEqual(2, GetObjects(json).GetArrayLength(), "MaxResults should limit to 2");
+        }
+
+        private static async Task TestEnumDocumentsCreatedAfter()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", CreatedAfter = DateTime.UtcNow.AddHours(-1).ToString("o") }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() > 0, "CreatedAfter filter should return results");
+        }
+
+        private static async Task TestEnumDocumentsCreatedBefore()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", CreatedBefore = DateTime.UtcNow.AddHours(1).ToString("o") }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() > 0, "CreatedBefore filter should return results");
+        }
+
+        private static async Task TestEnumDocumentsDateRangeNone()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", CreatedBefore = DateTime.UtcNow.AddHours(-1).ToString("o") }).ConfigureAwait(false);
+            AssertEqual(0, GetObjects(json).GetArrayLength(), "CreatedBefore in past should return 0 results");
+        }
+
+        private static async Task TestEnumDocumentsDocumentIds()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", DocumentIds = new List<string> { "grp-alpha", "grp-beta" } }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() > 0, "DocumentIds filter should return results");
+        }
+
+        private static async Task TestEnumDocumentsDocumentIdsNoMatch()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", DocumentIds = new List<string> { "nonexistent-docid-xyz" } }).ConfigureAwait(false);
+            AssertEqual(0, GetObjects(json).GetArrayLength(), "DocumentIds no match should return 0 results");
+        }
+
+        private static async Task TestEnumDocumentsLabelRequired()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", LabelFilter = new { Required = new List<string> { "science" } } }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() > 0, "Label required filter should return results");
+        }
+
+        private static async Task TestEnumDocumentsLabelExcluded()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", LabelFilter = new { Excluded = new List<string> { "lifestyle" } } }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() > 0, "Label excluded filter should return results");
+        }
+
+        private static async Task TestEnumDocumentsLabelNoMatch()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", LabelFilter = new { Required = new List<string> { "nonexistent-label-xyz" } } }).ConfigureAwait(false);
+            AssertEqual(0, GetObjects(json).GetArrayLength(), "Label no match should return 0 results");
+        }
+
+        private static async Task TestEnumDocumentsTagEquals()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", TagFilter = new { Required = new List<object> { new { Key = "category", Condition = "Equals", Value = "ai" } } } }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() > 0, "Tag Equals filter should return results");
+        }
+
+        private static async Task TestEnumDocumentsTagNotEquals()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", TagFilter = new { Required = new List<object> { new { Key = "category", Condition = "NotEquals", Value = "ai" } } } }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() > 0, "Tag NotEquals filter should return results");
+        }
+
+        private static async Task TestEnumDocumentsTagContains()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", TagFilter = new { Required = new List<object> { new { Key = "category", Condition = "Contains", Value = "heal" } } } }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() > 0, "Tag Contains filter should return results");
+        }
+
+        private static async Task TestEnumDocumentsTagStartsWith()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", TagFilter = new { Required = new List<object> { new { Key = "category", Condition = "StartsWith", Value = "fin" } } } }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() > 0, "Tag StartsWith filter should return results");
+        }
+
+        private static async Task TestEnumDocumentsTagEndsWith()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", TagFilter = new { Required = new List<object> { new { Key = "category", Condition = "EndsWith", Value = "ics" } } } }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() > 0, "Tag EndsWith filter should return results");
+        }
+
+        private static async Task TestEnumDocumentsTagGreaterThan()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", TagFilter = new { Required = new List<object> { new { Key = "year", Condition = "GreaterThan", Value = "2023" } } } }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() > 0, "Tag GreaterThan filter should return results");
+        }
+
+        private static async Task TestEnumDocumentsTagLessThan()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", TagFilter = new { Required = new List<object> { new { Key = "year", Condition = "LessThan", Value = "2023" } } } }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() > 0, "Tag LessThan filter should return results");
+        }
+
+        private static async Task TestEnumDocumentsTagIsNotNull()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", TagFilter = new { Required = new List<object> { new { Key = "priority", Condition = "IsNotNull" } } } }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() >= 10, "Tag IsNotNull filter should return >= 10 results");
+        }
+
+        private static async Task TestEnumDocumentsTagIsNull()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", TagFilter = new { Required = new List<object> { new { Key = "nonexistent-tag-xyz", Condition = "IsNull" } } } }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() >= 10, "Tag IsNull filter should return >= 10 results");
+        }
+
+        private static async Task TestEnumDocumentsTagContainsNot()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", TagFilter = new { Required = new List<object> { new { Key = "category", Condition = "ContainsNot", Value = "ai" } } } }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() > 0, "Tag ContainsNot filter should return results");
+        }
+
+        private static async Task TestEnumDocumentsTermsRequired()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", TermsFilter = new { Required = new List<string> { "machine learning" } } }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() > 0, "Terms required filter should return results");
+        }
+
+        private static async Task TestEnumDocumentsTermsExcluded()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", TermsFilter = new { Excluded = new List<string> { "quantum" } } }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() > 0, "Terms excluded filter should return results");
+        }
+
+        private static async Task TestEnumDocumentsCombinedLabelAndTag()
+        {
+            var json = await DoEnumDocs(new
+            {
+                MaxResults = 100,
+                Ordering = "CreatedDescending",
+                LabelFilter = new { Required = new List<string> { "science" } },
+                TagFilter = new { Required = new List<object> { new { Key = "category", Condition = "Equals", Value = "ai" } } }
+            }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() > 0, "Combined label and tag filter should return results");
+        }
+
+        private static async Task TestEnumDocumentsCombinedAllFilters()
+        {
+            var json = await DoEnumDocs(new
+            {
+                MaxResults = 100,
+                Ordering = "CreatedDescending",
+                LabelFilter = new { Required = new List<string> { "science" } },
+                TagFilter = new { Required = new List<object> { new { Key = "year", Condition = "Equals", Value = "2024" } } },
+                TermsFilter = new { Required = new List<string> { "learning" } },
+                CreatedAfter = DateTime.UtcNow.AddHours(-1).ToString("o"),
+                CreatedBefore = DateTime.UtcNow.AddHours(1).ToString("o")
+            }).ConfigureAwait(false);
+            AssertTrue(GetObjects(json).GetArrayLength() > 0, "Combined all filters should return results");
+        }
+
+        private static async Task TestEnumDocumentsResultFields()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending" }).ConfigureAwait(false);
+            AssertTrue(json.GetProperty("Success").GetBoolean(), "Success should be true");
+            AssertTrue(json.TryGetProperty("MaxResults", out _), "Response should contain MaxResults");
+            AssertTrue(json.TryGetProperty("EndOfResults", out _), "Response should contain EndOfResults");
+            AssertTrue(json.GetProperty("TotalRecords").GetInt64() > 0, "TotalRecords should be > 0");
+            AssertTrue(json.TryGetProperty("RecordsRemaining", out _), "Response should contain RecordsRemaining");
+            AssertTrue(json.TryGetProperty("Objects", out _), "Response should contain Objects");
+        }
+
+        private static async Task TestEnumDocumentsObjectFields()
+        {
+            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending" }).ConfigureAwait(false);
+            var objects = GetObjects(json);
+            AssertTrue(objects.GetArrayLength() > 0, "Should have at least one object");
+
+            JsonElement obj = objects[0];
+            AssertNotNullOrEmpty(obj.GetProperty("DocumentKey").GetString(), "DocumentKey");
+            AssertNotNullOrEmpty(obj.GetProperty("DocumentId").GetString(), "DocumentId");
+            AssertNotNullOrEmpty(obj.GetProperty("Content").GetString(), "Content");
+            AssertNotNullOrEmpty(obj.GetProperty("ContentType").GetString(), "ContentType");
+            AssertTrue(obj.GetProperty("ContentLength").GetInt32() > 0, "ContentLength should be > 0");
+            AssertNotNullOrEmpty(obj.GetProperty("CreatedUtc").GetString(), "CreatedUtc");
+            AssertTrue(obj.TryGetProperty("Labels", out _), "Object should have Labels");
+            AssertTrue(obj.TryGetProperty("Tags", out _), "Object should have Tags");
+        }
+
+        #endregion
+
+        #region Test-24-Tenant-Enumeration-Pagination
 
         private static async Task TestEnumerationPagination()
         {
@@ -1027,7 +1841,7 @@ namespace Test.Automated
 
         #endregion
 
-        #region Test-14-Authorization
+        #region Test-25-Authorization
 
         private static async Task TestAuthorizationNonAdmin()
         {
@@ -1040,7 +1854,43 @@ namespace Test.Automated
 
         #endregion
 
-        #region Test-15-Cleanup
+        #region Test-26-Cleanup
+
+        private static async Task TestCleanupSearchLabels()
+        {
+            if (string.IsNullOrEmpty(_TestCollectionId)) return;
+
+            foreach (string labelId in _SearchTestLabelIds)
+            {
+                string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/labels/" + labelId;
+                using HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
+                AssertStatusCode(response, HttpStatusCode.NoContent);
+            }
+        }
+
+        private static async Task TestCleanupSearchTags()
+        {
+            if (string.IsNullOrEmpty(_TestCollectionId)) return;
+
+            foreach (string tagId in _SearchTestTagIds)
+            {
+                string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/tags/" + tagId;
+                using HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
+                AssertStatusCode(response, HttpStatusCode.NoContent);
+            }
+        }
+
+        private static async Task TestCleanupSearchDocuments()
+        {
+            if (string.IsNullOrEmpty(_TestCollectionId)) return;
+
+            foreach (string docKey in _SearchTestDocKeys)
+            {
+                string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/" + docKey;
+                using HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
+                AssertStatusCode(response, HttpStatusCode.NoContent);
+            }
+        }
 
         private static async Task TestCleanupLabels()
         {

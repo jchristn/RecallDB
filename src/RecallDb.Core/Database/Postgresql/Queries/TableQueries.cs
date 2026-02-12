@@ -12,6 +12,12 @@ namespace RecallDb.Core.Database.Postgresql.Queries
             "CREATE EXTENSION IF NOT EXISTS vector;";
 
         /// <summary>
+        /// Create the pg_trgm extension for trigram indexing.
+        /// </summary>
+        public static readonly string CreateTrgmExtension =
+            "CREATE EXTENSION IF NOT EXISTS pg_trgm;";
+
+        /// <summary>
         /// Create the tenants table.
         /// </summary>
         public static readonly string CreateTenantsTable =

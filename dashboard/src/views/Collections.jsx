@@ -31,14 +31,17 @@ export default function Collections() {
   const [editForm, setEditForm] = useState({ Name: '', Description: '', Active: true })
   const [statsModal, setStatsModal] = useState(null)
   const [statsLoading, setStatsLoading] = useState(false)
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => { loadCollections() }, [tenantId])
 
   const loadCollections = async () => {
     try {
+      setLoading(true)
       const result = await api.listCollections(tenantId)
       setCollections(result?.Objects || [])
     } catch (err) { setError(err) }
+    finally { setLoading(false) }
   }
 
   const handleCreate = async (e) => {
@@ -137,7 +140,7 @@ export default function Collections() {
       </div>
       <ErrorModal error={error} onClose={() => setError(null)} />
       <div className="card">
-        <DataTable data={collections} columns={columns} />
+        <DataTable data={collections} columns={columns} onRefresh={loadCollections} refreshing={loading} />
       </div>
 
       {showCreate && (

@@ -136,6 +136,66 @@ namespace RecallDb.Core.Models
         }
 
         /// <summary>
+        /// Minimum score threshold for results.
+        /// </summary>
+        public double? MinimumScore
+        {
+            get
+            {
+                return _MinimumScore;
+            }
+            set
+            {
+                _MinimumScore = value;
+            }
+        }
+
+        /// <summary>
+        /// Maximum score threshold for results.
+        /// </summary>
+        public double? MaximumScore
+        {
+            get
+            {
+                return _MaximumScore;
+            }
+            set
+            {
+                _MaximumScore = value;
+            }
+        }
+
+        /// <summary>
+        /// Minimum distance threshold for results.
+        /// </summary>
+        public double? MinimumDistance
+        {
+            get
+            {
+                return _MinimumDistance;
+            }
+            set
+            {
+                _MinimumDistance = value;
+            }
+        }
+
+        /// <summary>
+        /// Maximum distance threshold for results.
+        /// </summary>
+        public double? MaximumDistance
+        {
+            get
+            {
+                return _MaximumDistance;
+            }
+            set
+            {
+                _MaximumDistance = value;
+            }
+        }
+
+        /// <summary>
         /// Maximum number of results to return.
         /// Default: 10. Minimum: 1. Maximum: 1000.
         /// Values outside the range are clamped.
@@ -181,6 +241,10 @@ namespace RecallDb.Core.Models
         private TagFilterSet _TagFilter = null;
         private VectorQuery _Vector = null;
         private TermsFilter _Terms = null;
+        private double? _MinimumScore = null;
+        private double? _MaximumScore = null;
+        private double? _MinimumDistance = null;
+        private double? _MaximumDistance = null;
         private int _MaxResults = 10;
         private string _ContinuationToken = null;
 

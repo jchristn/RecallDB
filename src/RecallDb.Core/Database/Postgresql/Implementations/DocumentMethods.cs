@@ -62,6 +62,8 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             if (document == null) throw new ArgumentNullException(nameof(document));
 
+            CalculateContentLength(document);
+
             string tableName = "collection_" + SanitizeTableName(collectionId);
 
             string query =
@@ -106,6 +108,8 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
 
             foreach (DocumentRecord document in documents)
             {
+                CalculateContentLength(document);
+
                 string query =
                     "INSERT INTO " + tableName + " " +
                     "(document_key, document_id, content_length, etag, sha256, position, content_type, content, binary_data, embeddings, created_utc) " +
@@ -474,6 +478,16 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
 
         #region Private-Methods
 
+        private void CalculateContentLength(DocumentRecord document)
+        {
+            if (document.ContentLength > 0) return;
+
+            if (!string.IsNullOrEmpty(document.Content))
+                document.ContentLength = System.Text.Encoding.UTF8.GetByteCount(document.Content);
+            else if (document.BinaryData != null)
+                document.ContentLength = document.BinaryData.Length;
+        }
+
         private string SanitizeTableName(string collectionId)
         {
             if (string.IsNullOrEmpty(collectionId)) return "unknown";
@@ -540,9 +554,9 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                         ")";
 
                 case TagConditionEnum.IsNull:
-                    return "document_key " + inOrNotIn + " (" +
+                    return "document_key " + (excluded ? "IN" : "NOT IN") + " (" +
                         "SELECT document_key FROM " + tagsTableName + " " +
-                        "WHERE key = '" + sanitizedKey + "' AND (value IS NULL OR value = '')" +
+                        "WHERE key = '" + sanitizedKey + "' AND value IS NOT NULL AND value != ''" +
                         ")";
 
                 case TagConditionEnum.IsNotNull:

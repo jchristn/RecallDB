@@ -21,14 +21,17 @@ export default function Credentials() {
   const [jsonModal, setJsonModal] = useState(null)
   const [editTarget, setEditTarget] = useState(null)
   const [editForm, setEditForm] = useState({ Name: '', Active: true })
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => { loadCredentials() }, [tenantId])
 
   const loadCredentials = async () => {
     try {
+      setLoading(true)
       const result = await api.listCredentials(tenantId)
       setCredentials(result?.Objects || [])
     } catch (err) { setError(err) }
+    finally { setLoading(false) }
   }
 
   const handleCreate = async (e) => {
@@ -113,7 +116,7 @@ export default function Credentials() {
       </div>
       <ErrorModal error={error} onClose={() => setError(null)} />
       <div className="card">
-        <DataTable data={credentials} columns={columns} />
+        <DataTable data={credentials} columns={columns} onRefresh={loadCredentials} refreshing={loading} />
       </div>
 
       {showCreate && (

@@ -39,13 +39,15 @@ namespace RecallDb.Core.Database.Postgresql.Queries
         public static string[] GetCreateCollectionIndexes(string collectionId)
         {
             string tableName = SanitizeTableName(collectionId);
+            string ixId = GetIndexIdentifier(collectionId);
             return new string[]
             {
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_col_" + tableName + "_doc_key ON collection_" + tableName + " (document_key);",
-                "CREATE INDEX IF NOT EXISTS idx_col_" + tableName + "_doc_id ON collection_" + tableName + " (document_id);",
-                "CREATE INDEX IF NOT EXISTS idx_col_" + tableName + "_doc_id_pos ON collection_" + tableName + " (document_id, position);",
-                "CREATE INDEX IF NOT EXISTS idx_col_" + tableName + "_created ON collection_" + tableName + " (created_utc);",
-                "CREATE INDEX IF NOT EXISTS idx_col_" + tableName + "_hnsw ON collection_" + tableName + " USING hnsw (embeddings vector_cosine_ops) WITH (m = 16, ef_construction = 64);"
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_col_" + ixId + "_dkey ON collection_" + tableName + " (document_key);",
+                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_did ON collection_" + tableName + " (document_id);",
+                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_didp ON collection_" + tableName + " (document_id, position);",
+                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_crt ON collection_" + tableName + " (created_utc);",
+                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_hnsw ON collection_" + tableName + " USING hnsw (embeddings vector_cosine_ops) WITH (m = 16, ef_construction = 64);",
+                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_trgm ON collection_" + tableName + " USING gin (content gin_trgm_ops);"
             };
         }
 
@@ -76,12 +78,13 @@ namespace RecallDb.Core.Database.Postgresql.Queries
         public static string[] GetCreateLabelsIndexes(string collectionId)
         {
             string tableName = SanitizeTableName(collectionId);
+            string ixId = GetIndexIdentifier(collectionId);
             return new string[]
             {
-                "CREATE INDEX IF NOT EXISTS idx_col_" + tableName + "_labels_doc_key ON collection_" + tableName + "_labels (document_key);",
-                "CREATE INDEX IF NOT EXISTS idx_col_" + tableName + "_labels_doc_id ON collection_" + tableName + "_labels (document_id);",
-                "CREATE INDEX IF NOT EXISTS idx_col_" + tableName + "_labels_label ON collection_" + tableName + "_labels (label);",
-                "CREATE INDEX IF NOT EXISTS idx_col_" + tableName + "_labels_created ON collection_" + tableName + "_labels (created_utc);"
+                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_l_dkey ON collection_" + tableName + "_labels (document_key);",
+                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_l_did ON collection_" + tableName + "_labels (document_id);",
+                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_l_lbl ON collection_" + tableName + "_labels (label);",
+                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_l_crt ON collection_" + tableName + "_labels (created_utc);"
             };
         }
 
@@ -113,13 +116,14 @@ namespace RecallDb.Core.Database.Postgresql.Queries
         public static string[] GetCreateTagsIndexes(string collectionId)
         {
             string tableName = SanitizeTableName(collectionId);
+            string ixId = GetIndexIdentifier(collectionId);
             return new string[]
             {
-                "CREATE INDEX IF NOT EXISTS idx_col_" + tableName + "_tags_doc_key ON collection_" + tableName + "_tags (document_key);",
-                "CREATE INDEX IF NOT EXISTS idx_col_" + tableName + "_tags_doc_id ON collection_" + tableName + "_tags (document_id);",
-                "CREATE INDEX IF NOT EXISTS idx_col_" + tableName + "_tags_key ON collection_" + tableName + "_tags (key);",
-                "CREATE INDEX IF NOT EXISTS idx_col_" + tableName + "_tags_key_value ON collection_" + tableName + "_tags (key, value);",
-                "CREATE INDEX IF NOT EXISTS idx_col_" + tableName + "_tags_created ON collection_" + tableName + "_tags (created_utc);"
+                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_t_dkey ON collection_" + tableName + "_tags (document_key);",
+                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_t_did ON collection_" + tableName + "_tags (document_id);",
+                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_t_key ON collection_" + tableName + "_tags (key);",
+                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_t_kv ON collection_" + tableName + "_tags (key, value);",
+                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_t_crt ON collection_" + tableName + "_tags (created_utc);"
             };
         }
 
@@ -145,6 +149,23 @@ namespace RecallDb.Core.Database.Postgresql.Queries
         {
             if (string.IsNullOrEmpty(collectionId)) return "unknown";
             return collectionId.Replace("-", "_").Replace(".", "_");
+        }
+
+        private static string GetIndexIdentifier(string collectionId)
+        {
+            string sanitized = SanitizeTableName(collectionId);
+
+            if (sanitized.StartsWith("col_") && sanitized.Length > 4)
+            {
+                int nextUnderscore = sanitized.IndexOf('_', 4);
+                if (nextUnderscore > 4)
+                {
+                    return sanitized.Substring(4, nextUnderscore - 4);
+                }
+            }
+
+            if (sanitized.Length <= 8) return sanitized;
+            return sanitized.Substring(sanitized.Length - 8);
         }
 
         #endregion

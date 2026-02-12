@@ -229,27 +229,31 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                 totalCount = Convert.ToInt64(countResult.Rows[0]["count"]);
             }
 
-            // Apply score/distance filtering
-            if (query.Vector != null)
+            // Apply score/distance filtering from query-level thresholds
             {
-                if (query.Vector.MinimumScore.HasValue)
+                double? minScore = query.MinimumScore ?? (query.Vector != null ? query.Vector.MinimumScore : null);
+                double? maxScore = query.MaximumScore ?? (query.Vector != null ? query.Vector.MaximumScore : null);
+                double? minDist = query.MinimumDistance ?? (query.Vector != null ? query.Vector.MinimumDistance : null);
+                double? maxDist = query.MaximumDistance ?? (query.Vector != null ? query.Vector.MaximumDistance : null);
+
+                if (minScore.HasValue)
                 {
-                    documents = documents.Where(d => d.Score >= query.Vector.MinimumScore.Value).ToList();
+                    documents = documents.Where(d => d.Score >= minScore.Value).ToList();
                 }
 
-                if (query.Vector.MaximumScore.HasValue)
+                if (maxScore.HasValue)
                 {
-                    documents = documents.Where(d => d.Score <= query.Vector.MaximumScore.Value).ToList();
+                    documents = documents.Where(d => d.Score <= maxScore.Value).ToList();
                 }
 
-                if (query.Vector.MinimumDistance.HasValue)
+                if (minDist.HasValue && query.Vector != null)
                 {
-                    documents = documents.Where(d => GetDistanceFromScore(query.Vector, d.Score) >= query.Vector.MinimumDistance.Value).ToList();
+                    documents = documents.Where(d => GetDistanceFromScore(query.Vector, d.Score) >= minDist.Value).ToList();
                 }
 
-                if (query.Vector.MaximumDistance.HasValue)
+                if (maxDist.HasValue && query.Vector != null)
                 {
-                    documents = documents.Where(d => GetDistanceFromScore(query.Vector, d.Score) <= query.Vector.MaximumDistance.Value).ToList();
+                    documents = documents.Where(d => GetDistanceFromScore(query.Vector, d.Score) <= maxDist.Value).ToList();
                 }
             }
 
@@ -333,9 +337,16 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
 
         private string GetScoreExpression(VectorQuery vectorQuery, string vectorOperator, string vectorLiteral)
         {
-            if (vectorQuery != null && vectorQuery.SearchType == SearchTypeEnum.InnerProduct)
+            if (vectorQuery != null)
             {
-                return "(-(embeddings " + vectorOperator + " " + vectorLiteral + "))";
+                switch (vectorQuery.SearchType)
+                {
+                    case SearchTypeEnum.InnerProduct:
+                        return "(-(embeddings " + vectorOperator + " " + vectorLiteral + "))";
+                    case SearchTypeEnum.CosineDistance:
+                    case SearchTypeEnum.EuclideanDistance:
+                        return "(embeddings " + vectorOperator + " " + vectorLiteral + ")";
+                }
             }
 
             return "(1.0 - (embeddings " + vectorOperator + " " + vectorLiteral + "))";
@@ -343,12 +354,16 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
 
         private double GetDistanceFromScore(VectorQuery vectorQuery, double score)
         {
-            if (vectorQuery.SearchType == SearchTypeEnum.InnerProduct)
+            switch (vectorQuery.SearchType)
             {
-                return -score;
+                case SearchTypeEnum.InnerProduct:
+                    return -score;
+                case SearchTypeEnum.CosineDistance:
+                case SearchTypeEnum.EuclideanDistance:
+                    return score;
+                default:
+                    return 1.0 - score;
             }
-
-            return 1.0 - score;
         }
 
         private string GetOrderByClause(SortOrderEnum sortOrder)
@@ -432,9 +447,9 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                         ")";
 
                 case TagConditionEnum.IsNull:
-                    return "document_key " + inOrNotIn + " (" +
+                    return "document_key " + (excluded ? "IN" : "NOT IN") + " (" +
                         "SELECT document_key FROM " + tagsTableName + " " +
-                        "WHERE key = '" + sanitizedKey + "' AND (value IS NULL OR value = '')" +
+                        "WHERE key = '" + sanitizedKey + "' AND value IS NOT NULL AND value != ''" +
                         ")";
 
                 case TagConditionEnum.IsNotNull:
