@@ -2,6 +2,7 @@ namespace RecallDb.Server
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.IO;
     using System.Text;
     using System.Threading;
@@ -1022,9 +1023,12 @@ namespace RecallDb.Server
             AuthenticationResult auth = GetAuthResult(req);
             EnumerationQuery query = new EnumerationQuery();
 
+            Stopwatch sw = Stopwatch.StartNew();
+
             if (auth.IsAdmin)
             {
                 EnumerationResult<TenantMetadata> result = await _Database.Tenants.EnumerateAsync(query).ConfigureAwait(false);
+                result.TotalMs = sw.Elapsed.TotalMilliseconds;
                 return result;
             }
             else
@@ -1038,6 +1042,7 @@ namespace RecallDb.Server
                 result.TotalRecords = list.Count;
                 result.RecordsRemaining = 0;
                 result.Objects = list;
+                result.TotalMs = sw.Elapsed.TotalMilliseconds;
                 return result;
             }
         }
@@ -1083,7 +1088,9 @@ namespace RecallDb.Server
             EnumerationQuery query = req.Data as EnumerationQuery;
             if (query == null) query = new EnumerationQuery();
 
+            Stopwatch sw = Stopwatch.StartNew();
             EnumerationResult<TenantMetadata> result = await _Database.Tenants.EnumerateAsync(query).ConfigureAwait(false);
+            result.TotalMs = sw.Elapsed.TotalMilliseconds;
             return result;
         }
 
@@ -1152,8 +1159,10 @@ namespace RecallDb.Server
             if (!ValidateTenantAccess(auth, tid))
                 return MakeError(req, 403, "Forbidden", "Access denied.");
 
+            Stopwatch sw = Stopwatch.StartNew();
             EnumerationQuery query = new EnumerationQuery();
             EnumerationResult<UserMaster> result = await _Database.Users.EnumerateAsync(tid, query).ConfigureAwait(false);
+            result.TotalMs = sw.Elapsed.TotalMilliseconds;
             return result;
         }
 
@@ -1201,7 +1210,9 @@ namespace RecallDb.Server
             EnumerationQuery query = req.Data as EnumerationQuery;
             if (query == null) query = new EnumerationQuery();
 
+            Stopwatch sw = Stopwatch.StartNew();
             EnumerationResult<UserMaster> result = await _Database.Users.EnumerateAsync(tid, query).ConfigureAwait(false);
+            result.TotalMs = sw.Elapsed.TotalMilliseconds;
             return result;
         }
 
@@ -1281,8 +1292,10 @@ namespace RecallDb.Server
             if (!ValidateTenantAccess(auth, tid))
                 return MakeError(req, 403, "Forbidden", "Access denied.");
 
+            Stopwatch sw = Stopwatch.StartNew();
             EnumerationQuery query = new EnumerationQuery();
             EnumerationResult<Credential> result = await _Database.Credentials.EnumerateAsync(tid, query).ConfigureAwait(false);
+            result.TotalMs = sw.Elapsed.TotalMilliseconds;
             return result;
         }
 
@@ -1330,7 +1343,9 @@ namespace RecallDb.Server
             EnumerationQuery query = req.Data as EnumerationQuery;
             if (query == null) query = new EnumerationQuery();
 
+            Stopwatch sw = Stopwatch.StartNew();
             EnumerationResult<Credential> result = await _Database.Credentials.EnumerateAsync(tid, query).ConfigureAwait(false);
+            result.TotalMs = sw.Elapsed.TotalMilliseconds;
             return result;
         }
 
@@ -1409,8 +1424,10 @@ namespace RecallDb.Server
             if (!ValidateTenantAccess(auth, tid))
                 return MakeError(req, 403, "Forbidden", "Access denied.");
 
+            Stopwatch sw = Stopwatch.StartNew();
             EnumerationQuery query = new EnumerationQuery();
             EnumerationResult<CollectionMetadata> result = await _Database.Collections.EnumerateAsync(tid, query).ConfigureAwait(false);
+            result.TotalMs = sw.Elapsed.TotalMilliseconds;
             return result;
         }
 
@@ -1458,7 +1475,9 @@ namespace RecallDb.Server
             EnumerationQuery query = req.Data as EnumerationQuery;
             if (query == null) query = new EnumerationQuery();
 
+            Stopwatch sw = Stopwatch.StartNew();
             EnumerationResult<CollectionMetadata> result = await _Database.Collections.EnumerateAsync(tid, query).ConfigureAwait(false);
+            result.TotalMs = sw.Elapsed.TotalMilliseconds;
             return result;
         }
 
@@ -1646,9 +1665,11 @@ namespace RecallDb.Server
             if (!ValidateTenantAccess(auth, tid))
                 return MakeError(req, 403, "Forbidden", "Access denied.");
 
+            Stopwatch sw = Stopwatch.StartNew();
             EnumerationQuery query = new EnumerationQuery();
             EnumerationResult<DocumentRecord> result = await _Database.Documents.EnumerateAsync(cid, query).ConfigureAwait(false);
             await AttachLabelsAndTagsAsync(cid, result.Objects).ConfigureAwait(false);
+            result.TotalMs = sw.Elapsed.TotalMilliseconds;
             return result;
         }
 
@@ -1722,8 +1743,10 @@ namespace RecallDb.Server
             EnumerationQuery query = req.Data as EnumerationQuery;
             if (query == null) query = new EnumerationQuery();
 
+            Stopwatch sw = Stopwatch.StartNew();
             EnumerationResult<DocumentRecord> result = await _Database.Documents.EnumerateAsync(cid, query).ConfigureAwait(false);
             await AttachLabelsAndTagsAsync(cid, result.Objects).ConfigureAwait(false);
+            result.TotalMs = sw.Elapsed.TotalMilliseconds;
             return result;
         }
 
@@ -1739,6 +1762,13 @@ namespace RecallDb.Server
             DocumentRecord doc = req.Data as DocumentRecord;
             if (doc == null)
                 return MakeError(req, 400, "Bad request", "Request body is required.");
+
+            CollectionMetadata col = await _Database.Collections.ReadAsync(tid, cid).ConfigureAwait(false);
+            if (col == null)
+                return MakeError(req, 404, "Not found", "Collection not found.");
+
+            if (doc.Embeddings != null && doc.Embeddings.Count != col.Dimensionality)
+                return MakeError(req, 400, "Bad request", "Embeddings dimensionality mismatch. Expected " + col.Dimensionality + " dimensions, but received " + doc.Embeddings.Count + ".");
 
             List<string> reqLabels = doc.Labels;
             Dictionary<string, string> reqTags = doc.Tags;
@@ -1823,6 +1853,16 @@ namespace RecallDb.Server
             List<DocumentRecord> docs = req.Data as List<DocumentRecord>;
             if (docs == null || docs.Count == 0)
                 return MakeError(req, 400, "Bad request", "Request body must contain a list of documents.");
+
+            CollectionMetadata col = await _Database.Collections.ReadAsync(tid, cid).ConfigureAwait(false);
+            if (col == null)
+                return MakeError(req, 404, "Not found", "Collection not found.");
+
+            foreach (DocumentRecord d in docs)
+            {
+                if (d.Embeddings != null && d.Embeddings.Count != col.Dimensionality)
+                    return MakeError(req, 400, "Bad request", "Embeddings dimensionality mismatch for document '" + d.DocumentKey + "'. Expected " + col.Dimensionality + " dimensions, but received " + d.Embeddings.Count + ".");
+            }
 
             Dictionary<string, List<string>> reqLabelsMap = new Dictionary<string, List<string>>();
             Dictionary<string, Dictionary<string, string>> reqTagsMap = new Dictionary<string, Dictionary<string, string>>();
@@ -1933,8 +1973,10 @@ namespace RecallDb.Server
             if (!ValidateTenantAccess(auth, tid))
                 return MakeError(req, 403, "Forbidden", "Access denied.");
 
+            Stopwatch sw = Stopwatch.StartNew();
             EnumerationQuery query = new EnumerationQuery();
             EnumerationResult<LabelRecord> result = await _Database.Labels.EnumerateAsync(cid, query).ConfigureAwait(false);
+            result.TotalMs = sw.Elapsed.TotalMilliseconds;
             return result;
         }
 
@@ -2001,8 +2043,10 @@ namespace RecallDb.Server
             if (!ValidateTenantAccess(auth, tid))
                 return MakeError(req, 403, "Forbidden", "Access denied.");
 
+            Stopwatch sw = Stopwatch.StartNew();
             EnumerationQuery query = new EnumerationQuery();
             EnumerationResult<TagRecord> result = await _Database.Tags.EnumerateAsync(cid, query).ConfigureAwait(false);
+            result.TotalMs = sw.Elapsed.TotalMilliseconds;
             return result;
         }
 
@@ -2077,8 +2121,10 @@ namespace RecallDb.Server
             if (col == null)
                 return MakeError(req, 404, "Not found", "Collection not found.");
 
+            Stopwatch sw = Stopwatch.StartNew();
             SearchResult result = await _Database.Search.SearchAsync(cid, col.Dimensionality, query).ConfigureAwait(false);
             await AttachLabelsAndTagsAsync(cid, result.Documents).ConfigureAwait(false);
+            result.TotalMs = sw.Elapsed.TotalMilliseconds;
             return result;
         }
 

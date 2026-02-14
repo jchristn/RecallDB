@@ -45,6 +45,11 @@ namespace RecallDb.Sdk.Models
         public List<T> Objects { get; set; }
 
         /// <summary>
+        /// Total time in milliseconds the query took from start to finish.
+        /// </summary>
+        public double TotalMs { get; set; }
+
+        /// <summary>
         /// Instantiate.
         /// </summary>
         public EnumerationResult()

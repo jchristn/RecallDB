@@ -119,6 +119,21 @@ namespace RecallDb.Core.Models
             }
         }
 
+        /// <summary>
+        /// Total time in milliseconds the query took from start to finish.
+        /// </summary>
+        public double TotalMs
+        {
+            get
+            {
+                return _TotalMs;
+            }
+            set
+            {
+                _TotalMs = Math.Round(value, 2);
+            }
+        }
+
         #endregion
 
         #region Private-Members
@@ -130,6 +145,7 @@ namespace RecallDb.Core.Models
         private long _TotalRecords = 0;
         private long _RecordsRemaining = 0;
         private List<T> _Objects = new List<T>();
+        private double _TotalMs = 0;
 
         #endregion
 
