@@ -198,10 +198,10 @@ export default function DocumentsBrowser() {
       key: 'DocumentKey',
       label: 'Key',
       width: '220px',
-      render: (d) => <CopyId value={d.DocumentKey} truncate={16} />,
+      render: (d) => <CopyId value={d.DocumentKey} />,
       filterValue: (d) => d.DocumentKey
     },
-    { key: 'DocumentId', label: 'Doc ID', render: (d) => d.DocumentId ? <CopyId value={d.DocumentId} truncate={16} /> : '-' },
+    { key: 'DocumentId', label: 'Doc ID', render: (d) => d.DocumentId ? <CopyId value={d.DocumentId} /> : '-' },
     { key: 'Position', label: 'Position', width: '80px' },
     { key: 'ContentType', label: 'Type', width: '80px' },
     { key: 'ContentLength', label: 'Length', width: '80px' },
