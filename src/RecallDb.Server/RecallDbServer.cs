@@ -236,11 +236,18 @@ namespace RecallDb.Server
             credential.BearerToken = "default";
             await _Database.Credentials.CreateAsync(credential).ConfigureAwait(false);
 
+            CollectionMetadata collection = new CollectionMetadata();
+            collection.Id = "default";
+            collection.TenantId = "default";
+            collection.Name = "Default Collection";
+            await _Database.Collections.CreateAsync(collection).ConfigureAwait(false);
+
             Console.WriteLine("");
             Console.WriteLine("===== FIRST RUN =====");
             Console.WriteLine("Tenant    : Default Tenant (ID: default)");
             Console.WriteLine("User      : admin@recall / password (ID: default)");
             Console.WriteLine("Credential: Bearer token: default");
+            Console.WriteLine("Collection: Default Collection (ID: default)");
             Console.WriteLine("Admin keys: " + string.Join(", ", _Settings.AdminApiKeys));
             Console.WriteLine("=====================");
             Console.WriteLine("");
