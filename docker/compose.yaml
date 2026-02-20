@@ -24,7 +24,7 @@ services:
     ports:
       - "8600:8600"
     environment:
-      RECALLDB_DB_HOST: pgvector
+      RECALLDB_DB_HOST: recalldb-pgvector
       RECALLDB_DB_PORT: "5432"
       RECALLDB_DB_NAME: recalldb
       RECALLDB_DB_USER: recalldb
