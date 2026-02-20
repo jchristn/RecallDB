@@ -4,7 +4,7 @@ import './Topbar.css'
 
 export default function Topbar({ theme, toggleTheme }) {
   const { user, tenant, isAdmin, logout } = useAuth()
-  const serverUrl = localStorage.getItem('recalldb_server_url') || 'http://localhost:8600'
+  const serverUrl = localStorage.getItem('recalldb_server_url') || window.__RECALLDB_CONFIG__?.RECALLDB_SERVER_URL || 'http://localhost:8601'
   const isTenantAdmin = user?.IsTenantAdmin || false
 
   return (

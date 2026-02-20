@@ -1,4 +1,4 @@
-const DEFAULT_API_URL = 'http://localhost:8600';
+const DEFAULT_API_URL = window.__RECALLDB_CONFIG__?.RECALLDB_SERVER_URL || 'http://localhost:8601';
 
 class RecallDbApi {
   constructor() {

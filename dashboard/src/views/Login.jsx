@@ -5,7 +5,7 @@ import ErrorModal from '../components/ErrorModal.jsx'
 
 export default function Login() {
   const [mode, setMode] = useState('token')
-  const [serverUrl, setServerUrl] = useState(localStorage.getItem('recalldb_server_url') || 'http://localhost:8600')
+  const [serverUrl, setServerUrl] = useState(localStorage.getItem('recalldb_server_url') || window.__RECALLDB_CONFIG__?.RECALLDB_SERVER_URL || 'http://localhost:8601')
   const [token, setToken] = useState('')
   const [tenantId, setTenantId] = useState('default')
   const [email, setEmail] = useState('')

@@ -47,6 +47,8 @@ services:
     container_name: recalldb-dashboard
     ports:
       - "8601:8601"
+    environment:
+      RECALLDB_SERVER_URL: "http://recalldb-dashboard:8601"
     depends_on:
       recalldb-server:
         condition: service_healthy
