@@ -47,7 +47,8 @@ namespace RecallDb.Core.Database.Postgresql.Queries
                 "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_didp ON collection_" + tableName + " (document_id, position);",
                 "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_crt ON collection_" + tableName + " (created_utc);",
                 "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_hnsw ON collection_" + tableName + " USING hnsw (embeddings vector_cosine_ops) WITH (m = 16, ef_construction = 64);",
-                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_trgm ON collection_" + tableName + " USING gin (content gin_trgm_ops);"
+                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_trgm ON collection_" + tableName + " USING gin (content gin_trgm_ops);",
+                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_fts ON collection_" + tableName + " USING gin (to_tsvector('english', COALESCE(content, '')));"
             };
         }
 

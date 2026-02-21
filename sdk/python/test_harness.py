@@ -866,6 +866,59 @@ def test_search_combined_all_filters():
 
 
 # ---------------------------------------------------------------------------
+# Test-21b: Full-Text Search
+# ---------------------------------------------------------------------------
+
+def test_search_full_text_basic():
+    resp = do_search({"FullText": {"Query": "machine learning"}, "MaxResults": 10})
+    docs = resp.get("Documents", [])
+    assert_true(len(docs) > 0, "Full-text search should return results")
+    for doc in docs:
+        assert_true(doc["Score"] > 0, "Score should be > 0")
+        assert_true(doc.get("TextScore") is not None and doc["TextScore"] > 0, "TextScore should be > 0")
+
+
+def test_search_full_text_hybrid():
+    resp = do_search({
+        "Vector": {"SearchType": "CosineSimilarity", "Embeddings": _VECTOR_EMBEDDINGS},
+        "FullText": {"Query": "machine learning", "TextWeight": 0.3},
+        "MaxResults": 10
+    })
+    docs = resp.get("Documents", [])
+    assert_true(len(docs) > 0, "Hybrid search should return results")
+    for doc in docs:
+        assert_true(doc.get("TextScore") is not None and doc["TextScore"] > 0, "TextScore should be populated")
+        assert_true(doc["Score"] > 0, "Score should be > 0 (blended)")
+
+
+def test_search_full_text_with_filters():
+    resp = do_search({
+        "FullText": {"Query": "learning"},
+        "LabelFilter": {"Required": ["science"]},
+        "Terms": {"Required": ["learning"]},
+        "MaxResults": 10
+    })
+    docs = resp.get("Documents", [])
+    assert_true(len(docs) > 0, "Full-text with filters should return results")
+    for doc in docs:
+        assert_true("science" in doc.get("Labels", []), "Document should have science label")
+
+
+def test_search_full_text_no_match():
+    resp = do_search({"FullText": {"Query": "xyznonexistentterm12345"}, "MaxResults": 10})
+    assert_true(resp.get("TotalRecords", 0) == 0, "Should return 0 results")
+    assert_true(len(resp.get("Documents", [])) == 0, "Documents list should be empty")
+
+
+def test_search_full_text_backward_compat():
+    resp = do_search({"Vector": {"SearchType": "CosineSimilarity", "Embeddings": _VECTOR_EMBEDDINGS}, "MaxResults": 10})
+    docs = resp.get("Documents", [])
+    assert_true(len(docs) > 0, "Vector-only search should still work")
+    for doc in docs:
+        assert_true(doc["Score"] > 0, "Score should be > 0")
+
+
+# ---------------------------------------------------------------------------
 # Test-22: Search Result Validation
 # ---------------------------------------------------------------------------
 
@@ -1373,6 +1426,13 @@ def main():
     run_test("Search combined: label and tag", test_search_combined_label_and_tag)
     run_test("Search combined: terms and label", test_search_combined_terms_and_label)
     run_test("Search combined: all filters", test_search_combined_all_filters)
+
+    # 21b. Full-Text Search
+    run_test("Search full-text: basic query", test_search_full_text_basic)
+    run_test("Search full-text: hybrid vector + text", test_search_full_text_hybrid)
+    run_test("Search full-text: with filters", test_search_full_text_with_filters)
+    run_test("Search full-text: no match", test_search_full_text_no_match)
+    run_test("Search full-text: backward compat", test_search_full_text_backward_compat)
 
     # 22. Search Result Validation
     run_test("Search validation: result fields", test_search_result_fields)

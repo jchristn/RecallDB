@@ -520,16 +520,29 @@ class RecallDbClient {
 
     /**
      * Search documents in a collection.
+     *
+     * Supports three search modes:
+     * - Vector-only: provide Vector without FullText.
+     * - Full-text-only: provide FullText without Vector.
+     * - Hybrid: provide both Vector and FullText for blended scoring.
+     *
      * @param {string} tenantId - Tenant ID.
      * @param {string} collectionId - Collection ID.
      * @param {Object} query - Search query parameters.
-     * @param {string} [query.SortOrder] - Sort order (e.g. "ScoreDescending").
+     * @param {string} [query.SortOrder] - Sort order (e.g. "ScoreDescending", "TextScoreDescending").
      * @param {Object} [query.Vector] - Vector query with SearchType, Embeddings, MinimumScore, etc.
+     * @param {Object} [query.FullText] - Full-text search query parameters.
+     * @param {string} query.FullText.Query - Search text (required). Processed with stemming and stop word removal.
+     * @param {string} [query.FullText.SearchType] - Ranking function: "TsRank" (default) or "TsRankCd" (cover density).
+     * @param {string} [query.FullText.Language] - Text search configuration, default "english".
+     * @param {number} [query.FullText.Normalization] - ts_rank normalization bitmask, default 32 (0-1 range).
+     * @param {number} [query.FullText.MinimumScore] - Minimum text relevance score threshold.
+     * @param {number} [query.FullText.TextWeight] - Weight for text score in hybrid mode (0.0-1.0, default 0.5).
      * @param {Object} [query.LabelFilter] - Label filter with Required and Excluded arrays.
      * @param {Object} [query.TagFilter] - Tag filter with Required and Excluded condition arrays.
      * @param {Object} [query.Terms] - Terms filter for content matching, e.g. { Required: ["term1"], Excluded: ["term2"] }.
      * @param {number} [query.MaxResults] - Maximum results (1-1000, default 10).
-     * @returns {Promise<Object>} Search result.
+     * @returns {Promise<Object>} Search result. Documents include Score and, when FullText is used, TextScore (number).
      */
     async search(tenantId, collectionId, query) {
         return this._post(

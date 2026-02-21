@@ -1255,7 +1255,7 @@ Delete a tag by ID.
 
 ### `POST /v1.0/tenants/{tid}/collections/{cid}/search`
 
-Perform vector similarity search within a collection. Supports multiple search types, filtering by labels, tags, date ranges, content terms, and document IDs.
+Perform vector similarity, full-text, or hybrid search within a collection. Supports multiple search types, filtering by labels, tags, date ranges, content terms, and document IDs.
 
 **Auth:** Authenticated
 
@@ -1271,6 +1271,14 @@ Perform vector similarity search within a collection. Supports multiple search t
     "MaximumScore": null,
     "MinimumDistance": null,
     "MaximumDistance": null
+  },
+  "FullText": {
+    "Query": "search terms",
+    "SearchType": "TsRank",
+    "Language": "english",
+    "Normalization": 32,
+    "MinimumScore": 0.01,
+    "TextWeight": 0.5
   },
   "LabelFilter": {
     "Required": ["important"],
@@ -1322,6 +1330,7 @@ Perform vector similarity search within a collection. Supports multiple search t
       "Embeddings": [0.123, -0.456, 0.789],
       "CreatedUtc": "2025-01-15T12:00:00Z",
       "Score": 0.95,
+      "TextScore": 0.62,
       "Labels": ["important", "ml"],
       "Tags": { "source": "arxiv", "year": "2024" }
     }
@@ -1329,6 +1338,26 @@ Perform vector similarity search within a collection. Supports multiple search t
   "TotalMs": 12.45
 }
 ```
+
+---
+
+## Search Modes
+
+The search endpoint operates in one of three modes depending on which query parameters are provided.
+
+**Vector-only** — provide only the `Vector` field (no `FullText`):
+- `Score` = vector similarity (or distance, depending on `SearchType`)
+- `TextScore` is not populated
+
+**Full-text-only** — provide only the `FullText` field (no `Vector`):
+- `Score` = text relevance score from PostgreSQL full-text ranking
+- `TextScore` = text relevance score (same as `Score` in this mode)
+
+**Hybrid** — provide both `Vector` and `FullText`:
+- `Score` = weighted blend of vector and text scores
+- `TextScore` = text relevance score component
+- Formula: `Score = (1 - TextWeight) * vectorScore + TextWeight * textScore`
+- `TextWeight` (set in `FullTextQuery`) controls the balance: `0.0` is pure vector, `1.0` is pure full-text, `0.5` (default) weights them equally
 
 ---
 
@@ -1340,6 +1369,7 @@ Perform vector similarity search within a collection. Supports multiple search t
 |-------|------|---------|-------------|
 | `SortOrder` | string | `ScoreDescending` | Result ordering (see SortOrderEnum) |
 | `Vector` | VectorQuery | null | Vector search parameters |
+| `FullText` | FullTextQuery | null | Full-text search parameters for content relevance scoring |
 | `LabelFilter` | LabelFilter | null | Include/exclude by label |
 | `TagFilter` | TagFilterSet | null | Include/exclude by tag conditions |
 | `Terms` | TermsFilter | null | Include/exclude by content substring (case-insensitive) |
@@ -1352,6 +1382,17 @@ Perform vector similarity search within a collection. Supports multiple search t
 | `MaximumDistance` | double | null | Maximum distance threshold |
 | `MaxResults` | int | 10 | Results per page (1-1000) |
 | `ContinuationToken` | string | null | Token for next page of results |
+
+### FullTextQuery Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `Query` | string | required | The search text to match against content |
+| `SearchType` | string | `TsRank` | Ranking function: TsRank or TsRankCd (see TextSearchTypeEnum) |
+| `Language` | string | `english` | Text search configuration (PostgreSQL text search language) |
+| `Normalization` | int | `32` | ts_rank normalization bitmask (0, 1, 2, 32) |
+| `MinimumScore` | double | null | Minimum text relevance score threshold |
+| `TextWeight` | double | `0.5` | Weight for text score in hybrid mode (0.0-1.0) |
 
 ### EnumerationQuery Fields
 
@@ -1398,6 +1439,8 @@ Perform vector similarity search within a collection. Supports multiple search t
 | `DistanceDescending` | Longest distance first |
 | `CreatedAscending` | Oldest first |
 | `CreatedDescending` | Newest first |
+| `TextScoreAscending` | Lowest text relevance score first |
+| `TextScoreDescending` | Highest text relevance score first |
 
 **EnumerationOrderEnum** — used in `EnumerationQuery.Ordering`:
 
@@ -1415,6 +1458,13 @@ Perform vector similarity search within a collection. Supports multiple search t
 | `EuclideanSimilarity` | Euclidean similarity (higher = more similar) |
 | `EuclideanDistance` | Euclidean distance (lower = more similar) |
 | `InnerProduct` | Inner product |
+
+**TextSearchTypeEnum** — used in `FullTextQuery.SearchType`:
+
+| Value | Description |
+|-------|-------------|
+| `TsRank` | Standard scoring: term frequency with length normalization |
+| `TsRankCd` | Cover density ranking: rewards term proximity |
 
 **ContentTypeEnum** — used in `DocumentRecord.ContentType`:
 

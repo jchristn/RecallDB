@@ -121,6 +121,23 @@ namespace RecallDb.Core.Models
         }
 
         /// <summary>
+        /// Full-text search query parameters for content relevance scoring.
+        /// When provided without Vector, performs a standalone full-text search.
+        /// When provided with Vector, performs a hybrid search combining both scores.
+        /// </summary>
+        public FullTextQuery FullText
+        {
+            get
+            {
+                return _FullText;
+            }
+            set
+            {
+                _FullText = value;
+            }
+        }
+
+        /// <summary>
         /// Terms filter for including or excluding documents by content terms.
         /// </summary>
         public TermsFilter Terms
@@ -240,6 +257,7 @@ namespace RecallDb.Core.Models
         private LabelFilter _LabelFilter = null;
         private TagFilterSet _TagFilter = null;
         private VectorQuery _Vector = null;
+        private FullTextQuery _FullText = null;
         private TermsFilter _Terms = null;
         private double? _MinimumScore = null;
         private double? _MaximumScore = null;

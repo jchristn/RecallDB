@@ -674,6 +674,49 @@ async function testSearchCombinedAllFilters() {
 }
 
 // ---------------------------------------------------------------------------
+// Test-21b: Full-Text Search
+// ---------------------------------------------------------------------------
+
+async function testSearchFullTextBasic() {
+    const r = await doSearch({ FullText: { Query: "machine learning" }, MaxResults: 10 });
+    const docs = r.Documents || [];
+    assertTrue(docs.length > 0, "Full-text search should return results");
+    for (const doc of docs) {
+        assertTrue(doc.Score > 0, "Score should be > 0");
+        assertTrue(doc.TextScore != null && doc.TextScore > 0, "TextScore should be > 0");
+    }
+}
+
+async function testSearchFullTextHybrid() {
+    const r = await doSearch({ Vector: { SearchType: "CosineSimilarity", Embeddings: VECTOR_EMBEDDINGS }, FullText: { Query: "machine learning", TextWeight: 0.3 }, MaxResults: 10 });
+    const docs = r.Documents || [];
+    assertTrue(docs.length > 0, "Hybrid search should return results");
+    for (const doc of docs) {
+        assertTrue(doc.TextScore != null && doc.TextScore > 0, "TextScore should be populated");
+        assertTrue(doc.Score > 0, "Score should be > 0 (blended)");
+    }
+}
+
+async function testSearchFullTextWithFilters() {
+    const r = await doSearch({ FullText: { Query: "learning" }, LabelFilter: { Required: ["science"] }, Terms: { Required: ["learning"] }, MaxResults: 10 });
+    const docs = r.Documents || [];
+    assertTrue(docs.length > 0, "Full-text with filters should return results");
+}
+
+async function testSearchFullTextNoMatch() {
+    const r = await doSearch({ FullText: { Query: "xyznonexistentterm12345" }, MaxResults: 10 });
+    assertEqual(0, r.TotalRecords || 0, "Should return 0 results");
+    assertEqual(0, (r.Documents || []).length, "Documents list should be empty");
+}
+
+async function testSearchFullTextBackwardCompat() {
+    const r = await doSearch({ Vector: { SearchType: "CosineSimilarity", Embeddings: VECTOR_EMBEDDINGS }, MaxResults: 10 });
+    const docs = r.Documents || [];
+    assertTrue(docs.length > 0, "Vector-only search should still work");
+    for (const doc of docs) assertTrue(doc.Score > 0, "Score should be > 0");
+}
+
+// ---------------------------------------------------------------------------
 // Test-22: Search Result Validation
 // ---------------------------------------------------------------------------
 
@@ -1007,6 +1050,13 @@ async function main() {
     await runTest("Search combined: label and tag", testSearchCombinedLabelAndTag);
     await runTest("Search combined: terms and label", testSearchCombinedTermsAndLabel);
     await runTest("Search combined: all filters", testSearchCombinedAllFilters);
+
+    // 21b. Full-Text Search
+    await runTest("Search full-text: basic query", testSearchFullTextBasic);
+    await runTest("Search full-text: hybrid vector + text", testSearchFullTextHybrid);
+    await runTest("Search full-text: with filters", testSearchFullTextWithFilters);
+    await runTest("Search full-text: no match", testSearchFullTextNoMatch);
+    await runTest("Search full-text: backward compat", testSearchFullTextBackwardCompat);
 
     // 22. Search Result Validation
     await runTest("Search validation: result fields", testSearchResultFields);

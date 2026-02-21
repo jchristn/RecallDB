@@ -46,6 +46,13 @@ namespace RecallDb.Sdk.Models
         public VectorQuery Vector { get; set; }
 
         /// <summary>
+        /// Full-text search query parameters for content relevance scoring.
+        /// When provided without Vector, performs a standalone full-text search.
+        /// When provided with Vector, performs a hybrid search combining both scores.
+        /// </summary>
+        public FullTextQuery FullText { get; set; }
+
+        /// <summary>
         /// Terms filter for including or excluding documents by content terms.
         /// </summary>
         public TermsFilter Terms { get; set; }

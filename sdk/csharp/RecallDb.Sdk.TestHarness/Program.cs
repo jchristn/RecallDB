@@ -209,6 +209,18 @@ namespace RecallDb.Sdk.TestHarness
             await RunTest("Search combined: terms and label", TestSearchCombinedTermsAndLabel);
             await RunTest("Search combined: all filters", TestSearchCombinedAllFilters);
 
+            // 21b. Full-Text Search
+            await RunTest("Search full-text: basic query", TestSearchFullTextBasic);
+            await RunTest("Search full-text: TsRankCd scoring", TestSearchFullTextTsRankCd);
+            await RunTest("Search full-text: hybrid vector + text", TestSearchFullTextHybrid);
+            await RunTest("Search full-text: minimum score threshold", TestSearchFullTextMinimumScore);
+            await RunTest("Search full-text: with terms filter", TestSearchFullTextWithTerms);
+            await RunTest("Search full-text: with label filter", TestSearchFullTextWithLabels);
+            await RunTest("Search full-text: no match", TestSearchFullTextNoMatch);
+            await RunTest("Search full-text: sort text score descending", TestSearchFullTextSortDescending);
+            await RunTest("Search full-text: sort text score ascending", TestSearchFullTextSortAscending);
+            await RunTest("Search full-text: backward compat vector-only", TestSearchFullTextBackwardCompat);
+
             // 22. Search Result Validation
             await RunTest("Search validation: result fields", TestSearchResultFields);
             await RunTest("Search validation: document fields", TestSearchDocumentFields);
@@ -1465,6 +1477,161 @@ namespace RecallDb.Sdk.TestHarness
                 createdBefore: DateTime.UtcNow.AddHours(1)
             )).ConfigureAwait(false);
             AssertTrue(result.Documents.Count > 0, "Combined all filters should return results");
+        }
+
+        #endregion
+
+        #region Test-21b-Full-Text-Search
+
+        private static SearchQuery MakeFullTextQuery(
+            string query,
+            string searchType = "TsRank",
+            string language = "english",
+            int normalization = 32,
+            double? minimumScore = null,
+            double textWeight = 0.5,
+            string sortOrder = null,
+            int maxResults = 10,
+            List<float> embeddings = null,
+            string vectorSearchType = null,
+            LabelFilter labelFilter = null,
+            TermsFilter termsFilter = null)
+        {
+            SearchQuery sq = new SearchQuery();
+            sq.MaxResults = maxResults;
+            if (sortOrder != null) sq.SortOrder = sortOrder;
+            sq.LabelFilter = labelFilter;
+            sq.Terms = termsFilter;
+
+            sq.FullText = new FullTextQuery();
+            sq.FullText.Query = query;
+            sq.FullText.SearchType = searchType;
+            sq.FullText.Language = language;
+            sq.FullText.Normalization = normalization;
+            sq.FullText.MinimumScore = minimumScore;
+            sq.FullText.TextWeight = textWeight;
+
+            if (embeddings != null)
+            {
+                sq.Vector = new VectorQuery();
+                sq.Vector.SearchType = vectorSearchType ?? "CosineSimilarity";
+                sq.Vector.Embeddings = embeddings;
+            }
+
+            return sq;
+        }
+
+        private static async Task TestSearchFullTextBasic()
+        {
+            SearchResult result = await DoSearch(MakeFullTextQuery("machine learning")).ConfigureAwait(false);
+            AssertTrue(result.Documents.Count > 0, "Full-text search should return results");
+            foreach (DocumentRecord doc in result.Documents)
+            {
+                AssertTrue(doc.Score > 0, "Score should be > 0");
+                AssertTrue(doc.TextScore.HasValue && doc.TextScore.Value > 0, "TextScore should be > 0");
+                AssertTrue(Math.Abs(doc.Score - doc.TextScore.Value) < 0.0001, "Score should equal TextScore in full-text-only mode");
+            }
+        }
+
+        private static async Task TestSearchFullTextTsRankCd()
+        {
+            SearchResult result = await DoSearch(MakeFullTextQuery("neural networks image", searchType: "TsRankCd")).ConfigureAwait(false);
+            AssertTrue(result.Documents.Count > 0, "TsRankCd search should return results");
+            foreach (DocumentRecord doc in result.Documents)
+            {
+                AssertTrue(doc.TextScore.HasValue && doc.TextScore.Value > 0, "TextScore should be > 0");
+            }
+        }
+
+        private static async Task TestSearchFullTextHybrid()
+        {
+            SearchResult result = await DoSearch(MakeFullTextQuery(
+                "machine learning",
+                embeddings: SearchEmbeddings(),
+                textWeight: 0.3)).ConfigureAwait(false);
+            AssertTrue(result.Documents.Count > 0, "Hybrid search should return results");
+            foreach (DocumentRecord doc in result.Documents)
+            {
+                AssertTrue(doc.TextScore.HasValue && doc.TextScore.Value > 0, "TextScore should be populated in hybrid mode");
+                AssertTrue(doc.Score > 0, "Score should be > 0 (blended)");
+            }
+        }
+
+        private static async Task TestSearchFullTextMinimumScore()
+        {
+            SearchResult result = await DoSearch(MakeFullTextQuery("learning", minimumScore: 0.01)).ConfigureAwait(false);
+            foreach (DocumentRecord doc in result.Documents)
+            {
+                AssertTrue(doc.TextScore.HasValue && doc.TextScore.Value >= 0.01, "TextScore should be >= minimum threshold");
+            }
+        }
+
+        private static async Task TestSearchFullTextWithTerms()
+        {
+            TermsFilter terms = new TermsFilter();
+            terms.Required = new List<string> { "Machine" };
+            SearchResult result = await DoSearch(MakeFullTextQuery("learning", termsFilter: terms)).ConfigureAwait(false);
+            AssertTrue(result.Documents.Count > 0, "Full-text with terms should return results");
+            foreach (DocumentRecord doc in result.Documents)
+            {
+                AssertTrue(doc.Content.Contains("Machine", StringComparison.OrdinalIgnoreCase), "Content should contain required term");
+            }
+        }
+
+        private static async Task TestSearchFullTextWithLabels()
+        {
+            LabelFilter lf = new LabelFilter();
+            lf.Required = new List<string> { "science" };
+            SearchResult result = await DoSearch(MakeFullTextQuery("learning", labelFilter: lf)).ConfigureAwait(false);
+            AssertTrue(result.Documents.Count > 0, "Full-text with label filter should return results");
+            foreach (DocumentRecord doc in result.Documents)
+            {
+                AssertTrue(doc.Labels.Contains("science"), "Document should have science label");
+            }
+        }
+
+        private static async Task TestSearchFullTextNoMatch()
+        {
+            SearchResult result = await DoSearch(MakeFullTextQuery("xyznonexistentterm12345")).ConfigureAwait(false);
+            AssertEqual(0, (int)result.TotalRecords, "Full-text search with no match should return 0 results");
+            AssertTrue(result.Documents.Count == 0, "Documents list should be empty");
+        }
+
+        private static async Task TestSearchFullTextSortDescending()
+        {
+            SearchResult result = await DoSearch(MakeFullTextQuery("learning", sortOrder: "TextScoreDescending")).ConfigureAwait(false);
+            AssertTrue(result.Documents.Count > 0, "Should return results");
+            double prev = double.MaxValue;
+            foreach (DocumentRecord doc in result.Documents)
+            {
+                double ts = doc.TextScore ?? 0;
+                AssertTrue(ts <= prev, "TextScore should be in descending order");
+                prev = ts;
+            }
+        }
+
+        private static async Task TestSearchFullTextSortAscending()
+        {
+            SearchResult result = await DoSearch(MakeFullTextQuery("learning", sortOrder: "TextScoreAscending")).ConfigureAwait(false);
+            AssertTrue(result.Documents.Count > 0, "Should return results");
+            double prev = -1;
+            foreach (DocumentRecord doc in result.Documents)
+            {
+                double ts = doc.TextScore ?? 0;
+                AssertTrue(ts >= prev, "TextScore should be in ascending order");
+                prev = ts;
+            }
+        }
+
+        private static async Task TestSearchFullTextBackwardCompat()
+        {
+            SearchResult result = await DoSearch(MakeSearchQuery(searchType: "CosineSimilarity", maxResults: 10)).ConfigureAwait(false);
+            AssertTrue(result.Documents.Count > 0, "Vector-only search should still work");
+            foreach (DocumentRecord doc in result.Documents)
+            {
+                AssertTrue(doc.Score > 0, "Score should be > 0");
+                AssertTrue(!doc.TextScore.HasValue || doc.TextScore.Value == 0, "TextScore should be null or 0 in vector-only mode");
+            }
         }
 
         #endregion

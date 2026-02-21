@@ -67,16 +67,67 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
             string labelsTableName = tableName + "_labels";
             string tagsTableName = tableName + "_tags";
 
+            // Determine search modes
+            bool hasVector = query.Vector != null && query.Vector.Embeddings != null && query.Vector.Embeddings.Count > 0;
+            bool hasFullText = query.FullText != null && !string.IsNullOrWhiteSpace(query.FullText.Query);
+
             string vectorOperator = GetVectorOperator(query.Vector);
             string vectorLiteral = FormatVectorLiteral(query.Vector, dimensionality);
             string scoreExpression = GetScoreExpression(query.Vector, vectorOperator, vectorLiteral);
             string distanceExpression = GetDistanceExpression(vectorOperator, vectorLiteral);
 
-            // Build SELECT clause
+            // Full-text search setup
+            string ftsScoreExpression = null;
+            string ftsMatchCondition = null;
+
+            if (hasFullText)
+            {
+                string sanitizedQuery = _Driver.Sanitize(query.FullText.Query);
+                string language = _Driver.Sanitize(query.FullText.Language ?? "english");
+                string normalization = query.FullText.Normalization.ToString(CultureInfo.InvariantCulture);
+                string rankFunction = query.FullText.SearchType == TextSearchTypeEnum.TsRankCd
+                    ? "ts_rank_cd" : "ts_rank";
+
+                string tsvector = "to_tsvector('" + language + "', COALESCE(content, ''))";
+                string tsquery = "plainto_tsquery('" + language + "', '" + sanitizedQuery + "')";
+
+                ftsScoreExpression = rankFunction + "(" + tsvector + ", " + tsquery + ", " + normalization + ")";
+                ftsMatchCondition = tsvector + " @@ " + tsquery;
+            }
+
+            // Build SELECT clause based on search mode
             StringBuilder sb = new StringBuilder();
-            sb.Append("SELECT " + _SelectColumns + ", ");
-            sb.Append(distanceExpression + " AS distance, ");
-            sb.Append(scoreExpression + " AS score ");
+
+            if (hasVector && hasFullText)
+            {
+                // Hybrid mode: weighted blend of vector and text scores
+                double textWeight = Math.Clamp(query.FullText.TextWeight, 0.0, 1.0);
+                double vectorWeight = 1.0 - textWeight;
+                string vectorScoreExpr = GetScoreExpression(query.Vector, vectorOperator, vectorLiteral);
+
+                sb.Append("SELECT " + _SelectColumns + ", ");
+                sb.Append(distanceExpression + " AS distance, ");
+                sb.Append(ftsScoreExpression + " AS text_score, ");
+                sb.Append("(" + vectorWeight.ToString(CultureInfo.InvariantCulture) + " * " + vectorScoreExpr
+                    + " + " + textWeight.ToString(CultureInfo.InvariantCulture) + " * " + ftsScoreExpression
+                    + ") AS score ");
+            }
+            else if (hasFullText)
+            {
+                // Full-text-only mode
+                sb.Append("SELECT " + _SelectColumns + ", ");
+                sb.Append("0.0 AS distance, ");
+                sb.Append(ftsScoreExpression + " AS text_score, ");
+                sb.Append(ftsScoreExpression + " AS score ");
+            }
+            else
+            {
+                // Vector-only mode (existing behavior, unchanged)
+                sb.Append("SELECT " + _SelectColumns + ", ");
+                sb.Append(distanceExpression + " AS distance, ");
+                sb.Append(scoreExpression + " AS score ");
+            }
+
             sb.Append("FROM " + tableName);
 
             // Build WHERE clause
@@ -158,6 +209,12 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                         }
                     }
                 }
+            }
+
+            // Full-text search match condition
+            if (hasFullText)
+            {
+                conditions.Add(ftsMatchCondition);
             }
 
             if (query.Terms != null)
@@ -255,6 +312,14 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                 {
                     documents = documents.Where(d => GetDistanceFromScore(query.Vector, d.Score) <= maxDist.Value).ToList();
                 }
+            }
+
+            // Apply full-text minimum score threshold
+            if (hasFullText && query.FullText.MinimumScore.HasValue)
+            {
+                documents = documents
+                    .Where(d => d.TextScore.HasValue && d.TextScore.Value >= query.FullText.MinimumScore.Value)
+                    .ToList();
             }
 
             // Build result
@@ -382,6 +447,10 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                     return "created_utc ASC";
                 case SortOrderEnum.CreatedDescending:
                     return "created_utc DESC";
+                case SortOrderEnum.TextScoreAscending:
+                    return "text_score ASC";
+                case SortOrderEnum.TextScoreDescending:
+                    return "text_score DESC";
                 default:
                     return "score DESC";
             }

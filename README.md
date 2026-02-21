@@ -36,6 +36,7 @@ Most vector databases store embeddings and call it a day. RecallDB stores the **
 | **Key-value tags** | Structured metadata with 10 filter operators (equals, contains, range, null checks) |
 | **SHA256 hashes + ETags** | Deduplication, cache invalidation, and change detection out of the box |
 | **Content length** | Token budget awareness without recomputing |
+| **Full-text search** | TF-IDF-like relevance scoring with ts_rank &mdash; find documents by lexical relevance, not just semantic similarity |
 
 This isn't a thin wrapper around pgvector. It's an **opinionated persistence schema** that normalizes how AI-ready data is stored, indexed, and retrieved, so you stop reinventing the storage layer for every project.
 
@@ -44,7 +45,8 @@ This isn't a thin wrapper around pgvector. It's an **opinionated persistence sch
 - **Multi-tenant isolation** &mdash; tenants, users, credentials, and collections are fully scoped. One deployment serves many clients.
 - **Per-collection vector tables** &mdash; each collection gets its own Postgres table with dedicated HNSW indexes (`m=16`, `ef_construction=64`). No noisy-neighbor problems.
 - **5 distance metrics** &mdash; cosine similarity, cosine distance, Euclidean similarity, Euclidean distance, inner product. Pick what fits your embedding model.
-- **Compound search queries** &mdash; combine vector similarity, label filters, tag conditions, content term matching, and date ranges in a single request.
+- **Three search modes** &mdash; vector similarity (nearest-neighbor), full-text relevance (ts_rank/ts_rank_cd scored), and hybrid (blended vector + full-text scoring with configurable weights). Mix and match in a single request.
+- **Compound search queries** &mdash; combine any search mode with label filters, tag conditions, content term matching, and date ranges in a single request.
 - **Bring your own embeddings** &mdash; no vendor lock-in to any embedding provider. Use OpenAI, Cohere, Ollama, or anything that outputs a float array.
 - **40+ REST endpoints** &mdash; full CRUD for tenants, users, credentials, collections, documents, labels, and tags.
 - **SDKs in C#, Python, and JavaScript** &mdash; typed clients ready to drop into your stack.
@@ -111,6 +113,22 @@ curl -X POST http://localhost:8600/v1.0/tenants/ten_default/collections/col_defa
   }'
 ```
 
+### Full-Text Search
+
+```bash
+curl -X POST http://localhost:8600/v1.0/tenants/default/collections/default/search \
+  -H "Authorization: Bearer default" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "FullText": {
+      "Query": "machine learning neural networks",
+      "SearchType": "TsRank",
+      "MinimumScore": 0.01
+    },
+    "MaxResults": 10
+  }'
+```
+
 ## Search
 
 RecallDB search goes well beyond nearest-neighbor. A single query can combine any of these filters:
@@ -122,6 +140,10 @@ RecallDB search goes well beyond nearest-neighbor. A single query can combine an
 **Tags** &mdash; filter on key-value metadata using `Equals`, `NotEquals`, `GreaterThan`, `LessThan`, `Contains`, `ContainsNot`, `StartsWith`, `EndsWith`, `IsNull`, `IsNotNull`.
 
 **Terms** &mdash; case-insensitive substring matching on document content. Require terms, exclude terms, or both.
+
+**Full-Text Search** &mdash; scored full-text search powered by Postgres `tsvector` and `tsquery`. Ranking uses `ts_rank` or `ts_rank_cd` for TF-IDF-like relevance scoring. Includes stemming, stop word removal, and configurable language support. Set a `MinimumScore` threshold to filter low-relevance results. This is distinct from the `Terms` substring filter: `Terms` does literal substring matching with no ranking, while `FullText` scores and ranks results by lexical relevance.
+
+**Hybrid Search** &mdash; combine vector similarity and full-text relevance in a single query with configurable blending weights. The final score is a weighted sum of the normalized vector score and full-text rank, letting you tune how much semantic vs. lexical relevance influences result ordering.
 
 **Date ranges** &mdash; `CreatedBefore` and `CreatedAfter` for temporal scoping.
 
@@ -135,6 +157,8 @@ RecallDB search goes well beyond nearest-neighbor. A single query can combine an
 
 ```csharp
 var client = new RecallDbClient("http://localhost:8600", "recalldbadmin");
+
+// Vector search
 var results = await client.SearchAsync("ten_default", "col_default", new SearchQuery
 {
     Vector = new VectorQuery
@@ -142,6 +166,18 @@ var results = await client.SearchAsync("ten_default", "col_default", new SearchQ
         SearchType = SearchTypeEnum.CosineSimilarity,
         Embeddings = new List<float> { 0.1f, 0.2f, 0.3f },
         MinimumScore = 0.7
+    },
+    MaxResults = 10
+});
+
+// Full-text search
+var ftResults = await client.SearchAsync("ten_default", "col_default", new SearchQuery
+{
+    FullText = new FullTextQuery
+    {
+        Query = "machine learning neural networks",
+        SearchType = FullTextSearchTypeEnum.TsRank,
+        MinimumScore = 0.01
     },
     MaxResults = 10
 });

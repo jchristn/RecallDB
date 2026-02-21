@@ -41,6 +41,18 @@ namespace RecallDb.Core.Enums
         /// Sort by creation date descending.
         /// </summary>
         [EnumMember(Value = "CreatedDescending")]
-        CreatedDescending
+        CreatedDescending,
+
+        /// <summary>
+        /// Sort by text relevance score ascending.
+        /// </summary>
+        [EnumMember(Value = "TextScoreAscending")]
+        TextScoreAscending,
+
+        /// <summary>
+        /// Sort by text relevance score descending.
+        /// </summary>
+        [EnumMember(Value = "TextScoreDescending")]
+        TextScoreDescending
     }
 }

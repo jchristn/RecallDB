@@ -98,6 +98,7 @@ CREATE INDEX IF NOT EXISTS idx_col_default_didp ON collection_default (document_
 CREATE INDEX IF NOT EXISTS idx_col_default_crt ON collection_default (created_utc);
 CREATE INDEX IF NOT EXISTS idx_col_default_hnsw ON collection_default USING hnsw (embeddings vector_cosine_ops) WITH (m = 16, ef_construction = 64);
 CREATE INDEX IF NOT EXISTS idx_col_default_trgm ON collection_default USING gin (content gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_col_default_fts ON collection_default USING gin (to_tsvector('english', COALESCE(content, '')));
 
 -- Labels table (collection_default_labels)
 CREATE TABLE IF NOT EXISTS collection_default_labels (

@@ -39,8 +39,15 @@ const SORT_ORDERS = [
   { value: 'ScoreAscending', label: 'Score Ascending' },
   { value: 'DistanceDescending', label: 'Distance Descending' },
   { value: 'DistanceAscending', label: 'Distance Ascending' },
+  { value: 'TextScoreDescending', label: 'Text Score Descending' },
+  { value: 'TextScoreAscending', label: 'Text Score Ascending' },
   { value: 'CreatedDescending', label: 'Created Descending' },
   { value: 'CreatedAscending', label: 'Created Ascending' }
+]
+
+const TEXT_SEARCH_TYPES = [
+  { value: 'TsRank', label: 'TsRank (Term Frequency)' },
+  { value: 'TsRankCd', label: 'TsRankCd (Cover Density)' }
 ]
 
 function parseCommaSep(str) {
@@ -50,7 +57,8 @@ function parseCommaSep(str) {
 
 function buildQuery({ embeddings, searchType, minScore, maxScore, minDistance, maxDistance,
   requiredLabels, excludedLabels, requiredTags, excludedTags, requiredTerms, excludedTerms,
-  sortOrder, maxResults, createdBefore, createdAfter, documentIds }) {
+  sortOrder, maxResults, createdBefore, createdAfter, documentIds,
+  fullTextQuery, fullTextSearchType, fullTextLanguage, fullTextNormalization, fullTextMinScore, fullTextWeight }) {
   const query = {
     SortOrder: sortOrder,
     MaxResults: parseInt(maxResults) || 10
@@ -95,6 +103,18 @@ function buildQuery({ embeddings, searchType, minScore, maxScore, minDistance, m
     query.Terms = {}
     if (reqTerms.length > 0) query.Terms.Required = reqTerms
     if (excTerms.length > 0) query.Terms.Excluded = excTerms
+  }
+
+  if (fullTextQuery && fullTextQuery.trim()) {
+    query.FullText = {
+      Query: fullTextQuery.trim(),
+      SearchType: fullTextSearchType || 'TsRank',
+      Language: fullTextLanguage || 'english',
+      Normalization: parseInt(fullTextNormalization) || 32,
+      TextWeight: parseFloat(fullTextWeight) || 0.5
+    }
+    const ftMinScore = parseFloat(fullTextMinScore)
+    if (!isNaN(ftMinScore)) query.FullText.MinimumScore = ftMinScore
   }
 
   return query
@@ -226,6 +246,12 @@ function SearchTab({ tenantId, collectionId }) {
   const removeLabel = (setter, index) => setter(prev => prev.filter((_, i) => i !== index))
   const [requiredTerms, setRequiredTerms] = useState('')
   const [excludedTerms, setExcludedTerms] = useState('')
+  const [fullTextQuery, setFullTextQuery] = useState('')
+  const [fullTextSearchType, setFullTextSearchType] = useState('TsRank')
+  const [fullTextLanguage, setFullTextLanguage] = useState('english')
+  const [fullTextNormalization, setFullTextNormalization] = useState(32)
+  const [fullTextMinScore, setFullTextMinScore] = useState('')
+  const [fullTextWeight, setFullTextWeight] = useState(0.5)
   const [sortOrder, setSortOrder] = useState('ScoreDescending')
   const [maxResults, setMaxResults] = useState(10)
   const [createdBefore, setCreatedBefore] = useState('')
@@ -255,11 +281,13 @@ function SearchTab({ tenantId, collectionId }) {
   const embeddingsEmpty = parsedEmbeddings.length === 0
   const embeddingsMismatch = dimensionality && parsedEmbeddings.length > 0 && parsedEmbeddings.length !== dimensionality
 
+  const hasFullTextQuery = fullTextQuery.trim().length > 0
+
   const handleSearch = async (e) => {
     e.preventDefault()
     setError(null)
-    if (embeddingsEmpty) {
-      setError(new Error('Embeddings are required. Please provide a comma-separated list of floats matching the collection dimensionality' + (dimensionality ? ` (${dimensionality})` : '') + '.'))
+    if (embeddingsEmpty && !hasFullTextQuery) {
+      setError(new Error('Embeddings or a full-text query are required. Provide embeddings for vector search, a full-text query for text search, or both for hybrid search.'))
       return
     }
     if (embeddingsMismatch) {
@@ -271,7 +299,8 @@ function SearchTab({ tenantId, collectionId }) {
       const query = buildQuery({
         embeddings, searchType, minScore, maxScore, minDistance, maxDistance,
         requiredLabels, excludedLabels, requiredTags, excludedTags, requiredTerms, excludedTerms,
-        sortOrder, maxResults, createdBefore, createdAfter, documentIds
+        sortOrder, maxResults, createdBefore, createdAfter, documentIds,
+        fullTextQuery, fullTextSearchType, fullTextLanguage, fullTextNormalization, fullTextMinScore, fullTextWeight
       })
       const result = await api.search(tenantId, collectionId, query)
       setResults(result)
@@ -297,6 +326,11 @@ function SearchTab({ tenantId, collectionId }) {
       sortValue: (d) => d.Score
     },
     {
+      key: 'TextScore', label: 'Text Score', width: '100px',
+      render: (d) => d.TextScore != null ? <span className="score-badge">{d.TextScore.toFixed(4)}</span> : '-',
+      sortValue: (d) => d.TextScore
+    },
+    {
       key: 'Content', label: 'Content',
       render: (d) => {
         const text = d.Content || '(no content)'
@@ -316,151 +350,192 @@ function SearchTab({ tenantId, collectionId }) {
       <div className="card">
         <form onSubmit={handleSearch}>
           {/* Vector Search */}
-          <div className="form-group">
-            <label>Embeddings (comma-separated floats){dimensionality ? ` — collection dimensionality: ${dimensionality}` : ''}</label>
-            <textarea value={embeddings} onChange={(e) => setEmbeddings(e.target.value)} rows={3} placeholder="0.1, 0.2, 0.3, ..." />
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
+          <CollapsibleSection title="Vector Search" defaultOpen={true}>
             <div className="form-group">
-              <label>Search Type</label>
-              <select value={searchType} onChange={(e) => setSearchType(e.target.value)}>
-                {SEARCH_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
+              <label>Embeddings (comma-separated floats){dimensionality ? ` — dimensionality: ${dimensionality}` : ''}</label>
+              <textarea value={embeddings} onChange={(e) => setEmbeddings(e.target.value)} rows={3} placeholder="0.1, 0.2, 0.3, ..." />
             </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
+              <div className="form-group">
+                <label>Search Type</label>
+                <select value={searchType} onChange={(e) => setSearchType(e.target.value)}>
+                  {SEARCH_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Min Score</label>
+                <input type="number" step="any" value={minScore} onChange={(e) => setMinScore(e.target.value)} placeholder="0.0" />
+              </div>
+              <div className="form-group">
+                <label>Max Score</label>
+                <input type="number" step="any" value={maxScore} onChange={(e) => setMaxScore(e.target.value)} placeholder="1.0" />
+              </div>
+              <div className="form-group">
+                <label>Min Distance</label>
+                <input type="number" step="any" value={minDistance} onChange={(e) => setMinDistance(e.target.value)} placeholder="0.0" />
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16 }}>
+              <div className="form-group">
+                <label>Max Distance</label>
+                <input type="number" step="any" value={maxDistance} onChange={(e) => setMaxDistance(e.target.value)} placeholder="1.0" style={{ maxWidth: 200 }} />
+              </div>
+            </div>
+          </CollapsibleSection>
+
+          {/* Full-Text Search */}
+          <CollapsibleSection title="Full-Text Search">
             <div className="form-group">
+              <label>Query</label>
+              <textarea value={fullTextQuery} onChange={(e) => setFullTextQuery(e.target.value)} rows={2} placeholder="Enter search terms (e.g. OAuth2 PKCE configuration)" />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
+              <div className="form-group">
+                <label>Ranking Function</label>
+                <select value={fullTextSearchType} onChange={(e) => setFullTextSearchType(e.target.value)}>
+                  {TEXT_SEARCH_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Language</label>
+                <input type="text" value={fullTextLanguage} onChange={(e) => setFullTextLanguage(e.target.value)} placeholder="english" />
+              </div>
+              <div className="form-group">
+                <label>Normalization</label>
+                <input type="number" value={fullTextNormalization} onChange={(e) => setFullTextNormalization(e.target.value)} min={0} />
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div className="form-group">
+                <label>Min Text Score</label>
+                <input type="number" step="any" value={fullTextMinScore} onChange={(e) => setFullTextMinScore(e.target.value)} placeholder="0.0" />
+              </div>
+              <div className="form-group">
+                <label>Text Weight (hybrid blend, 0.0-1.0)</label>
+                <input type="number" step="0.1" min="0" max="1" value={fullTextWeight} onChange={(e) => setFullTextWeight(e.target.value)} placeholder="0.5" />
+              </div>
+            </div>
+          </CollapsibleSection>
+
+          {/* Filters */}
+          <CollapsibleSection title="Filters">
+            {/* Labels */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Required Labels</label>
+                {requiredLabels.map((label, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+                    <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                      <input type="text" value={label} onChange={(e) => updateLabel(setRequiredLabels, i, e.target.value)} placeholder="Label" />
+                    </div>
+                    <button type="button" className="btn btn-sm btn-danger" onClick={() => removeLabel(setRequiredLabels, i)}>X</button>
+                  </div>
+                ))}
+                <button type="button" className="add-row-btn" onClick={() => addLabel(setRequiredLabels)}>+ Add Label</button>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Excluded Labels</label>
+                {excludedLabels.map((label, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+                    <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                      <input type="text" value={label} onChange={(e) => updateLabel(setExcludedLabels, i, e.target.value)} placeholder="Label" />
+                    </div>
+                    <button type="button" className="btn btn-sm btn-danger" onClick={() => removeLabel(setExcludedLabels, i)}>X</button>
+                  </div>
+                ))}
+                <button type="button" className="add-row-btn" onClick={() => addLabel(setExcludedLabels)}>+ Add Label</button>
+              </div>
+            </div>
+
+            {/* Tags */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Required Tags</label>
+              {requiredTags.map((tag, i) => (
+                <div key={i} className="tag-row">
+                  <div className="form-group">
+                    <input type="text" value={tag.Key} onChange={(e) => updateTagRow(setRequiredTags, i, 'Key', e.target.value)} placeholder="Key" />
+                  </div>
+                  <div className="form-group">
+                    <select value={tag.Condition} onChange={(e) => updateTagRow(setRequiredTags, i, 'Condition', e.target.value)}>
+                      {TAG_CONDITIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <input type="text" value={tag.Value} onChange={(e) => updateTagRow(setRequiredTags, i, 'Value', e.target.value)} placeholder="Value" />
+                  </div>
+                  <button type="button" className="btn btn-sm btn-danger" onClick={() => removeTagRow(setRequiredTags, i)} style={{ marginBottom: 0, alignSelf: 'end' }}>X</button>
+                </div>
+              ))}
+              <button type="button" className="add-row-btn" onClick={() => addTagRow(setRequiredTags)}>+ Add Required Tag</button>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Excluded Tags</label>
+              {excludedTags.map((tag, i) => (
+                <div key={i} className="tag-row">
+                  <div className="form-group">
+                    <input type="text" value={tag.Key} onChange={(e) => updateTagRow(setExcludedTags, i, 'Key', e.target.value)} placeholder="Key" />
+                  </div>
+                  <div className="form-group">
+                    <select value={tag.Condition} onChange={(e) => updateTagRow(setExcludedTags, i, 'Condition', e.target.value)}>
+                      {TAG_CONDITIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <input type="text" value={tag.Value} onChange={(e) => updateTagRow(setExcludedTags, i, 'Value', e.target.value)} placeholder="Value" />
+                  </div>
+                  <button type="button" className="btn btn-sm btn-danger" onClick={() => removeTagRow(setExcludedTags, i)} style={{ marginBottom: 0, alignSelf: 'end' }}>X</button>
+                </div>
+              ))}
+              <button type="button" className="add-row-btn" onClick={() => addTagRow(setExcludedTags)}>+ Add Excluded Tag</button>
+            </div>
+
+            {/* Terms */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+              <div className="form-group">
+                <label>Required Terms (comma-separated)</label>
+                <input type="text" value={requiredTerms} onChange={(e) => setRequiredTerms(e.target.value)} placeholder="machine learning, neural network" />
+              </div>
+              <div className="form-group">
+                <label>Excluded Terms (comma-separated)</label>
+                <input type="text" value={excludedTerms} onChange={(e) => setExcludedTerms(e.target.value)} placeholder="deprecated, draft" />
+              </div>
+            </div>
+
+            {/* Date range & Doc IDs */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+              <div className="form-group">
+                <label>Created After</label>
+                <input type="datetime-local" value={createdAfter} onChange={(e) => setCreatedAfter(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>Created Before</label>
+                <input type="datetime-local" value={createdBefore} onChange={(e) => setCreatedBefore(e.target.value)} />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>Document IDs (comma-separated)</label>
+              <input type="text" value={documentIds} onChange={(e) => setDocumentIds(e.target.value)} placeholder="doc-id-1, doc-id-2" />
+            </div>
+          </CollapsibleSection>
+
+          {/* Results options & submit */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 16, alignItems: 'end', marginTop: 8 }}>
+            <div className="form-group" style={{ marginBottom: 0 }}>
               <label>Sort Order</label>
               <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)}>
                 {SORT_ORDERS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
-            <div className="form-group">
+            <div className="form-group" style={{ marginBottom: 0 }}>
               <label>Max Results</label>
               <input type="number" value={maxResults} onChange={(e) => setMaxResults(e.target.value)} min={1} max={1000} />
             </div>
+            <button type="submit" className="btn btn-primary" disabled={loading || !tenantId || !collectionId} style={{ marginBottom: 0 }}>
+              {loading ? 'Searching...' : 'Search'}
+            </button>
           </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
-            <div className="form-group">
-              <label>Min Score</label>
-              <input type="number" step="any" value={minScore} onChange={(e) => setMinScore(e.target.value)} placeholder="0.0" />
-            </div>
-            <div className="form-group">
-              <label>Max Score</label>
-              <input type="number" step="any" value={maxScore} onChange={(e) => setMaxScore(e.target.value)} placeholder="1.0" />
-            </div>
-            <div className="form-group">
-              <label>Min Distance</label>
-              <input type="number" step="any" value={minDistance} onChange={(e) => setMinDistance(e.target.value)} placeholder="0.0" />
-            </div>
-            <div className="form-group">
-              <label>Max Distance</label>
-              <input type="number" step="any" value={maxDistance} onChange={(e) => setMaxDistance(e.target.value)} placeholder="1.0" />
-            </div>
-          </div>
-
-          {/* Labels */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Required Labels</label>
-              {requiredLabels.map((label, i) => (
-                <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
-                  <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                    <input type="text" value={label} onChange={(e) => updateLabel(setRequiredLabels, i, e.target.value)} placeholder="Label" />
-                  </div>
-                  <button type="button" className="btn btn-sm btn-danger" onClick={() => removeLabel(setRequiredLabels, i)}>X</button>
-                </div>
-              ))}
-              <button type="button" className="add-row-btn" onClick={() => addLabel(setRequiredLabels)}>+ Add Label</button>
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Excluded Labels</label>
-              {excludedLabels.map((label, i) => (
-                <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
-                  <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                    <input type="text" value={label} onChange={(e) => updateLabel(setExcludedLabels, i, e.target.value)} placeholder="Label" />
-                  </div>
-                  <button type="button" className="btn btn-sm btn-danger" onClick={() => removeLabel(setExcludedLabels, i)}>X</button>
-                </div>
-              ))}
-              <button type="button" className="add-row-btn" onClick={() => addLabel(setExcludedLabels)}>+ Add Label</button>
-            </div>
-          </div>
-
-          {/* Terms */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-            <div className="form-group">
-              <label>Required Terms (comma-separated)</label>
-              <input type="text" value={requiredTerms} onChange={(e) => setRequiredTerms(e.target.value)} placeholder="machine learning, neural network" />
-            </div>
-            <div className="form-group">
-              <label>Excluded Terms (comma-separated)</label>
-              <input type="text" value={excludedTerms} onChange={(e) => setExcludedTerms(e.target.value)} placeholder="deprecated, draft" />
-            </div>
-          </div>
-
-          {/* Tags */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Required Tags</label>
-            {requiredTags.map((tag, i) => (
-              <div key={i} className="tag-row">
-                <div className="form-group">
-                  <input type="text" value={tag.Key} onChange={(e) => updateTagRow(setRequiredTags, i, 'Key', e.target.value)} placeholder="Key" />
-                </div>
-                <div className="form-group">
-                  <select value={tag.Condition} onChange={(e) => updateTagRow(setRequiredTags, i, 'Condition', e.target.value)}>
-                    {TAG_CONDITIONS.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <input type="text" value={tag.Value} onChange={(e) => updateTagRow(setRequiredTags, i, 'Value', e.target.value)} placeholder="Value" />
-                </div>
-                <button type="button" className="btn btn-sm btn-danger" onClick={() => removeTagRow(setRequiredTags, i)} style={{ marginBottom: 0, alignSelf: 'end' }}>X</button>
-              </div>
-            ))}
-            <button type="button" className="add-row-btn" onClick={() => addTagRow(setRequiredTags)}>+ Add Required Tag</button>
-          </div>
-
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Excluded Tags</label>
-            {excludedTags.map((tag, i) => (
-              <div key={i} className="tag-row">
-                <div className="form-group">
-                  <input type="text" value={tag.Key} onChange={(e) => updateTagRow(setExcludedTags, i, 'Key', e.target.value)} placeholder="Key" />
-                </div>
-                <div className="form-group">
-                  <select value={tag.Condition} onChange={(e) => updateTagRow(setExcludedTags, i, 'Condition', e.target.value)}>
-                    {TAG_CONDITIONS.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <input type="text" value={tag.Value} onChange={(e) => updateTagRow(setExcludedTags, i, 'Value', e.target.value)} placeholder="Value" />
-                </div>
-                <button type="button" className="btn btn-sm btn-danger" onClick={() => removeTagRow(setExcludedTags, i)} style={{ marginBottom: 0, alignSelf: 'end' }}>X</button>
-              </div>
-            ))}
-            <button type="button" className="add-row-btn" onClick={() => addTagRow(setExcludedTags)}>+ Add Excluded Tag</button>
-          </div>
-
-          {/* Date range & Doc IDs */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-            <div className="form-group">
-              <label>Created After</label>
-              <input type="datetime-local" value={createdAfter} onChange={(e) => setCreatedAfter(e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label>Created Before</label>
-              <input type="datetime-local" value={createdBefore} onChange={(e) => setCreatedBefore(e.target.value)} />
-            </div>
-          </div>
-
-          <div className="form-group" style={{ marginBottom: 16 }}>
-            <label>Document IDs (comma-separated)</label>
-            <input type="text" value={documentIds} onChange={(e) => setDocumentIds(e.target.value)} placeholder="doc-id-1, doc-id-2" />
-          </div>
-
-          <button type="submit" className="btn btn-primary" disabled={loading || !tenantId || !collectionId}>
-            {loading ? 'Searching...' : 'Search'}
-          </button>
         </form>
       </div>
 

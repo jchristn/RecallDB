@@ -649,12 +649,24 @@ class RecallDbClient:
         """
         Search documents in a collection.
 
+        Supports three search modes:
+        - Vector-only: provide Vector without FullText.
+        - Full-text-only: provide FullText without Vector.
+        - Hybrid: provide both Vector and FullText for blended scoring.
+
         Args:
             tenant_id: Tenant ID.
             collection_id: Collection ID.
             query: dict with search query parameters. Supported keys:
-                SortOrder (str): Sort order, e.g. "ScoreDescending".
+                SortOrder (str): Sort order, e.g. "ScoreDescending", "TextScoreDescending".
                 Vector (dict): Vector query with SearchType, Embeddings, MinimumScore, etc.
+                FullText (dict): Full-text search query parameters:
+                    Query (str): Search text (required). Processed with stemming and stop word removal.
+                    SearchType (str): Ranking function - "TsRank" (default) or "TsRankCd" (cover density).
+                    Language (str): Text search configuration, default "english".
+                    Normalization (int): ts_rank normalization bitmask, default 32 (0-1 range).
+                    MinimumScore (float): Minimum text relevance score threshold.
+                    TextWeight (float): Weight for text score in hybrid mode (0.0-1.0, default 0.5).
                 LabelFilter (dict): Label filter with Required and Excluded lists.
                 TagFilter (dict): Tag filter with Required and Excluded condition lists.
                 Terms (dict): Terms filter for content matching,
@@ -662,7 +674,8 @@ class RecallDbClient:
                 MaxResults (int): Maximum results (1-1000, default 10).
 
         Returns:
-            dict: Search result.
+            dict: Search result. Documents include Score and, when FullText is used,
+                TextScore (float) with the full-text relevance score.
         """
         return self._post(
             f"/v1.0/tenants/{tenant_id}/collections/{collection_id}/search",

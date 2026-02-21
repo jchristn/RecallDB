@@ -194,6 +194,34 @@ namespace Test.Automated
             await RunTest("Search combined: terms and label", TestSearchCombinedTermsAndLabel);
             await RunTest("Search combined: all filters", TestSearchCombinedAllFilters);
 
+            // 21b. Full-Text Search
+            await RunTest("Search full-text: basic query", TestSearchFullTextBasic);
+            await RunTest("Search full-text: TsRank scoring", TestSearchFullTextTsRank);
+            await RunTest("Search full-text: TsRankCd scoring", TestSearchFullTextTsRankCd);
+            await RunTest("Search full-text: no match", TestSearchFullTextNoMatch);
+            await RunTest("Search full-text: minimum score threshold", TestSearchFullTextMinimumScore);
+            await RunTest("Search full-text: sort text score descending", TestSearchFullTextSortDescending);
+            await RunTest("Search full-text: sort text score ascending", TestSearchFullTextSortAscending);
+            await RunTest("Search hybrid: vector + full-text", TestSearchHybridBasic);
+            await RunTest("Search hybrid: custom text weight", TestSearchHybridCustomWeight);
+            await RunTest("Search hybrid: with label filter", TestSearchHybridWithLabelFilter);
+            await RunTest("Search hybrid: with tag filter", TestSearchHybridWithTagFilter);
+            await RunTest("Search hybrid: with terms filter", TestSearchHybridWithTermsFilter);
+            await RunTest("Search hybrid: with date range", TestSearchHybridWithDateRange);
+            await RunTest("Search full-text: pagination", TestSearchFullTextPagination);
+            await RunTest("Search full-text: max results", TestSearchFullTextMaxResults);
+            await RunTest("Search full-text: with label filter", TestSearchFullTextWithLabelFilter);
+            await RunTest("Search full-text: with tag filter", TestSearchFullTextWithTagFilter);
+            await RunTest("Search full-text: with terms filter", TestSearchFullTextWithTermsFilter);
+            await RunTest("Search full-text: with date range", TestSearchFullTextWithDateRange);
+            await RunTest("Search full-text: with document ids", TestSearchFullTextWithDocumentIds);
+            await RunTest("Search full-text: distance is zero", TestSearchFullTextDistanceIsZero);
+            await RunTest("Search full-text: TsRank vs TsRankCd differ", TestSearchFullTextRankTypesDiffer);
+            await RunTest("Search hybrid: TextWeight 0.0 matches vector-only", TestSearchHybridWeightZero);
+            await RunTest("Search hybrid: TextWeight 1.0 matches full-text-only", TestSearchHybridWeightOne);
+            await RunTest("Search hybrid: blended score formula", TestSearchHybridBlendedScoreFormula);
+            await RunTest("Search backward compat: vector-only unchanged", TestSearchBackwardCompatVectorOnly);
+
             // 22. Search Result Validation
             await RunTest("Search validation: result fields", TestSearchResultFields);
             await RunTest("Search validation: document fields", TestSearchDocumentFields);
@@ -1494,6 +1522,313 @@ namespace Test.Automated
                 MaxResults = 20
             }).ConfigureAwait(false);
             AssertTrue(GetDocs(json).GetArrayLength() > 0, "Combined all filters should return results");
+        }
+
+        #endregion
+
+        #region Test-21b-Full-Text-Search
+
+        private static readonly List<float> _SearchEmb = new List<float> { 0.9f, 0.1f, 0.05f };
+
+        private static async Task TestSearchFullTextBasic()
+        {
+            var json = await DoSearch(new { FullText = new { Query = "machine learning" }, MaxResults = 10 }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Full-text search should return results");
+            foreach (JsonElement doc in docs.EnumerateArray())
+            {
+                AssertTrue(doc.GetProperty("Score").GetDouble() > 0, "Score should be > 0");
+                AssertTrue(doc.TryGetProperty("TextScore", out JsonElement ts) && ts.GetDouble() > 0, "TextScore should be > 0");
+            }
+        }
+
+        private static async Task TestSearchFullTextTsRank()
+        {
+            var json = await DoSearch(new { FullText = new { Query = "learning", SearchType = "TsRank" }, MaxResults = 10 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "TsRank search should return results");
+        }
+
+        private static async Task TestSearchFullTextTsRankCd()
+        {
+            var json = await DoSearch(new { FullText = new { Query = "neural networks image", SearchType = "TsRankCd" }, MaxResults = 10 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "TsRankCd search should return results");
+        }
+
+        private static async Task TestSearchFullTextNoMatch()
+        {
+            var json = await DoSearch(new { FullText = new { Query = "xyznonexistentterm12345" }, MaxResults = 10 }).ConfigureAwait(false);
+            AssertTrue(json.GetProperty("TotalRecords").GetInt64() == 0, "Should return 0 total records");
+            AssertTrue(GetDocs(json).GetArrayLength() == 0, "Documents should be empty");
+        }
+
+        private static async Task TestSearchFullTextMinimumScore()
+        {
+            var json = await DoSearch(new { FullText = new { Query = "learning", MinimumScore = 0.01 }, MaxResults = 10 }).ConfigureAwait(false);
+            foreach (JsonElement doc in GetDocs(json).EnumerateArray())
+            {
+                double ts = doc.GetProperty("TextScore").GetDouble();
+                AssertTrue(ts >= 0.01, "TextScore should be >= minimum threshold");
+            }
+        }
+
+        private static async Task TestSearchFullTextSortDescending()
+        {
+            var json = await DoSearch(new { FullText = new { Query = "learning" }, SortOrder = "TextScoreDescending", MaxResults = 10 }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Should return results");
+            double prev = double.MaxValue;
+            foreach (JsonElement doc in docs.EnumerateArray())
+            {
+                double ts = doc.GetProperty("TextScore").GetDouble();
+                AssertTrue(ts <= prev, "TextScore should be in descending order");
+                prev = ts;
+            }
+        }
+
+        private static async Task TestSearchFullTextSortAscending()
+        {
+            var json = await DoSearch(new { FullText = new { Query = "learning" }, SortOrder = "TextScoreAscending", MaxResults = 10 }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Should return results");
+            double prev = -1;
+            foreach (JsonElement doc in docs.EnumerateArray())
+            {
+                double ts = doc.GetProperty("TextScore").GetDouble();
+                AssertTrue(ts >= prev, "TextScore should be in ascending order");
+                prev = ts;
+            }
+        }
+
+        private static async Task TestSearchHybridBasic()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = _SearchEmb }, FullText = new { Query = "machine learning" }, MaxResults = 10 }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Hybrid search should return results");
+            foreach (JsonElement doc in docs.EnumerateArray())
+            {
+                AssertTrue(doc.GetProperty("Score").GetDouble() > 0, "Score should be > 0");
+                AssertTrue(doc.TryGetProperty("TextScore", out JsonElement ts) && ts.GetDouble() > 0, "TextScore should be populated");
+            }
+        }
+
+        private static async Task TestSearchHybridCustomWeight()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = _SearchEmb }, FullText = new { Query = "machine learning", TextWeight = 0.3 }, MaxResults = 10 }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Hybrid search with custom weight should return results");
+        }
+
+        private static async Task TestSearchHybridWithLabelFilter()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = _SearchEmb }, FullText = new { Query = "learning" }, LabelFilter = new { Required = new List<string> { "science" } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Hybrid with label filter should return results");
+        }
+
+        private static async Task TestSearchHybridWithTagFilter()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = _SearchEmb }, FullText = new { Query = "learning" }, TagFilter = new { Required = new List<object> { new { Key = "category", Condition = "Equals", Value = "ai" } } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Hybrid with tag filter should return results");
+        }
+
+        private static async Task TestSearchHybridWithTermsFilter()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = _SearchEmb }, FullText = new { Query = "learning" }, TermsFilter = new { Required = new List<string> { "Machine" } }, MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Hybrid with terms filter should return results");
+        }
+
+        private static async Task TestSearchHybridWithDateRange()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = _SearchEmb }, FullText = new { Query = "learning" }, CreatedAfter = DateTime.UtcNow.AddHours(-1).ToString("o"), CreatedBefore = DateTime.UtcNow.AddHours(1).ToString("o"), MaxResults = 20 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() > 0, "Hybrid with date range should return results");
+        }
+
+        private static async Task TestSearchFullTextPagination()
+        {
+            int totalFetched = 0;
+            string ct = null;
+            bool eor = false;
+            while (!eor)
+            {
+                object body;
+                if (ct != null)
+                    body = new { FullText = new { Query = "learning" }, MaxResults = 2, ContinuationToken = ct };
+                else
+                    body = new { FullText = new { Query = "learning" }, MaxResults = 2 };
+                var json = await DoSearch(body).ConfigureAwait(false);
+                eor = json.GetProperty("EndOfResults").GetBoolean();
+                totalFetched += GetDocs(json).GetArrayLength();
+                if (!eor)
+                {
+                    ct = json.GetProperty("ContinuationToken").GetString();
+                    AssertNotNullOrEmpty(ct, "ContinuationToken");
+                }
+            }
+            AssertTrue(totalFetched > 0, "Should page through full-text results");
+        }
+
+        private static async Task TestSearchFullTextMaxResults()
+        {
+            var json = await DoSearch(new { FullText = new { Query = "learning" }, MaxResults = 1 }).ConfigureAwait(false);
+            AssertTrue(GetDocs(json).GetArrayLength() <= 1, "MaxResults should limit to 1");
+        }
+
+        private static async Task TestSearchFullTextWithLabelFilter()
+        {
+            var json = await DoSearch(new { FullText = new { Query = "learning" }, LabelFilter = new { Required = new List<string> { "science" } }, MaxResults = 20 }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Full-text with label filter should return results");
+            foreach (JsonElement doc in docs.EnumerateArray())
+            {
+                AssertTrue(doc.GetProperty("TextScore").GetDouble() > 0, "TextScore should be > 0");
+            }
+        }
+
+        private static async Task TestSearchFullTextWithTagFilter()
+        {
+            var json = await DoSearch(new { FullText = new { Query = "learning" }, TagFilter = new { Required = new List<object> { new { Key = "category", Condition = "Equals", Value = "ai" } } }, MaxResults = 20 }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Full-text with tag filter should return results");
+            foreach (JsonElement doc in docs.EnumerateArray())
+            {
+                AssertTrue(doc.GetProperty("TextScore").GetDouble() > 0, "TextScore should be > 0");
+            }
+        }
+
+        private static async Task TestSearchFullTextWithTermsFilter()
+        {
+            var json = await DoSearch(new { FullText = new { Query = "learning" }, TermsFilter = new { Required = new List<string> { "Machine" } }, MaxResults = 20 }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Full-text with terms filter should return results");
+            foreach (JsonElement doc in docs.EnumerateArray())
+            {
+                AssertTrue(doc.GetProperty("TextScore").GetDouble() > 0, "TextScore should be > 0");
+            }
+        }
+
+        private static async Task TestSearchFullTextWithDateRange()
+        {
+            var json = await DoSearch(new { FullText = new { Query = "learning" }, CreatedAfter = DateTime.UtcNow.AddHours(-1).ToString("o"), CreatedBefore = DateTime.UtcNow.AddHours(1).ToString("o"), MaxResults = 20 }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Full-text with date range should return results");
+            foreach (JsonElement doc in docs.EnumerateArray())
+            {
+                AssertTrue(doc.GetProperty("TextScore").GetDouble() > 0, "TextScore should be > 0");
+            }
+        }
+
+        private static async Task TestSearchFullTextWithDocumentIds()
+        {
+            var json = await DoSearch(new { FullText = new { Query = "learning" }, DocumentIds = new List<string> { "grp-alpha" }, MaxResults = 20 }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Full-text with document ID filter should return results");
+            foreach (JsonElement doc in docs.EnumerateArray())
+            {
+                AssertTrue(doc.GetProperty("TextScore").GetDouble() > 0, "TextScore should be > 0");
+                AssertEqual("grp-alpha", doc.GetProperty("DocumentId").GetString(), "DocumentId should match filter");
+            }
+        }
+
+        private static async Task TestSearchFullTextDistanceIsZero()
+        {
+            var json = await DoSearch(new { FullText = new { Query = "learning" }, MaxResults = 10 }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Should return results");
+            foreach (JsonElement doc in docs.EnumerateArray())
+            {
+                double distance = doc.GetProperty("Distance").GetDouble();
+                AssertTrue(distance == 0.0, "Full-text-only search should return Distance = 0.0, got " + distance);
+            }
+        }
+
+        private static async Task TestSearchFullTextRankTypesDiffer()
+        {
+            var jsonRank = await DoSearch(new { FullText = new { Query = "Deep learning neural networks for image recognition", SearchType = "TsRank" }, MaxResults = 10 }).ConfigureAwait(false);
+            var jsonRankCd = await DoSearch(new { FullText = new { Query = "Deep learning neural networks for image recognition", SearchType = "TsRankCd" }, MaxResults = 10 }).ConfigureAwait(false);
+
+            var docsRank = GetDocs(jsonRank);
+            var docsRankCd = GetDocs(jsonRankCd);
+            AssertTrue(docsRank.GetArrayLength() > 0, "TsRank should return results");
+            AssertTrue(docsRankCd.GetArrayLength() > 0, "TsRankCd should return results");
+
+            double scoreRank = docsRank[0].GetProperty("TextScore").GetDouble();
+            double scoreRankCd = docsRankCd[0].GetProperty("TextScore").GetDouble();
+            AssertTrue(scoreRank != scoreRankCd, "TsRank (" + scoreRank + ") and TsRankCd (" + scoreRankCd + ") should produce different scores for the same query");
+        }
+
+        private static async Task TestSearchHybridWeightZero()
+        {
+            // TextWeight = 0.0 means pure vector scoring; hybrid score should equal vector score
+            var jsonHybrid = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = _SearchEmb }, FullText = new { Query = "learning", TextWeight = 0.0 }, MaxResults = 10 }).ConfigureAwait(false);
+            var jsonVector = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = _SearchEmb }, MaxResults = 10 }).ConfigureAwait(false);
+
+            var docsHybrid = GetDocs(jsonHybrid);
+            var docsVector = GetDocs(jsonVector);
+            AssertTrue(docsHybrid.GetArrayLength() > 0, "Hybrid weight=0 should return results");
+            AssertTrue(docsVector.GetArrayLength() > 0, "Vector-only should return results");
+
+            // The top result ordering should match since text weight is zero
+            string hybridTopKey = docsHybrid[0].GetProperty("DocumentKey").GetString();
+            string vectorTopKey = docsVector[0].GetProperty("DocumentKey").GetString();
+            AssertEqual(vectorTopKey, hybridTopKey, "TextWeight=0.0 should produce same top result as vector-only");
+
+            double hybridScore = docsHybrid[0].GetProperty("Score").GetDouble();
+            double vectorScore = docsVector[0].GetProperty("Score").GetDouble();
+            AssertTrue(Math.Abs(hybridScore - vectorScore) < 0.001, "TextWeight=0.0 hybrid score (" + hybridScore + ") should match vector score (" + vectorScore + ")");
+        }
+
+        private static async Task TestSearchHybridWeightOne()
+        {
+            // TextWeight = 1.0 means pure full-text scoring; hybrid score should equal text score
+            var jsonHybrid = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = _SearchEmb }, FullText = new { Query = "learning", TextWeight = 1.0 }, MaxResults = 10 }).ConfigureAwait(false);
+            var jsonFts = await DoSearch(new { FullText = new { Query = "learning" }, MaxResults = 10 }).ConfigureAwait(false);
+
+            var docsHybrid = GetDocs(jsonHybrid);
+            var docsFts = GetDocs(jsonFts);
+            AssertTrue(docsHybrid.GetArrayLength() > 0, "Hybrid weight=1 should return results");
+            AssertTrue(docsFts.GetArrayLength() > 0, "Full-text-only should return results");
+
+            // The top result ordering should match since vector weight is zero
+            string hybridTopKey = docsHybrid[0].GetProperty("DocumentKey").GetString();
+            string ftsTopKey = docsFts[0].GetProperty("DocumentKey").GetString();
+            AssertEqual(ftsTopKey, hybridTopKey, "TextWeight=1.0 should produce same top result as full-text-only");
+
+            double hybridScore = docsHybrid[0].GetProperty("Score").GetDouble();
+            double ftsTextScore = docsFts[0].GetProperty("TextScore").GetDouble();
+            AssertTrue(Math.Abs(hybridScore - ftsTextScore) < 0.001, "TextWeight=1.0 hybrid score (" + hybridScore + ") should match FTS text score (" + ftsTextScore + ")");
+        }
+
+        private static async Task TestSearchHybridBlendedScoreFormula()
+        {
+            // Verify Score = (1 - TextWeight) * vectorScore + TextWeight * textScore
+            double textWeight = 0.4;
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = _SearchEmb }, FullText = new { Query = "machine learning", TextWeight = textWeight }, MaxResults = 10 }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Hybrid search should return results");
+
+            foreach (JsonElement doc in docs.EnumerateArray())
+            {
+                double score = doc.GetProperty("Score").GetDouble();
+                double textScore = doc.GetProperty("TextScore").GetDouble();
+                double distance = doc.GetProperty("Distance").GetDouble();
+
+                // Vector score for cosine similarity = 1 - distance
+                double vectorScore = 1.0 - distance;
+                double expectedScore = (1.0 - textWeight) * vectorScore + textWeight * textScore;
+
+                AssertTrue(Math.Abs(score - expectedScore) < 0.01,
+                    "Blended score (" + score + ") should equal (1-" + textWeight + ")*" + vectorScore + " + " + textWeight + "*" + textScore + " = " + expectedScore);
+            }
+        }
+
+        private static async Task TestSearchBackwardCompatVectorOnly()
+        {
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = _SearchEmb }, MaxResults = 10 }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Vector-only search should still work");
+            foreach (JsonElement doc in docs.EnumerateArray())
+            {
+                AssertTrue(doc.GetProperty("Score").GetDouble() > 0, "Score should be > 0");
+            }
         }
 
         #endregion

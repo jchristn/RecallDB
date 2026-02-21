@@ -69,9 +69,19 @@ namespace RecallDb.Sdk.Models
         public DateTime CreatedUtc { get; set; }
 
         /// <summary>
+        /// Vector distance (populated during search).
+        /// </summary>
+        public double Distance { get; set; }
+
+        /// <summary>
         /// Score (populated during search).
         /// </summary>
         public double Score { get; set; }
+
+        /// <summary>
+        /// Full-text relevance score (populated during full-text or hybrid search).
+        /// </summary>
+        public double? TextScore { get; set; }
 
         /// <summary>
         /// Labels associated with this document.

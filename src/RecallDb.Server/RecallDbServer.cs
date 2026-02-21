@@ -904,8 +904,8 @@ namespace RecallDb.Server
             _App.Rest.Post<SearchQuery>("/v1.0/tenants/{tid}/collections/{cid}/search", SearchRoute,
                 openApi => openApi
                     .WithTag("Search")
-                    .WithSummary("Vector search")
-                    .WithDescription("Perform vector similarity search within a collection. Supports cosine similarity, cosine distance, euclidean similarity, euclidean distance, and inner product. Filter results by labels, tags, date ranges, and document IDs.")
+                    .WithSummary("Search")
+                    .WithDescription("Search within a collection using vector similarity, full-text relevance, or hybrid (combined) search. Vector search supports cosine similarity, cosine distance, euclidean similarity, euclidean distance, and inner product. Full-text search uses PostgreSQL ts_rank scoring with stemming and stop word removal. Hybrid search blends vector and text scores with configurable weighting. Filter results by labels, tags, date ranges, terms, and document IDs.")
                     .WithOperationId("search")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))

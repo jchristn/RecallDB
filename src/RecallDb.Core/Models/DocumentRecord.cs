@@ -196,6 +196,22 @@ namespace RecallDb.Core.Models
         }
 
         /// <summary>
+        /// Vector distance (transient, populated during search).
+        /// Only present when a vector query is used; 0.0 for full-text-only searches.
+        /// </summary>
+        public double Distance
+        {
+            get
+            {
+                return _Distance;
+            }
+            set
+            {
+                _Distance = value;
+            }
+        }
+
+        /// <summary>
         /// Score (transient, populated during search).
         /// </summary>
         public double Score
@@ -207,6 +223,22 @@ namespace RecallDb.Core.Models
             set
             {
                 _Score = value;
+            }
+        }
+
+        /// <summary>
+        /// Full-text relevance score (transient, populated during search).
+        /// Only present when a FullText query is used.
+        /// </summary>
+        public double? TextScore
+        {
+            get
+            {
+                return _TextScore;
+            }
+            set
+            {
+                _TextScore = value;
             }
         }
 
@@ -256,7 +288,9 @@ namespace RecallDb.Core.Models
         private byte[] _BinaryData = null;
         private List<float> _Embeddings = null;
         private DateTime _CreatedUtc = DateTime.UtcNow;
+        private double _Distance = 0;
         private double _Score = 0;
+        private double? _TextScore = null;
         private List<string> _Labels = new List<string>();
         private Dictionary<string, string> _Tags = new Dictionary<string, string>();
 
@@ -301,10 +335,22 @@ namespace RecallDb.Core.Models
             doc.Embeddings = DataTableHelper.GetFloatArrayValue(row, "embeddings");
             doc.CreatedUtc = DataTableHelper.GetDateTimeValue(row, "created_utc");
 
+            // Distance may or may not be present (only in search results)
+            if (row.Table.Columns.Contains("distance"))
+            {
+                doc.Distance = DataTableHelper.GetDoubleValue(row, "distance");
+            }
+
             // Score may or may not be present (only in search results)
             if (row.Table.Columns.Contains("score"))
             {
                 doc.Score = DataTableHelper.GetDoubleValue(row, "score");
+            }
+
+            // TextScore may or may not be present (only in full-text or hybrid search results)
+            if (row.Table.Columns.Contains("text_score"))
+            {
+                doc.TextScore = DataTableHelper.GetDoubleValue(row, "text_score");
             }
 
             return doc;
