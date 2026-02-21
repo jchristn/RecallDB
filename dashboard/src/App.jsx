@@ -14,6 +14,8 @@ import QueryBuilder from './views/QueryBuilder.jsx'
 import SearchQuery from './views/SearchQuery.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import Topbar from './components/Topbar.jsx'
+import Tour from './components/Tour.jsx'
+import SetupWizard from './components/SetupWizard.jsx'
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth()
@@ -23,17 +25,40 @@ function ProtectedRoute({ children }) {
 
 function AppLayout() {
   const [theme, setTheme] = useState(localStorage.getItem('recalldb_theme') || 'light')
+  const [showTour, setShowTour] = useState(false)
+  const [showWizard, setShowWizard] = useState(false)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('recalldb_theme', theme)
   }, [theme])
 
+  useEffect(() => {
+    if (!localStorage.getItem('recalldb_tour_completed')) {
+      setShowTour(true)
+    }
+  }, [])
+
   const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light')
+
+  const handleTourComplete = () => {
+    setShowTour(false)
+    if (!localStorage.getItem('recalldb_setup_completed')) {
+      setShowWizard(true)
+    }
+  }
+
+  const handleTourClose = () => {
+    setShowTour(false)
+  }
+
+  const handleWizardClose = () => {
+    setShowWizard(false)
+  }
 
   return (
     <div className="app-layout">
-      <Sidebar />
+      <Sidebar onStartTour={() => setShowTour(true)} onStartWizard={() => setShowWizard(true)} />
       <div className="main-wrapper">
         <Topbar theme={theme} toggleTheme={toggleTheme} />
         <main className="main-content">
@@ -52,6 +77,8 @@ function AppLayout() {
           </Routes>
         </main>
       </div>
+      {showTour && <Tour onClose={handleTourClose} onComplete={handleTourComplete} />}
+      {showWizard && <SetupWizard onClose={handleWizardClose} />}
     </div>
   )
 }

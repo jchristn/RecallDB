@@ -1,0 +1,117 @@
+.tour-welcome-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.tour-welcome-modal {
+  background: var(--card-bg);
+  border-radius: 12px;
+  padding: 40px;
+  width: 520px;
+  max-width: 90vw;
+  text-align: center;
+}
+
+.tour-welcome-modal h2 {
+  font-size: 24px;
+  margin-bottom: 12px;
+  color: var(--text);
+}
+
+.tour-welcome-modal p {
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+.tour-welcome-features {
+  text-align: left;
+  margin: 20px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tour-welcome-features li {
+  padding: 6px 0;
+  font-size: 14px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tour-welcome-features li::before {
+  content: "\2713";
+  color: var(--success);
+  font-weight: 700;
+}
+
+.tour-welcome-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 24px;
+}
+
+/* Spotlight overlay */
+.tour-spotlight-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  pointer-events: none;
+}
+
+.tour-spotlight {
+  position: fixed;
+  border-radius: 6px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+  z-index: 2001;
+  pointer-events: none;
+  transition: top 0.3s ease, left 0.3s ease, width 0.3s ease, height 0.3s ease;
+}
+
+.tour-tooltip {
+  position: fixed;
+  z-index: 2002;
+  background: var(--card-bg);
+  border-radius: 10px;
+  padding: 20px;
+  width: 320px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+  pointer-events: auto;
+}
+
+.tour-tooltip h3 {
+  font-size: 16px;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.tour-tooltip p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.tour-tooltip-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tour-step-counter {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.tour-tooltip-buttons {
+  display: flex;
+  gap: 8px;
+}

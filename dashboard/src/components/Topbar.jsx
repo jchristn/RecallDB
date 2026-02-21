@@ -10,13 +10,13 @@ export default function Topbar({ theme, toggleTheme }) {
   return (
     <header className="topbar">
       <div className="topbar-left">
-        <span className="topbar-badge server-badge">
+        <span className="topbar-badge server-badge" data-tour="server-badge">
           <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M2 5a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm14 1a1 1 0 11-2 0 1 1 0 012 0zM2 13a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 01-2 2H4a2 2 0 01-2-2v-2zm14 1a1 1 0 11-2 0 1 1 0 012 0z" clipRule="evenodd" />
           </svg>
           {serverUrl}
         </span>
-        <span className="topbar-badge email-badge">
+        <span className="topbar-badge email-badge" data-tour="email-badge">
           <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
             <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
             <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
@@ -24,7 +24,7 @@ export default function Topbar({ theme, toggleTheme }) {
           {user?.Email || (isAdmin ? 'admin@recalldb' : 'Unknown')}
         </span>
         {tenant && (
-          <span className="topbar-badge tenant-badge">
+          <span className="topbar-badge tenant-badge" data-tour="tenant-badge">
             <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a1 1 0 110 2h-3a1 1 0 01-1-1v-2a1 1 0 00-1-1H9a1 1 0 00-1 1v2a1 1 0 01-1 1H4a1 1 0 110-2V4zm3 1h2v2H7V5zm2 4H7v2h2V9zm2-4h2v2h-2V5zm2 4h-2v2h2V9z" clipRule="evenodd" />
             </svg>
@@ -49,7 +49,7 @@ export default function Topbar({ theme, toggleTheme }) {
         )}
       </div>
       <div className="topbar-right">
-        <button className="theme-toggle" onClick={toggleTheme} title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}>
+        <button className="theme-toggle" data-tour="theme-toggle" onClick={toggleTheme} title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}>
           {theme === 'light' ? (
             <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor">
               <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
@@ -60,7 +60,7 @@ export default function Topbar({ theme, toggleTheme }) {
             </svg>
           )}
         </button>
-        <button className="topbar-logout" onClick={logout}>Logout</button>
+        <button className="topbar-logout" data-tour="logout" onClick={logout}>Logout</button>
       </div>
     </header>
   )
