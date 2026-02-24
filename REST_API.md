@@ -1301,6 +1301,7 @@ Perform vector similarity, full-text, or hybrid search within a collection. Supp
   "CreatedBefore": "2025-12-31T23:59:59Z",
   "DocumentIds": [],
   "MaxResults": 10,
+  "IncludeNeighbors": null,
   "ContinuationToken": null
 }
 ```
@@ -1332,7 +1333,27 @@ Perform vector similarity, full-text, or hybrid search within a collection. Supp
       "Score": 0.95,
       "TextScore": 0.62,
       "Labels": ["important", "ml"],
-      "Tags": { "source": "arxiv", "year": "2024" }
+      "Tags": { "source": "arxiv", "year": "2024" },
+      "Neighbors": [
+        {
+          "DocumentKey": "doc_01JPREVIOUS",
+          "DocumentId": "paper-123",
+          "Position": -1,
+          "ContentType": "Text",
+          "Content": "Previous chunk content...",
+          "Labels": ["important"],
+          "Tags": { "source": "arxiv" }
+        },
+        {
+          "DocumentKey": "doc_01JNEXT",
+          "DocumentId": "paper-123",
+          "Position": 1,
+          "ContentType": "Text",
+          "Content": "Next chunk content...",
+          "Labels": ["important"],
+          "Tags": { "source": "arxiv" }
+        }
+      ]
     }
   ],
   "TotalMs": 12.45
@@ -1361,6 +1382,62 @@ The search endpoint operates in one of three modes depending on which query para
 
 ---
 
+## Neighbor Retrieval
+
+When `IncludeNeighbors` is set to `N` in the search query, each matched document in the response will include a `Neighbors` array containing up to `N` chunks before and `N` chunks after the matched chunk's position within the same `DocumentId`. This provides surrounding context for each match, which is useful for RAG pipelines where isolated chunks lose meaning without adjacent content.
+
+**Key behaviors:**
+
+- Neighbors are scoped to the same `DocumentId` as the matched chunk
+- Neighbors are ordered by `Position` ascending
+- Neighbors do **not** affect scoring, filtering, or pagination
+- The matched chunk itself is excluded from the `Neighbors` array
+- If two matched chunks are close together in the same document, their neighbor lists may overlap — each match carries its own self-contained context window
+
+**Edge cases:**
+
+- **First/last chunks**: If a matched chunk is at position 0, only neighbors after it are returned (no negative positions)
+- **Single-chunk documents**: `Neighbors` will be an empty array
+- **`IncludeNeighbors: 0` or `null`**: `Neighbors` is null (not populated)
+- **Range 0-10**: Values outside the range are clamped
+
+**Example request:**
+
+```json
+{
+  "Vector": {
+    "SearchType": "CosineSimilarity",
+    "Embeddings": [0.1, 0.2, 0.3]
+  },
+  "MaxResults": 5,
+  "IncludeNeighbors": 2
+}
+```
+
+**Example response (truncated):**
+
+```json
+{
+  "Documents": [
+    {
+      "DocumentKey": "doc_chunk_05",
+      "DocumentId": "paper-123",
+      "Position": 5,
+      "Content": "Main matched content...",
+      "Score": 0.95,
+      "Neighbors": [
+        { "DocumentKey": "doc_chunk_03", "DocumentId": "paper-123", "Position": 3, "Content": "Two chunks before..." },
+        { "DocumentKey": "doc_chunk_04", "DocumentId": "paper-123", "Position": 4, "Content": "One chunk before..." },
+        { "DocumentKey": "doc_chunk_06", "DocumentId": "paper-123", "Position": 6, "Content": "One chunk after..." },
+        { "DocumentKey": "doc_chunk_07", "DocumentId": "paper-123", "Position": 7, "Content": "Two chunks after..." }
+      ]
+    }
+  ]
+}
+```
+
+---
+
 ## Reference
 
 ### SearchQuery Fields
@@ -1381,6 +1458,7 @@ The search endpoint operates in one of three modes depending on which query para
 | `MinimumDistance` | double | null | Minimum distance threshold |
 | `MaximumDistance` | double | null | Maximum distance threshold |
 | `MaxResults` | int | 10 | Results per page (1-1000) |
+| `IncludeNeighbors` | int (nullable) | null | Number of neighboring chunks before and after each matched chunk to include (0-10). When set, each document includes a Neighbors array. |
 | `ContinuationToken` | string | null | Token for next page of results |
 
 ### FullTextQuery Fields

@@ -147,6 +147,8 @@ RecallDB search goes well beyond nearest-neighbor. A single query can combine an
 
 **Date ranges** &mdash; `CreatedBefore` and `CreatedAfter` for temporal scoping.
 
+**Neighbor retrieval** &mdash; include surrounding chunks for contextual windows (`IncludeNeighbors: N` returns up to N chunks before and after each match).
+
 **Pagination** &mdash; `MaxResults` (1-1000) with continuation tokens for large result sets.
 
 **Sort** &mdash; by score, distance, or creation date in ascending or descending order.
@@ -167,6 +169,18 @@ var results = await client.SearchAsync("ten_default", "col_default", new SearchQ
         Embeddings = new List<float> { 0.1f, 0.2f, 0.3f },
         MinimumScore = 0.7
     },
+    MaxResults = 10
+});
+
+// Vector search with neighbor retrieval
+var neighborResults = await client.SearchAsync("ten_default", "col_default", new SearchQuery
+{
+    Vector = new VectorQuery
+    {
+        SearchType = SearchTypeEnum.CosineSimilarity,
+        Embeddings = new List<float> { 0.1f, 0.2f, 0.3f }
+    },
+    IncludeNeighbors = 2,
     MaxResults = 10
 });
 

@@ -57,7 +57,7 @@ function parseCommaSep(str) {
 
 function buildQuery({ embeddings, searchType, minScore, maxScore, minDistance, maxDistance,
   requiredLabels, excludedLabels, requiredTags, excludedTags, requiredTerms, excludedTerms,
-  sortOrder, maxResults, createdBefore, createdAfter, documentIds,
+  sortOrder, maxResults, includeNeighbors, createdBefore, createdAfter, documentIds,
   fullTextQuery, fullTextSearchType, fullTextLanguage, fullTextNormalization, fullTextMinScore, fullTextWeight }) {
   const query = {
     SortOrder: sortOrder,
@@ -104,6 +104,9 @@ function buildQuery({ embeddings, searchType, minScore, maxScore, minDistance, m
     if (reqTerms.length > 0) query.Terms.Required = reqTerms
     if (excTerms.length > 0) query.Terms.Excluded = excTerms
   }
+
+  const parsedNeighbors = parseInt(includeNeighbors)
+  if (parsedNeighbors > 0) query.IncludeNeighbors = parsedNeighbors
 
   if (fullTextQuery && fullTextQuery.trim()) {
     query.FullText = {
@@ -254,6 +257,7 @@ function SearchTab({ tenantId, collectionId }) {
   const [fullTextWeight, setFullTextWeight] = useState(0.5)
   const [sortOrder, setSortOrder] = useState('ScoreDescending')
   const [maxResults, setMaxResults] = useState(10)
+  const [includeNeighbors, setIncludeNeighbors] = useState('')
   const [createdBefore, setCreatedBefore] = useState('')
   const [createdAfter, setCreatedAfter] = useState('')
   const [documentIds, setDocumentIds] = useState('')
@@ -299,7 +303,7 @@ function SearchTab({ tenantId, collectionId }) {
       const query = buildQuery({
         embeddings, searchType, minScore, maxScore, minDistance, maxDistance,
         requiredLabels, excludedLabels, requiredTags, excludedTags, requiredTerms, excludedTerms,
-        sortOrder, maxResults, createdBefore, createdAfter, documentIds,
+        sortOrder, maxResults, includeNeighbors, createdBefore, createdAfter, documentIds,
         fullTextQuery, fullTextSearchType, fullTextLanguage, fullTextNormalization, fullTextMinScore, fullTextWeight
       })
       const result = await api.search(tenantId, collectionId, query)
@@ -521,7 +525,7 @@ function SearchTab({ tenantId, collectionId }) {
           </CollapsibleSection>
 
           {/* Results options & submit */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 16, alignItems: 'end', marginTop: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: 16, alignItems: 'end', marginTop: 8 }}>
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label>Sort Order</label>
               <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)}>
@@ -531,6 +535,10 @@ function SearchTab({ tenantId, collectionId }) {
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label>Max Results</label>
               <input type="number" value={maxResults} onChange={(e) => setMaxResults(e.target.value)} min={1} max={1000} />
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label>Include Neighbors</label>
+              <input type="number" value={includeNeighbors} onChange={(e) => setIncludeNeighbors(e.target.value)} min={0} max={10} placeholder="0" />
             </div>
             <button type="submit" className="btn btn-primary" disabled={loading || !tenantId || !collectionId} style={{ marginBottom: 0 }}>
               {loading ? 'Searching...' : 'Search'}
@@ -545,7 +553,40 @@ function SearchTab({ tenantId, collectionId }) {
             {results.TotalRecords || 0} total results {results.EndOfResults ? '' : `(showing first ${results.Documents?.length || 0})`}
           </p>
           <div className="card">
-            <DataTable data={results.Documents || []} columns={resultColumns} />
+            <DataTable
+              data={results.Documents || []}
+              columns={resultColumns}
+              expandable={results.Documents?.some(d => d.Neighbors && d.Neighbors.length > 0)}
+              renderExpanded={(doc) => doc.Neighbors && doc.Neighbors.length > 0 ? (
+                <div style={{ padding: '8px 16px', background: 'var(--bg-tertiary, #f5f5f5)', borderTop: '1px solid var(--border-color, #eee)' }}>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                    Neighbors ({doc.Neighbors.length} chunk{doc.Neighbors.length !== 1 ? 's' : ''})
+                  </p>
+                  <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border-color, #ddd)' }}>
+                        <th style={{ textAlign: 'left', padding: '4px 8px', width: 60 }}>Pos</th>
+                        <th style={{ textAlign: 'left', padding: '4px 8px', width: 70 }}>Type</th>
+                        <th style={{ textAlign: 'left', padding: '4px 8px' }}>Content</th>
+                        <th style={{ width: 50 }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {doc.Neighbors.map((nb, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid var(--border-color, #eee)' }}>
+                          <td style={{ padding: '4px 8px' }}>{nb.Position}</td>
+                          <td style={{ padding: '4px 8px' }}>{nb.ContentType}</td>
+                          <td style={{ padding: '4px 8px' }}>{(nb.Content || '').length > 120 ? nb.Content.substring(0, 120) + '...' : (nb.Content || '(no content)')}</td>
+                          <td style={{ padding: '4px 8px' }}>
+                            <ActionMenu actions={[{ label: 'View JSON', onClick: () => setJsonModal(nb) }]} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+            />
           </div>
         </div>
       )}

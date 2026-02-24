@@ -58,6 +58,13 @@ namespace RecallDb.Sdk.Models
         public TermsFilter Terms { get; set; }
 
         /// <summary>
+        /// Number of neighboring chunks before and after each matched chunk to include in results.
+        /// When set to N, each matched document will include up to N chunks before and N chunks after.
+        /// Default: null (no neighbors). Range: 0-10.
+        /// </summary>
+        public int? IncludeNeighbors { get; set; }
+
+        /// <summary>
         /// Maximum number of results to return.
         /// Default: 10. Minimum: 1. Maximum: 1000.
         /// </summary>

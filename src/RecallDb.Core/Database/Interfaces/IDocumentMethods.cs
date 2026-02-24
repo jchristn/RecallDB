@@ -93,6 +93,17 @@ namespace RecallDb.Core.Database.Interfaces
         Task<bool> ExistsAsync(string collectionId, string documentKey, CancellationToken token = default);
 
         /// <summary>
+        /// Read document records by document ID within a position range.
+        /// </summary>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <param name="documentId">Document ID.</param>
+        /// <param name="minPosition">Minimum position (inclusive).</param>
+        /// <param name="maxPosition">Maximum position (inclusive).</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>List of document records within the position range, ordered by position ascending.</returns>
+        Task<List<DocumentRecord>> ReadByDocumentIdAndPositionRangeAsync(string collectionId, string documentId, int minPosition, int maxPosition, CancellationToken token = default);
+
+        /// <summary>
         /// Enumerate document records within a collection with pagination.
         /// </summary>
         /// <param name="collectionId">Collection ID.</param>

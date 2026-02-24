@@ -747,6 +747,56 @@ async function testSearchDocumentFields() {
 }
 
 // ---------------------------------------------------------------------------
+// Test-22b: Neighbor Retrieval
+// ---------------------------------------------------------------------------
+
+async function testNeighborDataSetup() {
+    const docs = [
+        { DocumentKey: "nbr-doc-0", DocumentId: "nbr-group-a", Position: 0, Content: "Chapter one introduction to the topic", ContentType: "Text", Embeddings: [0.9, 0.1, 0.05] },
+        { DocumentKey: "nbr-doc-1", DocumentId: "nbr-group-a", Position: 1, Content: "Chapter two background and context", ContentType: "Text", Embeddings: [0.85, 0.12, 0.08] },
+        { DocumentKey: "nbr-doc-2", DocumentId: "nbr-group-a", Position: 2, Content: "Chapter three core methodology explained", ContentType: "Text", Embeddings: [0.8, 0.15, 0.1] },
+        { DocumentKey: "nbr-doc-3", DocumentId: "nbr-group-a", Position: 3, Content: "Chapter four results and analysis", ContentType: "Text", Embeddings: [0.75, 0.18, 0.12] },
+        { DocumentKey: "nbr-doc-4", DocumentId: "nbr-group-a", Position: 4, Content: "Chapter five conclusion and future work", ContentType: "Text", Embeddings: [0.7, 0.2, 0.15] },
+        { DocumentKey: "nbr-doc-5", DocumentId: "nbr-group-b", Position: 0, Content: "Standalone single chunk document", ContentType: "Text", Embeddings: [0.6, 0.3, 0.2] },
+    ];
+    await _adminClient.createDocumentsBatch(_testTenantId, _testCollectionId, docs);
+}
+
+async function testNeighborSearchWithNeighbors() {
+    const r = await doSearch({
+        Vector: { SearchType: "CosineSimilarity", Embeddings: VECTOR_EMBEDDINGS },
+        MaxResults: 1,
+        IncludeNeighbors: 2,
+        DocumentIds: ["nbr-group-a"]
+    });
+    const docs = r.Documents || [];
+    assertTrue(docs.length > 0, "Should have at least one result");
+    const doc = docs[0];
+    assertTrue("Neighbors" in doc, "Document should have Neighbors when IncludeNeighbors is set");
+    assertTrue(doc.Neighbors !== null, "Neighbors should not be null");
+    assertTrue(doc.Neighbors.length > 0, "Neighbors should not be empty");
+    // Verify ordering
+    for (let i = 1; i < doc.Neighbors.length; i++) {
+        assertTrue(doc.Neighbors[i].Position > doc.Neighbors[i - 1].Position, "Neighbors should be ordered by Position ascending");
+    }
+    // Verify matched chunk not in neighbors
+    for (const nb of doc.Neighbors) {
+        assertTrue(nb.Position !== doc.Position, "Neighbor should not be the matched chunk itself");
+    }
+}
+
+async function testNeighborSearchWithoutNeighbors() {
+    const r = await doSearch({
+        Vector: { SearchType: "CosineSimilarity", Embeddings: VECTOR_EMBEDDINGS },
+        MaxResults: 1
+    });
+    const docs = r.Documents || [];
+    assertTrue(docs.length > 0, "Should have at least one result");
+    const doc = docs[0];
+    assertTrue(doc.Neighbors === null || doc.Neighbors === undefined, "Neighbors should be null when IncludeNeighbors is not set");
+}
+
+// ---------------------------------------------------------------------------
 // Test-23: Document Enumeration
 // ---------------------------------------------------------------------------
 
@@ -1061,6 +1111,11 @@ async function main() {
     // 22. Search Result Validation
     await runTest("Search validation: result fields", testSearchResultFields);
     await runTest("Search validation: document fields", testSearchDocumentFields);
+
+    // 22b. Neighbor Retrieval
+    await runTest("Neighbor retrieval: setup data", testNeighborDataSetup);
+    await runTest("Neighbor retrieval: search with neighbors", testNeighborSearchWithNeighbors);
+    await runTest("Neighbor retrieval: search without neighbors", testNeighborSearchWithoutNeighbors);
 
     // 23. Document Enumeration
     await runTest("Enum docs: basic", testEnumDocumentsBasic);

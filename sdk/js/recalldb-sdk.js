@@ -542,7 +542,8 @@ class RecallDbClient {
      * @param {Object} [query.TagFilter] - Tag filter with Required and Excluded condition arrays.
      * @param {Object} [query.Terms] - Terms filter for content matching, e.g. { Required: ["term1"], Excluded: ["term2"] }.
      * @param {number} [query.MaxResults] - Maximum results (1-1000, default 10).
-     * @returns {Promise<Object>} Search result. Documents include Score and, when FullText is used, TextScore (number).
+     * @param {number} [query.IncludeNeighbors] - Number of neighboring chunks before and after each matched chunk to include (0-10). When set, each document in the response will include a Neighbors array of surrounding chunks ordered by position.
+     * @returns {Promise<Object>} Search result. Documents include Score and, when FullText is used, TextScore (number). When IncludeNeighbors is set, documents include a Neighbors array.
      */
     async search(tenantId, collectionId, query) {
         return this._post(

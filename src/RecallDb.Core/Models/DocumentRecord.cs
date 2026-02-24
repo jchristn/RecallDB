@@ -258,6 +258,22 @@ namespace RecallDb.Core.Models
         }
 
         /// <summary>
+        /// Neighboring chunks surrounding this document in positional order.
+        /// Populated when IncludeNeighbors is specified in the search query. Null when not requested.
+        /// </summary>
+        public List<DocumentRecord> Neighbors
+        {
+            get
+            {
+                return _Neighbors;
+            }
+            set
+            {
+                _Neighbors = value;
+            }
+        }
+
+        /// <summary>
         /// Tags associated with this document (populated by the server layer, not stored in the documents table).
         /// </summary>
         public Dictionary<string, string> Tags
@@ -291,6 +307,7 @@ namespace RecallDb.Core.Models
         private double _Distance = 0;
         private double _Score = 0;
         private double? _TextScore = null;
+        private List<DocumentRecord> _Neighbors = null;
         private List<string> _Labels = new List<string>();
         private Dictionary<string, string> _Tags = new Dictionary<string, string>();
 

@@ -84,6 +84,12 @@ namespace RecallDb.Sdk.Models
         public double? TextScore { get; set; }
 
         /// <summary>
+        /// Neighboring chunks surrounding this document in positional order.
+        /// Populated when IncludeNeighbors is specified in the search query. Null when not requested.
+        /// </summary>
+        public List<DocumentRecord> Neighbors { get; set; }
+
+        /// <summary>
         /// Labels associated with this document.
         /// </summary>
         public List<string> Labels { get; set; }

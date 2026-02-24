@@ -226,6 +226,17 @@ namespace Test.Automated
             await RunTest("Search validation: result fields", TestSearchResultFields);
             await RunTest("Search validation: document fields", TestSearchDocumentFields);
 
+            // 22b. Neighbor Retrieval
+            await RunTest("Neighbor retrieval: setup data", TestNeighborDataSetup);
+            await RunTest("Neighbor retrieval: vector search with neighbors", TestNeighborVectorSearch);
+            await RunTest("Neighbor retrieval: hybrid search with neighbors", TestNeighborHybridSearch);
+            await RunTest("Neighbor retrieval: full-text search with neighbors", TestNeighborFullTextSearch);
+            await RunTest("Neighbor retrieval: boundary chunk (position 0)", TestNeighborBoundaryChunk);
+            await RunTest("Neighbor retrieval: single-chunk document", TestNeighborSingleChunkDocument);
+            await RunTest("Neighbor retrieval: null and zero means no neighbors", TestNeighborNullAndZero);
+            await RunTest("Neighbor retrieval: overlapping results same document", TestNeighborOverlapping);
+            await RunTest("Neighbor retrieval: neighbor labels and tags", TestNeighborLabelsAndTags);
+
             // 23. Document Enumeration
             await RunTest("Enum docs: basic", TestEnumDocumentsBasic);
             await RunTest("Enum docs: created ascending", TestEnumDocumentsCreatedAscending);
@@ -1862,6 +1873,206 @@ namespace Test.Automated
             AssertTrue(doc.TryGetProperty("Score", out _), "Document should have Score");
             AssertTrue(doc.TryGetProperty("Labels", out _), "Document should have Labels");
             AssertTrue(doc.TryGetProperty("Tags", out _), "Document should have Tags");
+        }
+
+        #endregion
+
+        #region Test-22b-Neighbor-Retrieval
+
+        private static async Task TestNeighborDataSetup()
+        {
+            // Create a multi-chunk document (5 chunks at positions 0-4) and a single-chunk document
+            List<object> docs = new List<object>
+            {
+                new { DocumentKey = "nbr-doc-0", DocumentId = "nbr-group-a", Position = 0, Content = "Chapter one introduction to the topic", ContentType = "Text", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } },
+                new { DocumentKey = "nbr-doc-1", DocumentId = "nbr-group-a", Position = 1, Content = "Chapter two background and context", ContentType = "Text", Embeddings = new List<float> { 0.85f, 0.12f, 0.08f } },
+                new { DocumentKey = "nbr-doc-2", DocumentId = "nbr-group-a", Position = 2, Content = "Chapter three core methodology explained", ContentType = "Text", Embeddings = new List<float> { 0.8f, 0.15f, 0.1f } },
+                new { DocumentKey = "nbr-doc-3", DocumentId = "nbr-group-a", Position = 3, Content = "Chapter four results and analysis", ContentType = "Text", Embeddings = new List<float> { 0.75f, 0.18f, 0.12f } },
+                new { DocumentKey = "nbr-doc-4", DocumentId = "nbr-group-a", Position = 4, Content = "Chapter five conclusion and future work", ContentType = "Text", Embeddings = new List<float> { 0.7f, 0.2f, 0.15f } },
+                new { DocumentKey = "nbr-doc-5", DocumentId = "nbr-group-b", Position = 0, Content = "Standalone single chunk document", ContentType = "Text", Embeddings = new List<float> { 0.6f, 0.3f, 0.2f } }
+            };
+
+            using HttpResponseMessage batchResp = await PostAsync(_AdminClient, DocBasePath() + "/batch", docs).ConfigureAwait(false);
+            AssertStatusCode(batchResp, HttpStatusCode.Created);
+
+            // Add labels and tags to neighbor test docs
+            foreach (string dk in new[] { "nbr-doc-0", "nbr-doc-1", "nbr-doc-2", "nbr-doc-3", "nbr-doc-4", "nbr-doc-5" })
+            {
+                using HttpResponseMessage labelResp = await PutAsync(_AdminClient, LabelBasePath(), new { DocumentKey = dk, Label = "neighbor-test" }).ConfigureAwait(false);
+                AssertStatusCode(labelResp, HttpStatusCode.Created);
+
+                using HttpResponseMessage tagResp = await PutAsync(_AdminClient, TagBasePath(), new { DocumentKey = dk, Key = "suite", Value = "neighbor" }).ConfigureAwait(false);
+                AssertStatusCode(tagResp, HttpStatusCode.Created);
+            }
+        }
+
+        private static async Task TestNeighborVectorSearch()
+        {
+            // Search for nbr-doc-0 (position 0) with IncludeNeighbors=2
+            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, MaxResults = 1, IncludeNeighbors = 2, DocumentIds = new List<string> { "nbr-group-a" } }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Should have at least one result");
+            JsonElement doc = docs[0];
+            AssertTrue(doc.TryGetProperty("Neighbors", out JsonElement neighbors), "Document should have Neighbors");
+            AssertTrue(neighbors.GetArrayLength() > 0, "Neighbors should not be empty");
+            AssertTrue(neighbors.GetArrayLength() <= 4, "Neighbors should be <= 4 (2 before + 2 after)");
+
+            // Verify neighbors are ordered by Position ascending
+            int prevPos = -1;
+            foreach (JsonElement nb in neighbors.EnumerateArray())
+            {
+                int pos = nb.GetProperty("Position").GetInt32();
+                AssertTrue(pos > prevPos, "Neighbors should be ordered by Position ascending");
+                AssertTrue(pos != doc.GetProperty("Position").GetInt32(), "Neighbor should not be the matched chunk itself");
+                prevPos = pos;
+            }
+        }
+
+        private static async Task TestNeighborHybridSearch()
+        {
+            var json = await DoSearch(new
+            {
+                Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } },
+                FullText = new { Query = "chapter introduction", TextWeight = 0.5 },
+                MaxResults = 1,
+                IncludeNeighbors = 2,
+                DocumentIds = new List<string> { "nbr-group-a" }
+            }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Hybrid search should return results");
+            JsonElement doc = docs[0];
+            AssertTrue(doc.TryGetProperty("Neighbors", out JsonElement neighbors), "Document should have Neighbors");
+            AssertTrue(neighbors.GetArrayLength() > 0, "Neighbors should not be empty");
+        }
+
+        private static async Task TestNeighborFullTextSearch()
+        {
+            var json = await DoSearch(new
+            {
+                FullText = new { Query = "chapter introduction topic" },
+                MaxResults = 1,
+                IncludeNeighbors = 2,
+                DocumentIds = new List<string> { "nbr-group-a" }
+            }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Full-text search should return results");
+            JsonElement doc = docs[0];
+            AssertTrue(doc.TryGetProperty("Neighbors", out JsonElement neighbors), "Document should have Neighbors");
+            AssertTrue(neighbors.GetArrayLength() > 0, "Neighbors should not be empty");
+        }
+
+        private static async Task TestNeighborBoundaryChunk()
+        {
+            // Search specifically for position 0 chunk - should only have neighbors after
+            var json = await DoSearch(new
+            {
+                Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } },
+                MaxResults = 1,
+                IncludeNeighbors = 2,
+                DocumentIds = new List<string> { "nbr-group-a" }
+            }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Should return results");
+            JsonElement doc = docs[0];
+            int docPos = doc.GetProperty("Position").GetInt32();
+            if (docPos == 0)
+            {
+                JsonElement neighbors = doc.GetProperty("Neighbors");
+                foreach (JsonElement nb in neighbors.EnumerateArray())
+                {
+                    AssertTrue(nb.GetProperty("Position").GetInt32() > 0, "Boundary chunk at position 0 should only have neighbors after it");
+                }
+            }
+        }
+
+        private static async Task TestNeighborSingleChunkDocument()
+        {
+            var json = await DoSearch(new
+            {
+                Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.6f, 0.3f, 0.2f } },
+                MaxResults = 1,
+                IncludeNeighbors = 2,
+                DocumentIds = new List<string> { "nbr-group-b" }
+            }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Should return the single-chunk document");
+            JsonElement doc = docs[0];
+            if (doc.TryGetProperty("Neighbors", out JsonElement neighbors))
+            {
+                AssertTrue(neighbors.GetArrayLength() == 0, "Single-chunk document should have empty Neighbors");
+            }
+        }
+
+        private static async Task TestNeighborNullAndZero()
+        {
+            // IncludeNeighbors = 0 means no neighbors
+            var json0 = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, MaxResults = 1, IncludeNeighbors = 0 }).ConfigureAwait(false);
+            var docs0 = GetDocs(json0);
+            AssertTrue(docs0.GetArrayLength() > 0, "Should return results");
+            JsonElement doc0 = docs0[0];
+            if (doc0.TryGetProperty("Neighbors", out JsonElement nb0))
+            {
+                AssertTrue(nb0.ValueKind == JsonValueKind.Null, "Neighbors should be null when IncludeNeighbors is 0");
+            }
+
+            // No IncludeNeighbors set means no neighbors
+            var jsonNull = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, MaxResults = 1 }).ConfigureAwait(false);
+            var docsNull = GetDocs(jsonNull);
+            AssertTrue(docsNull.GetArrayLength() > 0, "Should return results");
+            JsonElement docNull = docsNull[0];
+            if (docNull.TryGetProperty("Neighbors", out JsonElement nbNull))
+            {
+                AssertTrue(nbNull.ValueKind == JsonValueKind.Null, "Neighbors should be null when IncludeNeighbors is not set");
+            }
+        }
+
+        private static async Task TestNeighborOverlapping()
+        {
+            // Search for two close chunks in the same document
+            var json = await DoSearch(new
+            {
+                Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } },
+                MaxResults = 5,
+                IncludeNeighbors = 2,
+                DocumentIds = new List<string> { "nbr-group-a" }
+            }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 1, "Should return multiple results from same document");
+
+            foreach (JsonElement doc in docs.EnumerateArray())
+            {
+                if (doc.TryGetProperty("Neighbors", out JsonElement neighbors) && neighbors.ValueKind == JsonValueKind.Array)
+                {
+                    int docPos = doc.GetProperty("Position").GetInt32();
+                    foreach (JsonElement nb in neighbors.EnumerateArray())
+                    {
+                        AssertTrue(nb.GetProperty("Position").GetInt32() != docPos, "Neighbor should not be the matched chunk itself");
+                    }
+                }
+            }
+        }
+
+        private static async Task TestNeighborLabelsAndTags()
+        {
+            var json = await DoSearch(new
+            {
+                Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } },
+                MaxResults = 1,
+                IncludeNeighbors = 2,
+                DocumentIds = new List<string> { "nbr-group-a" }
+            }).ConfigureAwait(false);
+            var docs = GetDocs(json);
+            AssertTrue(docs.GetArrayLength() > 0, "Should return results");
+            JsonElement doc = docs[0];
+            JsonElement neighbors = doc.GetProperty("Neighbors");
+            AssertTrue(neighbors.GetArrayLength() > 0, "Should have neighbors");
+
+            foreach (JsonElement nb in neighbors.EnumerateArray())
+            {
+                AssertTrue(nb.TryGetProperty("Labels", out JsonElement labels), "Neighbor should have Labels");
+                AssertTrue(labels.GetArrayLength() > 0, "Neighbor should have at least one label");
+                AssertTrue(nb.TryGetProperty("Tags", out JsonElement tags), "Neighbor should have Tags");
+            }
         }
 
         #endregion

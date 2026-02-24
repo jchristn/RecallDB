@@ -2147,6 +2147,90 @@ namespace RecallDb.Server
             Stopwatch sw = Stopwatch.StartNew();
             SearchResult result = await _Database.Search.SearchAsync(cid, col.Dimensionality, query).ConfigureAwait(false);
             await AttachLabelsAndTagsAsync(cid, result.Documents).ConfigureAwait(false);
+
+            // Neighbor enrichment
+            if (query.IncludeNeighbors.HasValue && query.IncludeNeighbors.Value > 0 && result.Documents != null && result.Documents.Count > 0)
+            {
+                int n = query.IncludeNeighbors.Value;
+
+                // Group matched documents by DocumentId, skipping those without a DocumentId
+                var groupedByDocId = new Dictionary<string, List<DocumentRecord>>();
+                foreach (DocumentRecord doc in result.Documents)
+                {
+                    if (string.IsNullOrEmpty(doc.DocumentId)) continue;
+                    if (!groupedByDocId.ContainsKey(doc.DocumentId))
+                        groupedByDocId[doc.DocumentId] = new List<DocumentRecord>();
+                    groupedByDocId[doc.DocumentId].Add(doc);
+                }
+
+                // For each unique DocumentId, merge overlapping position ranges and fetch neighbors
+                List<DocumentRecord> allNeighborDocs = new List<DocumentRecord>();
+
+                foreach (var kvp in groupedByDocId)
+                {
+                    string documentId = kvp.Key;
+                    List<DocumentRecord> matchedDocs = kvp.Value;
+
+                    // Compute merged position ranges
+                    var ranges = new List<(int Min, int Max)>();
+                    foreach (DocumentRecord doc in matchedDocs)
+                    {
+                        int minPos = Math.Max(0, doc.Position - n);
+                        int maxPos = doc.Position + n;
+                        ranges.Add((minPos, maxPos));
+                    }
+
+                    // Sort and merge overlapping ranges
+                    ranges.Sort((a, b) => a.Min.CompareTo(b.Min));
+                    var merged = new List<(int Min, int Max)>();
+                    merged.Add(ranges[0]);
+                    for (int i = 1; i < ranges.Count; i++)
+                    {
+                        var last = merged[merged.Count - 1];
+                        if (ranges[i].Min <= last.Max + 1)
+                        {
+                            merged[merged.Count - 1] = (last.Min, Math.Max(last.Max, ranges[i].Max));
+                        }
+                        else
+                        {
+                            merged.Add(ranges[i]);
+                        }
+                    }
+
+                    // Fetch chunks for each merged range
+                    List<DocumentRecord> fetchedChunks = new List<DocumentRecord>();
+                    foreach (var range in merged)
+                    {
+                        List<DocumentRecord> chunks = await _Database.Documents.ReadByDocumentIdAndPositionRangeAsync(
+                            cid, documentId, range.Min, range.Max).ConfigureAwait(false);
+                        fetchedChunks.AddRange(chunks);
+                    }
+
+                    // Assign neighbors to each matched document
+                    foreach (DocumentRecord doc in matchedDocs)
+                    {
+                        int minPos = Math.Max(0, doc.Position - n);
+                        int maxPos = doc.Position + n;
+                        doc.Neighbors = new List<DocumentRecord>();
+                        foreach (DocumentRecord chunk in fetchedChunks)
+                        {
+                            if (chunk.Position >= minPos && chunk.Position <= maxPos && chunk.Position != doc.Position)
+                            {
+                                doc.Neighbors.Add(chunk);
+                            }
+                        }
+                    }
+
+                    allNeighborDocs.AddRange(fetchedChunks);
+                }
+
+                // Attach labels and tags to neighbor documents
+                if (allNeighborDocs.Count > 0)
+                {
+                    await AttachLabelsAndTagsAsync(cid, allNeighborDocs).ConfigureAwait(false);
+                }
+            }
+
             result.TotalMs = sw.Elapsed.TotalMilliseconds;
             return result;
         }

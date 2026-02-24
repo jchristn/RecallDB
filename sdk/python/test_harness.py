@@ -949,6 +949,58 @@ def test_search_document_fields():
 
 
 # ---------------------------------------------------------------------------
+# Test-22b: Neighbor Retrieval
+# ---------------------------------------------------------------------------
+
+def test_neighbor_data_setup():
+    """Create multi-chunk documents for neighbor retrieval testing."""
+    docs = [
+        {"DocumentKey": "nbr-doc-0", "DocumentId": "nbr-group-a", "Position": 0, "Content": "Chapter one introduction to the topic", "ContentType": "Text", "Embeddings": [0.9, 0.1, 0.05]},
+        {"DocumentKey": "nbr-doc-1", "DocumentId": "nbr-group-a", "Position": 1, "Content": "Chapter two background and context", "ContentType": "Text", "Embeddings": [0.85, 0.12, 0.08]},
+        {"DocumentKey": "nbr-doc-2", "DocumentId": "nbr-group-a", "Position": 2, "Content": "Chapter three core methodology explained", "ContentType": "Text", "Embeddings": [0.8, 0.15, 0.1]},
+        {"DocumentKey": "nbr-doc-3", "DocumentId": "nbr-group-a", "Position": 3, "Content": "Chapter four results and analysis", "ContentType": "Text", "Embeddings": [0.75, 0.18, 0.12]},
+        {"DocumentKey": "nbr-doc-4", "DocumentId": "nbr-group-a", "Position": 4, "Content": "Chapter five conclusion and future work", "ContentType": "Text", "Embeddings": [0.7, 0.2, 0.15]},
+        {"DocumentKey": "nbr-doc-5", "DocumentId": "nbr-group-b", "Position": 0, "Content": "Standalone single chunk document", "ContentType": "Text", "Embeddings": [0.6, 0.3, 0.2]},
+    ]
+    _admin_client.create_documents_batch(_test_tenant_id, _test_collection_id, docs)
+
+
+def test_neighbor_search_with_neighbors():
+    """Search with IncludeNeighbors set, assert Neighbors present in response documents."""
+    resp = do_search({
+        "Vector": {"SearchType": "CosineSimilarity", "Embeddings": _VECTOR_EMBEDDINGS},
+        "MaxResults": 1,
+        "IncludeNeighbors": 2,
+        "DocumentIds": ["nbr-group-a"]
+    })
+    docs = resp.get("Documents", [])
+    assert_true(len(docs) > 0, "Should have at least one result")
+    doc = docs[0]
+    assert_true("Neighbors" in doc, "Document should have Neighbors when IncludeNeighbors is set")
+    assert_true(doc["Neighbors"] is not None, "Neighbors should not be null")
+    assert_true(len(doc["Neighbors"]) > 0, "Neighbors should not be empty")
+    # Verify ordering
+    positions = [nb["Position"] for nb in doc["Neighbors"]]
+    assert_true(positions == sorted(positions), "Neighbors should be ordered by Position ascending")
+    # Verify matched chunk not in neighbors
+    for nb in doc["Neighbors"]:
+        assert_true(nb["Position"] != doc["Position"], "Neighbor should not be the matched chunk itself")
+
+
+def test_neighbor_search_without_neighbors():
+    """Search without IncludeNeighbors, assert Neighbors is absent or null."""
+    resp = do_search({
+        "Vector": {"SearchType": "CosineSimilarity", "Embeddings": _VECTOR_EMBEDDINGS},
+        "MaxResults": 1
+    })
+    docs = resp.get("Documents", [])
+    assert_true(len(docs) > 0, "Should have at least one result")
+    doc = docs[0]
+    neighbors = doc.get("Neighbors")
+    assert_true(neighbors is None, "Neighbors should be null when IncludeNeighbors is not set")
+
+
+# ---------------------------------------------------------------------------
 # Test-23: Document Enumeration
 # ---------------------------------------------------------------------------
 
@@ -1437,6 +1489,11 @@ def main():
     # 22. Search Result Validation
     run_test("Search validation: result fields", test_search_result_fields)
     run_test("Search validation: document fields", test_search_document_fields)
+
+    # 22b. Neighbor Retrieval
+    run_test("Neighbor retrieval: setup data", test_neighbor_data_setup)
+    run_test("Neighbor retrieval: search with neighbors", test_neighbor_search_with_neighbors)
+    run_test("Neighbor retrieval: search without neighbors", test_neighbor_search_without_neighbors)
 
     # 23. Document Enumeration
     run_test("Enum docs: basic", test_enum_documents_basic)

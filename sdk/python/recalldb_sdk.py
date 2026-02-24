@@ -672,10 +672,15 @@ class RecallDbClient:
                 Terms (dict): Terms filter for content matching,
                     e.g. {"Required": ["term1"], "Excluded": ["term2"]}.
                 MaxResults (int): Maximum results (1-1000, default 10).
+                IncludeNeighbors (int): Number of neighboring chunks before and after
+                    each matched chunk to include (0-10). When set, each document in the
+                    response will include a Neighbors list of surrounding chunks ordered
+                    by position. Default: null (no neighbors).
 
         Returns:
             dict: Search result. Documents include Score and, when FullText is used,
-                TextScore (float) with the full-text relevance score.
+                TextScore (float) with the full-text relevance score. When IncludeNeighbors
+                is set, each document will also include a Neighbors list of adjacent chunks.
         """
         return self._post(
             f"/v1.0/tenants/{tenant_id}/collections/{collection_id}/search",

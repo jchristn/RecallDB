@@ -211,6 +211,33 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
         }
 
         /// <summary>
+        /// Read document records by document ID within a position range.
+        /// </summary>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <param name="documentId">Document ID.</param>
+        /// <param name="minPosition">Minimum position (inclusive).</param>
+        /// <param name="maxPosition">Maximum position (inclusive).</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>List of document records within the position range, ordered by position ascending.</returns>
+        public async Task<List<DocumentRecord>> ReadByDocumentIdAndPositionRangeAsync(string collectionId, string documentId, int minPosition, int maxPosition, CancellationToken token = default)
+        {
+            if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
+            if (string.IsNullOrEmpty(documentId)) throw new ArgumentNullException(nameof(documentId));
+
+            string tableName = "collection_" + SanitizeTableName(collectionId);
+
+            string query =
+                "SELECT " + _SelectColumns + " FROM " + tableName + " " +
+                "WHERE document_id = '" + _Driver.Sanitize(documentId) + "' " +
+                "AND position BETWEEN " + minPosition.ToString(CultureInfo.InvariantCulture) + " AND " + maxPosition.ToString(CultureInfo.InvariantCulture) + " " +
+                "ORDER BY position ASC";
+
+            DataTable result = await _Driver.ExecuteQueryAsync(query, false, token).ConfigureAwait(false);
+
+            return DocumentRecord.FromDataTable(result);
+        }
+
+        /// <summary>
         /// Update an existing document record within a collection.
         /// </summary>
         /// <param name="collectionId">Collection ID.</param>

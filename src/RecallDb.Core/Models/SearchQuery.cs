@@ -213,6 +213,34 @@ namespace RecallDb.Core.Models
         }
 
         /// <summary>
+        /// Number of neighboring chunks before and after each matched chunk to include in results.
+        /// When set to N, each matched document will have its Neighbors property populated with
+        /// up to N chunks before and N chunks after the matched chunk's position within the same DocumentId.
+        /// Default: null (no neighbors). Range: 0-10 (values outside range are clamped; null and 0 both mean no neighbors).
+        /// </summary>
+        public int? IncludeNeighbors
+        {
+            get
+            {
+                return _IncludeNeighbors;
+            }
+            set
+            {
+                if (value.HasValue)
+                {
+                    int v = value.Value;
+                    if (v < 0) v = 0;
+                    if (v > 10) v = 10;
+                    _IncludeNeighbors = v;
+                }
+                else
+                {
+                    _IncludeNeighbors = null;
+                }
+            }
+        }
+
+        /// <summary>
         /// Maximum number of results to return.
         /// Default: 10. Minimum: 1. Maximum: 1000.
         /// Values outside the range are clamped.
@@ -259,6 +287,7 @@ namespace RecallDb.Core.Models
         private VectorQuery _Vector = null;
         private FullTextQuery _FullText = null;
         private TermsFilter _Terms = null;
+        private int? _IncludeNeighbors = null;
         private double? _MinimumScore = null;
         private double? _MaximumScore = null;
         private double? _MinimumDistance = null;

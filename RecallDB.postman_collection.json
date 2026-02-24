@@ -1867,6 +1867,48 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "Search with Neighbor Retrieval",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1.0/tenants/{{tenant_id}}/collections/{{collection_id}}/search",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1.0",
+                "tenants",
+                "{{tenant_id}}",
+                "collections",
+                "{{collection_id}}",
+                "search"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"SortOrder\": \"ScoreDescending\",\n  \"MaxResults\": 10,\n  \"IncludeNeighbors\": 3,\n  \"Vector\": {\n    \"SearchType\": \"CosineSimilarity\",\n    \"Embeddings\": [0.1, 0.2, 0.3]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
         }
       ]
     }

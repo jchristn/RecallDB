@@ -10,7 +10,9 @@ export default function DataTable({
   onRefresh = null,
   refreshing = false,
   totalRecords = null,
-  onPageChange = null
+  onPageChange = null,
+  expandable = false,
+  renderExpanded = null
 }) {
   const isServerPaginated = totalRecords != null && onPageChange != null
   const [currentPage, setCurrentPage] = useState(0)
@@ -18,6 +20,7 @@ export default function DataTable({
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' })
   const [filters, setFilters] = useState({})
   const [pageInput, setPageInput] = useState('1')
+  const [expandedRows, setExpandedRows] = useState({})
   const [refreshDone, setRefreshDone] = useState(false)
   const prevRefreshing = useRef(false)
 
@@ -220,6 +223,7 @@ export default function DataTable({
       <table className="data-table">
         <thead>
           <tr>
+            {expandable && <th style={{ width: 32 }}></th>}
             {columns.map((col) => (
               <th
                 key={col.key}
@@ -237,6 +241,7 @@ export default function DataTable({
           </tr>
           {!isServerPaginated && (
             <tr className="filter-row">
+              {expandable && <th></th>}
               {columns.map((col) => (
                 <th key={`filter-${col.key}`}>
                   {col.filterable !== false && !col.isAction && (
@@ -255,24 +260,43 @@ export default function DataTable({
         <tbody>
           {paginatedData.length === 0 ? (
             <tr>
-              <td colSpan={columns.length} className="no-data">
+              <td colSpan={expandable ? columns.length + 1 : columns.length} className="no-data">
                 No data available
               </td>
             </tr>
           ) : (
-            paginatedData.map((item, index) => (
-              <tr
-                key={item.Id || item.DocumentKey || index}
-                onClick={() => onRowClick && onRowClick(item)}
-                className={onRowClick ? 'clickable' : ''}
-              >
-                {columns.map((col) => (
-                  <td key={col.key} style={col.width ? { minWidth: col.width } : undefined}>
-                    {col.render ? col.render(item) : item[col.key]}
-                  </td>
-                ))}
-              </tr>
-            ))
+            paginatedData.map((item, index) => {
+              const rowKey = item.Id || item.DocumentKey || index
+              const isExpanded = expandedRows[rowKey]
+              const hasExpandContent = expandable && renderExpanded && renderExpanded(item)
+              return (
+                <React.Fragment key={rowKey}>
+                  <tr
+                    onClick={() => onRowClick && onRowClick(item)}
+                    className={onRowClick ? 'clickable' : ''}
+                  >
+                    {expandable && (
+                      <td style={{ width: 32, textAlign: 'center', cursor: hasExpandContent ? 'pointer' : 'default', padding: '4px' }}
+                        onClick={(e) => { e.stopPropagation(); if (hasExpandContent) setExpandedRows(prev => ({ ...prev, [rowKey]: !prev[rowKey] })) }}>
+                        {hasExpandContent ? (isExpanded ? '\u25B2' : '\u25BC') : ''}
+                      </td>
+                    )}
+                    {columns.map((col) => (
+                      <td key={col.key} style={col.width ? { minWidth: col.width } : undefined}>
+                        {col.render ? col.render(item) : item[col.key]}
+                      </td>
+                    ))}
+                  </tr>
+                  {isExpanded && hasExpandContent && (
+                    <tr>
+                      <td colSpan={columns.length + 1} style={{ padding: 0 }}>
+                        {renderExpanded(item)}
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              )
+            })
           )}
         </tbody>
       </table>
