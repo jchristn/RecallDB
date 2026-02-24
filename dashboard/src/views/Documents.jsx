@@ -18,6 +18,9 @@ function formatBytes(bytes) {
 export default function Documents() {
   const { tenantId, collectionId } = useParams()
   const [documents, setDocuments] = useState([])
+  const [totalRecords, setTotalRecords] = useState(0)
+  const [pageIndex, setPageIndex] = useState(0)
+  const [pageSize, setPageSize] = useState(10)
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState({ Content: '', ContentType: 'Text', Embeddings: '', DocumentId: '', Position: 0, Labels: [], Tags: [{ key: '', value: '' }] })
   const [error, setError] = useState(null)
@@ -29,15 +32,26 @@ export default function Documents() {
   const [editForm, setEditForm] = useState({ Content: '', ContentType: 'Text', DocumentId: '', Position: 0, Labels: [], Tags: [{ key: '', value: '' }] })
   const [loading, setLoading] = useState(false)
 
-  useEffect(() => { loadDocuments() }, [tenantId, collectionId])
+  useEffect(() => { loadDocuments(0, pageSize) }, [tenantId, collectionId])
 
-  const loadDocuments = async () => {
+  const loadDocuments = async (page = pageIndex, size = pageSize) => {
     try {
       setLoading(true)
-      const result = await api.listDocuments(tenantId, collectionId)
+      const query = {
+        MaxResults: size,
+        ContinuationToken: page > 0 ? String(page * size) : null
+      }
+      const result = await api.enumerateDocuments(tenantId, collectionId, query)
       setDocuments(result?.Objects || [])
+      setTotalRecords(result?.TotalRecords || 0)
+      setPageIndex(page)
+      setPageSize(size)
     } catch (err) { setError(err) }
     finally { setLoading(false) }
+  }
+
+  const handlePageChange = (page, size) => {
+    loadDocuments(page, size)
   }
 
   const handleCreate = async (e) => {
@@ -61,13 +75,13 @@ export default function Documents() {
       })
       setForm({ Content: '', ContentType: 'Text', Embeddings: '', DocumentId: '', Position: 0, Labels: [], Tags: [{ key: '', value: '' }] })
       setShowCreate(false)
-      loadDocuments()
+      loadDocuments(pageIndex, pageSize)
     } catch (err) { setError(err) }
   }
 
   const handleDelete = async () => {
     if (!deleteTarget) return
-    try { await api.deleteDocument(tenantId, collectionId, deleteTarget); loadDocuments() } catch (err) { setError(err) }
+    try { await api.deleteDocument(tenantId, collectionId, deleteTarget); loadDocuments(pageIndex, pageSize) } catch (err) { setError(err) }
     setDeleteTarget(null)
   }
 
@@ -116,7 +130,7 @@ export default function Documents() {
         Tags: Object.keys(tags).length > 0 ? tags : null
       })
       setEditTarget(null)
-      loadDocuments()
+      loadDocuments(pageIndex, pageSize)
     } catch (err) { setError(err) }
   }
 
@@ -170,7 +184,7 @@ export default function Documents() {
       </div>
       <ErrorModal error={error} onClose={() => setError(null)} />
       <div className="card">
-        <DataTable data={documents} columns={columns} onRefresh={loadDocuments} refreshing={loading} />
+        <DataTable data={documents} columns={columns} onRefresh={() => loadDocuments(pageIndex, pageSize)} refreshing={loading} totalRecords={totalRecords} onPageChange={handlePageChange} />
       </div>
 
       {showCreate && (

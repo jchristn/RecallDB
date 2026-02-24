@@ -8,8 +8,11 @@ export default function DataTable({
   onRowClick = null,
   hidePagination = false,
   onRefresh = null,
-  refreshing = false
+  refreshing = false,
+  totalRecords = null,
+  onPageChange = null
 }) {
+  const isServerPaginated = totalRecords != null && onPageChange != null
   const [currentPage, setCurrentPage] = useState(0)
   const [pageSize, setPageSize] = useState(defaultPageSize)
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' })
@@ -60,10 +63,11 @@ export default function DataTable({
     return result
   }, [data, columns, sortConfig, filters])
 
-  const totalPages = Math.max(1, Math.ceil(filteredAndSortedData.length / pageSize))
+  const effectiveTotal = isServerPaginated ? totalRecords : filteredAndSortedData.length
+  const totalPages = Math.max(1, Math.ceil(effectiveTotal / pageSize))
   const startIndex = currentPage * pageSize
-  const endIndex = Math.min(startIndex + pageSize, filteredAndSortedData.length)
-  const paginatedData = filteredAndSortedData.slice(startIndex, endIndex)
+  const endIndex = Math.min(startIndex + pageSize, effectiveTotal)
+  const paginatedData = isServerPaginated ? data : filteredAndSortedData.slice(startIndex, endIndex)
 
   useEffect(() => {
     if (currentPage >= totalPages && totalPages > 0) {
@@ -88,10 +92,13 @@ export default function DataTable({
     setPageInput('1')
   }
 
-  const goToPage = (page) => {
-    const validPage = Math.max(0, Math.min(page, totalPages - 1))
+  const goToPage = (page, newPageSize) => {
+    const size = newPageSize || pageSize
+    const maxPage = Math.max(0, Math.ceil(effectiveTotal / size) - 1)
+    const validPage = Math.max(0, Math.min(page, maxPage))
     setCurrentPage(validPage)
     setPageInput(String(validPage + 1))
+    if (onPageChange) onPageChange(validPage, size)
   }
 
   const handlePageInputChange = (e) => {
@@ -143,17 +150,17 @@ export default function DataTable({
       {!hidePagination && (
         <div className="pagination">
           <div className="pagination-info">
-            Showing {filteredAndSortedData.length === 0 ? 0 : startIndex + 1} to{' '}
-            {endIndex} of {filteredAndSortedData.length} entries
+            Showing {effectiveTotal === 0 ? 0 : startIndex + 1} to{' '}
+            {endIndex} of {effectiveTotal.toLocaleString()} entries
           </div>
 
           <div className="pagination-controls">
             <select
               value={pageSize}
               onChange={(e) => {
-                setPageSize(Number(e.target.value))
-                setCurrentPage(0)
-                setPageInput('1')
+                const newSize = Number(e.target.value)
+                setPageSize(newSize)
+                goToPage(0, newSize)
               }}
             >
               <option value={10}>10</option>
@@ -228,20 +235,22 @@ export default function DataTable({
               </th>
             ))}
           </tr>
-          <tr className="filter-row">
-            {columns.map((col) => (
-              <th key={`filter-${col.key}`}>
-                {col.filterable !== false && !col.isAction && (
-                  <input
-                    type="text"
-                    placeholder="Filter..."
-                    value={filters[col.key] || ''}
-                    onChange={(e) => handleFilterChange(col.key, e.target.value)}
-                  />
-                )}
-              </th>
-            ))}
-          </tr>
+          {!isServerPaginated && (
+            <tr className="filter-row">
+              {columns.map((col) => (
+                <th key={`filter-${col.key}`}>
+                  {col.filterable !== false && !col.isAction && (
+                    <input
+                      type="text"
+                      placeholder="Filter..."
+                      value={filters[col.key] || ''}
+                      onChange={(e) => handleFilterChange(col.key, e.target.value)}
+                    />
+                  )}
+                </th>
+              ))}
+            </tr>
+          )}
         </thead>
         <tbody>
           {paginatedData.length === 0 ? (

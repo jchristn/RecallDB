@@ -14,6 +14,9 @@ export default function DocumentsBrowser() {
   const [tenants, setTenants] = useState([])
   const [collections, setCollections] = useState([])
   const [documents, setDocuments] = useState([])
+  const [totalRecords, setTotalRecords] = useState(0)
+  const [pageIndex, setPageIndex] = useState(0)
+  const [pageSize, setPageSize] = useState(10)
   const [selectedTenant, setSelectedTenant] = useState('')
   const [selectedCollection, setSelectedCollection] = useState('')
   const [showCreate, setShowCreate] = useState(false)
@@ -47,9 +50,10 @@ export default function DocumentsBrowser() {
 
   useEffect(() => {
     if (selectedTenant && selectedCollection) {
-      loadDocuments()
+      loadDocuments(0, pageSize)
     } else {
       setDocuments([])
+      setTotalRecords(0)
     }
   }, [selectedTenant, selectedCollection])
 
@@ -83,13 +87,24 @@ export default function DocumentsBrowser() {
     finally { setLoadingCollections(false) }
   }
 
-  const loadDocuments = async () => {
+  const loadDocuments = async (page = pageIndex, size = pageSize) => {
     try {
       setLoadingDocuments(true)
-      const result = await api.listDocuments(selectedTenant, selectedCollection)
+      const query = {
+        MaxResults: size,
+        ContinuationToken: page > 0 ? String(page * size) : null
+      }
+      const result = await api.enumerateDocuments(selectedTenant, selectedCollection, query)
       setDocuments(result?.Objects || [])
+      setTotalRecords(result?.TotalRecords || 0)
+      setPageIndex(page)
+      setPageSize(size)
     } catch (err) { setError(err) }
     finally { setLoadingDocuments(false) }
+  }
+
+  const handlePageChange = (page, size) => {
+    loadDocuments(page, size)
   }
 
   const handleCreate = async (e) => {
@@ -113,7 +128,7 @@ export default function DocumentsBrowser() {
       })
       setForm({ Content: '', ContentType: 'Text', Embeddings: '', DocumentId: '', Position: 0, Labels: [], Tags: [{ key: '', value: '' }] })
       setShowCreate(false)
-      loadDocuments()
+      loadDocuments(pageIndex, pageSize)
     } catch (err) { setError(err) }
   }
 
@@ -121,7 +136,7 @@ export default function DocumentsBrowser() {
     if (!deleteTarget) return
     try {
       await api.deleteDocument(selectedTenant, selectedCollection, deleteTarget)
-      loadDocuments()
+      loadDocuments(pageIndex, pageSize)
     } catch (err) { setError(err) }
     setDeleteTarget(null)
   }
@@ -168,7 +183,7 @@ export default function DocumentsBrowser() {
         Tags: Object.keys(tags).length > 0 ? tags : null
       })
       setEditTarget(null)
-      loadDocuments()
+      loadDocuments(pageIndex, pageSize)
     } catch (err) { setError(err) }
   }
 
@@ -300,7 +315,7 @@ export default function DocumentsBrowser() {
           {loadingDocuments ? (
             <div className="data-table-loading"><div className="spinner" />Loading documents...</div>
           ) : (
-            <DataTable data={documents} columns={columns} onRefresh={loadDocuments} refreshing={loadingDocuments} />
+            <DataTable data={documents} columns={columns} onRefresh={() => loadDocuments(pageIndex, pageSize)} refreshing={loadingDocuments} totalRecords={totalRecords} onPageChange={handlePageChange} />
           )}
         </div>
       )}
