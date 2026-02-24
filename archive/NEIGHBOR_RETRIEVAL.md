@@ -175,7 +175,7 @@ When searching via vector similarity, full-text relevance, or hybrid search, use
 
 - [x] **File**: `README.md` — DONE
 - [x] In the Search section, add a bullet point mentioning neighbor retrieval — DONE
-- [x] In the SDK examples section, add a brief example showing `IncludeNeighbors` usage in C# — DONE
+- [x] In the SDK examples section, add `IncludeNeighbors` usage examples in all three SDKs (C#, Python, JavaScript) — DONE
 
 ---
 

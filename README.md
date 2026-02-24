@@ -211,6 +211,16 @@ results = client.search("ten_default", "col_default", {
     },
     "MaxResults": 10
 })
+
+# Vector search with neighbor retrieval
+neighbor_results = client.search("ten_default", "col_default", {
+    "Vector": {
+        "SearchType": "CosineSimilarity",
+        "Embeddings": [0.1, 0.2, 0.3]
+    },
+    "IncludeNeighbors": 2,
+    "MaxResults": 10
+})
 ```
 
 ### JavaScript
@@ -225,6 +235,16 @@ const results = await client.search('ten_default', 'col_default', {
     Embeddings: [0.1, 0.2, 0.3],
     MinimumScore: 0.7,
   },
+  MaxResults: 10,
+});
+
+// Vector search with neighbor retrieval
+const neighborResults = await client.search('ten_default', 'col_default', {
+  Vector: {
+    SearchType: 'CosineSimilarity',
+    Embeddings: [0.1, 0.2, 0.3],
+  },
+  IncludeNeighbors: 2,
   MaxResults: 10,
 });
 ```
