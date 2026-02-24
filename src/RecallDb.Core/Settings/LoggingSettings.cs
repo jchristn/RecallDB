@@ -91,6 +91,38 @@ namespace RecallDb.Core.Settings
         }
 
         /// <summary>
+        /// Enable file logging.
+        /// Default: true.
+        /// </summary>
+        public bool FileLogging
+        {
+            get
+            {
+                return _FileLogging;
+            }
+            set
+            {
+                _FileLogging = value;
+            }
+        }
+
+        /// <summary>
+        /// Include date in log filename.
+        /// Default: true.
+        /// </summary>
+        public bool IncludeDateInFilename
+        {
+            get
+            {
+                return _IncludeDateInFilename;
+            }
+            set
+            {
+                _IncludeDateInFilename = value;
+            }
+        }
+
+        /// <summary>
         /// Syslog servers.
         /// </summary>
         public List<SyslogServer> Servers
@@ -115,6 +147,8 @@ namespace RecallDb.Core.Settings
         private int _MinimumSeverity = 0;
         private string _LogDirectory = "./logs/";
         private string _LogFilename = "recalldb.log";
+        private bool _FileLogging = true;
+        private bool _IncludeDateInFilename = true;
         private List<SyslogServer> _Servers = new List<SyslogServer>();
 
         #endregion

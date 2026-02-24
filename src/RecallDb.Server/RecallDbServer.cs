@@ -84,7 +84,23 @@ namespace RecallDb.Server
                 _Logging = new LoggingModule();
 
             _Logging.Settings.EnableConsole = _Settings.Logging.ConsoleLogging;
+            _Logging.Settings.EnableColors = _Settings.Logging.EnableColors;
             _Logging.Settings.MinimumSeverity = (Severity)_Settings.Logging.MinimumSeverity;
+
+            if (_Settings.Logging.FileLogging
+                && !String.IsNullOrEmpty(_Settings.Logging.LogDirectory)
+                && !String.IsNullOrEmpty(_Settings.Logging.LogFilename))
+            {
+                if (!Directory.Exists(_Settings.Logging.LogDirectory))
+                    Directory.CreateDirectory(_Settings.Logging.LogDirectory);
+
+                _Logging.Settings.LogFilename = Path.Combine(_Settings.Logging.LogDirectory, _Settings.Logging.LogFilename);
+
+                if (_Settings.Logging.IncludeDateInFilename)
+                    _Logging.Settings.FileLogging = FileLoggingMode.FileWithDate;
+                else
+                    _Logging.Settings.FileLogging = FileLoggingMode.SingleLogFile;
+            }
 
             _Logging.Info(_Header + "RecallDB v" + _Version + " starting");
 

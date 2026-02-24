@@ -1,3 +1,5 @@
+using System;
+
 namespace RecallDb.Core
 {
     /// <summary>
@@ -9,10 +11,10 @@ namespace RecallDb.Core
         /// ASCII art logo displayed at startup.
         /// </summary>
         public static string Logo =
-            @"                      _ _     _ _     " + "\n" +
-            @"  _ __ ___  ___ __ _| | | __| | |__  " + "\n" +
-            @" | '__/ _ \/ __/ _` | | |/ _` | '_ \ " + "\n" +
-            @" | | |  __/ (_| (_| | | | (_| | |_) |" + "\n" +
-            @" |_|  \___|\___\__,_|_|_|\__,_|_.__/ " + "\n";
+            @"                     _ _     _ _     " + Environment.NewLine +
+            @"  _ __ ___  ___ __ _| | | __| | |__  " + Environment.NewLine +
+            @" | '__/ _ \/ __/ _` | | |/ _` | '_ \ " + Environment.NewLine +
+            @" | | |  __/ (_| (_| | | | (_| | |_) |" + Environment.NewLine +
+            @" |_|  \___|\___\__,_|_|_|\__,_|_.__/ " + Environment.NewLine;
     }
 }

@@ -20,6 +20,8 @@
     "MinimumSeverity": 0,
     "LogDirectory": "./logs/",
     "LogFilename": "recalldb.log",
+    "FileLogging": true,
+    "IncludeDateInFilename": true,
     "Servers": []
   },
   "Debug": {
