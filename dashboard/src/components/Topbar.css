@@ -61,6 +61,23 @@
   color: var(--warning);
 }
 
+.topbar-github {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+
+.topbar-github:hover {
+  background: var(--bg);
+  color: var(--text);
+  border-color: var(--text-secondary);
+}
+
 .theme-toggle {
   display: flex;
   align-items: center;
