@@ -962,7 +962,7 @@ def test_neighbor_data_setup():
         {"DocumentKey": "nbr-doc-4", "DocumentId": "nbr-group-a", "Position": 4, "Content": "Chapter five conclusion and future work", "ContentType": "Text", "Embeddings": [0.7, 0.2, 0.15]},
         {"DocumentKey": "nbr-doc-5", "DocumentId": "nbr-group-b", "Position": 0, "Content": "Standalone single chunk document", "ContentType": "Text", "Embeddings": [0.6, 0.3, 0.2]},
     ]
-    _admin_client.create_documents_batch(_test_tenant_id, _test_collection_id, docs)
+    _admin_client.create_document_batch(_test_tenant_id, _test_collection_id, docs)
 
 
 def test_neighbor_search_with_neighbors():
@@ -1245,6 +1245,77 @@ def test_authorization_non_admin():
 
 
 # ---------------------------------------------------------------------------
+# Test-25b: Batch Delete
+# ---------------------------------------------------------------------------
+
+def test_batch_delete_by_keys():
+    # Create batch documents for deletion
+    keys_to_delete = []
+    docs = []
+    for i in range(3):
+        key = f"batchdel-{i}-{uuid.uuid4().hex[:8]}"
+        keys_to_delete.append(key)
+        base_val = (i + 1) * 0.1
+        docs.append({
+            "DocumentKey": key,
+            "DocumentId": "batchdel-docid",
+            "Content": f"Batch delete test document {i}",
+            "ContentType": "Text",
+            "Position": 0,
+            "Embeddings": [base_val, base_val + 0.1, base_val + 0.2]
+        })
+    _admin_client.create_document_batch(_test_tenant_id, _test_collection_id, docs)
+
+    # Verify documents exist
+    for key in keys_to_delete:
+        exists = _admin_client.document_exists(_test_tenant_id, _test_collection_id, key)
+        assert_true(exists, f"Document {key} should exist before batch delete")
+
+    # Batch delete by keys
+    _admin_client.delete_document_batch(_test_tenant_id, _test_collection_id, keys_to_delete)
+
+    # Verify documents no longer exist
+    for key in keys_to_delete:
+        exists = _admin_client.document_exists(_test_tenant_id, _test_collection_id, key)
+        assert_true(not exists, f"Document {key} should not exist after batch delete")
+
+
+def test_delete_by_filter():
+    # Create documents with a specific DocumentId for filter deletion
+    filter_doc_id = f"filterdel-{uuid.uuid4().hex[:8]}"
+    keys_to_delete = []
+    docs = []
+    for i in range(3):
+        key = f"filterdel-{i}-{uuid.uuid4().hex[:8]}"
+        keys_to_delete.append(key)
+        base_val = (i + 1) * 0.1
+        docs.append({
+            "DocumentKey": key,
+            "DocumentId": filter_doc_id,
+            "Content": f"Filter delete test document {i}",
+            "ContentType": "Text",
+            "Position": 0,
+            "Embeddings": [base_val, base_val + 0.1, base_val + 0.2]
+        })
+    _admin_client.create_document_batch(_test_tenant_id, _test_collection_id, docs)
+
+    # Verify documents exist
+    for key in keys_to_delete:
+        exists = _admin_client.document_exists(_test_tenant_id, _test_collection_id, key)
+        assert_true(exists, f"Document {key} should exist before filter delete")
+
+    # Delete by filter using DocumentIds
+    result = _admin_client.delete_documents_by_filter(
+        _test_tenant_id, _test_collection_id, {"DocumentIds": [filter_doc_id]})
+    assert_equal(3, result.get("DocumentsDeleted", 0), "DocumentsDeleted count")
+
+    # Verify documents no longer exist
+    for key in keys_to_delete:
+        exists = _admin_client.document_exists(_test_tenant_id, _test_collection_id, key)
+        assert_true(not exists, f"Document {key} should not exist after filter delete")
+
+
+# ---------------------------------------------------------------------------
 # Test-26: Cleanup
 # ---------------------------------------------------------------------------
 
@@ -1286,8 +1357,8 @@ def test_cleanup_documents():
         return
     if _test_document_key:
         _admin_client.delete_document(_test_tenant_id, _test_collection_id, _test_document_key)
-    for batch_key in _test_batch_document_keys:
-        _admin_client.delete_document(_test_tenant_id, _test_collection_id, batch_key)
+    if _test_batch_document_keys:
+        _admin_client.delete_document_batch(_test_tenant_id, _test_collection_id, _test_batch_document_keys)
 
 
 def test_cleanup_collection():
@@ -1531,6 +1602,10 @@ def main():
 
     # 25. Authorization
     run_test("Authorization: non-admin cannot create tenant", test_authorization_non_admin)
+
+    # 25b. Batch Delete
+    run_test("Batch delete: delete by keys", test_batch_delete_by_keys)
+    run_test("Batch delete: delete by filter", test_delete_by_filter)
 
     # 26. Cleanup
     run_test("Cleanup: delete search labels", test_cleanup_search_labels)

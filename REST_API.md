@@ -1010,6 +1010,64 @@ Delete a document by its document key.
 
 **Response `204`** — No content.
 
+### `POST /v1.0/tenants/{tid}/collections/{cid}/documents/batch/delete`
+
+Delete multiple documents by their document keys in a single operation. Associated labels and tags are also deleted.
+
+**Auth:** Authenticated
+
+**Request**
+
+```json
+{
+  "DocumentKeys": ["doc_01JEXAMPLE1", "doc_01JEXAMPLE2", "doc_01JEXAMPLE3"]
+}
+```
+
+**Response `204`** — No content.
+
+### `POST /v1.0/tenants/{tid}/collections/{cid}/documents/delete/filter`
+
+Delete all documents matching the specified filter criteria. Uses the same filter model as the enumerate endpoint. Associated labels and tags are also deleted. Pagination fields (`MaxResults`, `ContinuationToken`, `Ordering`) are ignored.
+
+**Auth:** Authenticated
+
+**Request**
+
+```json
+{
+  "DocumentIds": ["paper-123"],
+  "CreatedBefore": "2025-12-31T23:59:59Z",
+  "CreatedAfter": "2025-01-01T00:00:00Z",
+  "LabelFilter": {
+    "Required": ["important"],
+    "Excluded": ["draft"]
+  },
+  "TagFilter": {
+    "Required": [
+      { "Key": "source", "Condition": "Equals", "Value": "arxiv" }
+    ],
+    "Excluded": []
+  },
+  "Terms": {
+    "Required": ["machine learning"],
+    "Excluded": ["deprecated"]
+  }
+}
+```
+
+**Response `200`**
+
+```json
+{
+  "DocumentsDeleted": 42
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `DocumentsDeleted` | integer | The number of documents deleted by the filter |
+
 ### `GET /v1.0/tenants/{tid}/collections/{cid}/documents/stats/{docKey}`
 
 Get statistics for a document. If the document has a `DocumentId`, stats aggregate across all chunks sharing that ID.

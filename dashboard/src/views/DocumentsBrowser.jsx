@@ -33,6 +33,8 @@ export default function DocumentsBrowser() {
   const [loadingDocuments, setLoadingDocuments] = useState(false)
   const [tenantFilter, setTenantFilter] = useState('')
   const [collectionFilter, setCollectionFilter] = useState('')
+  const [selectedKeys, setSelectedKeys] = useState(new Set())
+  const [batchDeleteTarget, setBatchDeleteTarget] = useState(null)
 
   useEffect(() => {
     loadTenants()
@@ -141,6 +143,26 @@ export default function DocumentsBrowser() {
     setDeleteTarget(null)
   }
 
+  const handleBatchDelete = async () => {
+    if (!batchDeleteTarget || batchDeleteTarget.length === 0) return
+    try { await api.batchDeleteDocuments(selectedTenant, selectedCollection, batchDeleteTarget); setSelectedKeys(new Set()); loadDocuments(pageIndex, pageSize) } catch (err) { setError(err) }
+    setBatchDeleteTarget(null)
+  }
+
+  const toggleSelect = (key) => {
+    setSelectedKeys(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedKeys.size === documents.length) setSelectedKeys(new Set())
+    else setSelectedKeys(new Set(documents.map(d => d.DocumentKey)))
+  }
+
   const filteredTenants = tenants.filter(t =>
     !tenantFilter || (t.Name || t.Id || '').toLowerCase().includes(tenantFilter.toLowerCase())
   )
@@ -210,6 +232,13 @@ export default function DocumentsBrowser() {
 
   const columns = [
     {
+      key: '_select',
+      label: <input type="checkbox" checked={documents.length > 0 && selectedKeys.size === documents.length} onChange={toggleSelectAll} />,
+      width: '40px',
+      render: (d) => <input type="checkbox" checked={selectedKeys.has(d.DocumentKey)} onChange={() => toggleSelect(d.DocumentKey)} />,
+      noSort: true
+    },
+    {
       key: 'DocumentKey',
       label: 'Key',
       width: '220px',
@@ -250,6 +279,9 @@ export default function DocumentsBrowser() {
         <div>
           {selectedTenant && selectedCollection && (
             <>
+              {selectedKeys.size > 0 && (
+                <button className="btn btn-danger" style={{marginRight:8}} onClick={() => setBatchDeleteTarget([...selectedKeys])}>Delete Selected ({selectedKeys.size})</button>
+              )}
               <Link to={`/tenants/${selectedTenant}/collections/${selectedCollection}/search`} className="btn btn-secondary" style={{ marginRight: 8 }}>Search</Link>
               <Link to={`/tenants/${selectedTenant}/collections/${selectedCollection}/query`} className="btn btn-secondary" style={{ marginRight: 8 }}>Query</Link>
               <button className="btn btn-primary" onClick={() => setShowCreate(true)}>Add Document</button>
@@ -384,6 +416,16 @@ export default function DocumentsBrowser() {
           danger
           onConfirm={handleDelete}
           onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {batchDeleteTarget && (
+        <ConfirmModal
+          title="Delete Selected Documents"
+          message={`Are you sure you want to delete ${batchDeleteTarget.length} document(s)? This action cannot be undone.`}
+          danger
+          onConfirm={handleBatchDelete}
+          onCancel={() => setBatchDeleteTarget(null)}
         />
       )}
 

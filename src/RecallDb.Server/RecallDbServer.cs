@@ -794,6 +794,34 @@ namespace RecallDb.Server
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
                 requireAuthentication: true);
 
+            _App.Rest.Post<BatchDeleteRequest>("/v1.0/tenants/{tid}/collections/{cid}/documents/batch/delete", DocumentBatchDeleteRoute,
+                openApi => openApi
+                    .WithTag("Documents")
+                    .WithSummary("Batch delete documents")
+                    .WithDescription("Delete multiple documents by their document keys in a single operation. Associated labels and tags are also deleted.")
+                    .WithOperationId("documentBatchDelete")
+                    .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
+                    .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<BatchDeleteRequest>("Batch delete request containing document keys", required: true))
+                    .WithResponse(204, OpenApiResponseMetadata.NoContent())
+                    .WithResponse(400, OpenApiResponseMetadata.BadRequest())
+                    .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
+                requireAuthentication: true);
+
+            _App.Rest.Post<EnumerationQuery>("/v1.0/tenants/{tid}/collections/{cid}/documents/delete/filter", DocumentDeleteByFilterRoute,
+                openApi => openApi
+                    .WithTag("Documents")
+                    .WithSummary("Delete documents by filter")
+                    .WithDescription("Delete all documents matching the specified filter criteria. Uses the same filter model as the enumerate endpoint. Pagination fields (MaxResults, ContinuationToken, Ordering) are ignored. Associated labels and tags are also deleted.")
+                    .WithOperationId("documentDeleteByFilter")
+                    .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
+                    .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<EnumerationQuery>("Filter criteria for documents to delete", required: true))
+                    .WithResponse(200, OpenApiResponseMetadata.Json<DeleteResult>("Delete result with count of deleted documents"))
+                    .WithResponse(400, OpenApiResponseMetadata.BadRequest())
+                    .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
+                requireAuthentication: true);
+
             _App.Rest.Get("/v1.0/tenants/{tid}/collections/{cid}/documents/stats/{docKey}", DocumentStatsRoute,
                 openApi => openApi
                     .WithTag("Documents")
@@ -1862,6 +1890,73 @@ namespace RecallDb.Server
             await _Database.Documents.DeleteAsync(cid, docKey).ConfigureAwait(false);
             req.Http.Response.StatusCode = 204;
             return null;
+        }
+
+        private static async Task<object> DocumentBatchDeleteRoute(AppRequest req)
+        {
+            AuthenticationResult auth = GetAuthResult(req);
+            string tid = req.Parameters["tid"];
+            string cid = req.Parameters["cid"];
+
+            if (!ValidateTenantAccess(auth, tid))
+                return MakeError(req, 403, "Forbidden", "Access denied.");
+
+            BatchDeleteRequest batchReq = req.Data as BatchDeleteRequest;
+            if (batchReq == null || batchReq.DocumentKeys == null || batchReq.DocumentKeys.Count == 0)
+                return MakeError(req, 400, "Bad request", "Request body must contain a non-empty list of document keys.");
+
+            await _Database.Labels.DeleteByDocumentKeysAsync(cid, batchReq.DocumentKeys).ConfigureAwait(false);
+            await _Database.Tags.DeleteByDocumentKeysAsync(cid, batchReq.DocumentKeys).ConfigureAwait(false);
+            await _Database.Documents.DeleteBatchAsync(cid, batchReq.DocumentKeys).ConfigureAwait(false);
+            req.Http.Response.StatusCode = 204;
+            return null;
+        }
+
+        private static async Task<object> DocumentDeleteByFilterRoute(AppRequest req)
+        {
+            AuthenticationResult auth = GetAuthResult(req);
+            string tid = req.Parameters["tid"];
+            string cid = req.Parameters["cid"];
+
+            if (!ValidateTenantAccess(auth, tid))
+                return MakeError(req, 403, "Forbidden", "Access denied.");
+
+            EnumerationQuery query = req.Data as EnumerationQuery;
+            if (query == null) query = new EnumerationQuery();
+
+            // Collect all matching document keys by paginating through results
+            List<string> allKeys = new List<string>();
+            query.MaxResults = 1000;
+            query.ContinuationToken = null;
+
+            while (true)
+            {
+                EnumerationResult<DocumentRecord> result = await _Database.Documents.EnumerateAsync(cid, query).ConfigureAwait(false);
+
+                if (result.Objects != null)
+                {
+                    foreach (DocumentRecord doc in result.Objects)
+                    {
+                        allKeys.Add(doc.DocumentKey);
+                    }
+                }
+
+                if (result.EndOfResults || result.ContinuationToken == null)
+                    break;
+
+                query.ContinuationToken = result.ContinuationToken;
+            }
+
+            if (allKeys.Count > 0)
+            {
+                await _Database.Labels.DeleteByDocumentKeysAsync(cid, allKeys).ConfigureAwait(false);
+                await _Database.Tags.DeleteByDocumentKeysAsync(cid, allKeys).ConfigureAwait(false);
+                await _Database.Documents.DeleteBatchAsync(cid, allKeys).ConfigureAwait(false);
+            }
+
+            DeleteResult deleteResult = new DeleteResult();
+            deleteResult.DocumentsDeleted = allKeys.Count;
+            return deleteResult;
         }
 
         private static async Task<object> DocumentBatchRoute(AppRequest req)

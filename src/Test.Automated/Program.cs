@@ -115,6 +115,10 @@ namespace Test.Automated
             // 8. Document Batch
             await RunTest("Document: POST batch create", TestDocumentBatchCreate);
 
+            // 8b. Document Batch Delete
+            await RunTest("Document: POST batch delete by keys", TestDocumentBatchDeleteByKeys);
+            await RunTest("Document: POST delete by filter", TestDocumentDeleteByFilter);
+
             // 9. Label CRUD
             await RunTest("Label: PUT create", TestLabelCreate);
             await RunTest("Label: GET list", TestLabelList);
@@ -914,6 +918,124 @@ namespace Test.Automated
                 string readPath = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/" + batchKey;
                 using HttpResponseMessage readResp = await GetAsync(_AdminClient, readPath).ConfigureAwait(false);
                 AssertStatusCode(readResp, HttpStatusCode.OK);
+            }
+        }
+
+        #endregion
+
+        #region Test-8b-Document-Batch-Delete
+
+        private static async Task TestDocumentBatchDeleteByKeys()
+        {
+            // Create some temporary documents for this test
+            List<string> tempKeys = new List<string>();
+            List<object> docs = new List<object>();
+
+            for (int i = 0; i < 3; i++)
+            {
+                string key = "batchdel-" + i + "-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+                tempKeys.Add(key);
+
+                float baseVal = (i + 1) * 0.1f;
+                docs.Add(new
+                {
+                    DocumentKey = key,
+                    DocumentId = "batchdel-docid-" + i,
+                    Content = "Batch delete test document " + i,
+                    ContentType = "Text",
+                    Position = 0,
+                    Embeddings = new List<float> { baseVal, baseVal + 0.1f, baseVal + 0.2f }
+                });
+            }
+
+            // Create the documents via batch endpoint
+            string createPath = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/batch";
+            using HttpResponseMessage createResp = await PostAsync(_AdminClient, createPath, docs).ConfigureAwait(false);
+            AssertStatusCode(createResp, HttpStatusCode.Created);
+
+            // Verify they exist
+            foreach (string key in tempKeys)
+            {
+                string readPath = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/" + key;
+                using HttpResponseMessage readResp = await GetAsync(_AdminClient, readPath).ConfigureAwait(false);
+                AssertStatusCode(readResp, HttpStatusCode.OK);
+            }
+
+            // Batch delete by keys
+            string deletePath = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/batch/delete";
+            object deleteBody = new { DocumentKeys = tempKeys };
+            using HttpResponseMessage deleteResp = await PostAsync(_AdminClient, deletePath, deleteBody).ConfigureAwait(false);
+            AssertStatusCode(deleteResp, HttpStatusCode.NoContent);
+
+            // Verify they are gone (expect 404)
+            foreach (string key in tempKeys)
+            {
+                string readPath = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/" + key;
+                using HttpResponseMessage readResp = await GetAsync(_AdminClient, readPath).ConfigureAwait(false);
+                AssertStatusCode(readResp, HttpStatusCode.NotFound);
+            }
+        }
+
+        private static async Task TestDocumentDeleteByFilter()
+        {
+            // Create documents with a unique DocumentId for filter-based deletion
+            string uniqueDocId = "filterdel-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            List<string> tempKeys = new List<string>();
+            List<object> docs = new List<object>();
+
+            for (int i = 0; i < 3; i++)
+            {
+                string key = "filterdel-" + i + "-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+                tempKeys.Add(key);
+
+                float baseVal = (i + 1) * 0.1f;
+                docs.Add(new
+                {
+                    DocumentKey = key,
+                    DocumentId = uniqueDocId,
+                    Content = "Filter delete test document " + i,
+                    ContentType = "Text",
+                    Position = i,
+                    Embeddings = new List<float> { baseVal, baseVal + 0.1f, baseVal + 0.2f }
+                });
+            }
+
+            // Create the documents via batch endpoint
+            string createPath = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/batch";
+            using HttpResponseMessage createResp = await PostAsync(_AdminClient, createPath, docs).ConfigureAwait(false);
+            AssertStatusCode(createResp, HttpStatusCode.Created);
+
+            // Verify they exist
+            foreach (string key in tempKeys)
+            {
+                string readPath = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/" + key;
+                using HttpResponseMessage readResp = await GetAsync(_AdminClient, readPath).ConfigureAwait(false);
+                AssertStatusCode(readResp, HttpStatusCode.OK);
+            }
+
+            // Delete by filter using DocumentIds
+            string filterDeletePath = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/delete/filter";
+            object filterBody = new
+            {
+                MaxResults = 100,
+                Ordering = "CreatedDescending",
+                DocumentIds = new List<string> { uniqueDocId }
+            };
+            using HttpResponseMessage filterResp = await PostAsync(_AdminClient, filterDeletePath, filterBody).ConfigureAwait(false);
+            AssertStatusCode(filterResp, HttpStatusCode.OK);
+
+            // Verify response contains DocumentsDeleted count
+            JsonElement json = await ReadResponse<JsonElement>(filterResp).ConfigureAwait(false);
+            AssertTrue(json.TryGetProperty("DocumentsDeleted", out JsonElement deletedElem), "Response should contain DocumentsDeleted");
+            long deletedCount = deletedElem.GetInt64();
+            AssertTrue(deletedCount >= 3, "DocumentsDeleted should be >= 3, got " + deletedCount);
+
+            // Verify they are gone (expect 404)
+            foreach (string key in tempKeys)
+            {
+                string readPath = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/" + key;
+                using HttpResponseMessage readResp = await GetAsync(_AdminClient, readPath).ConfigureAwait(false);
+                AssertStatusCode(readResp, HttpStatusCode.NotFound);
             }
         }
 
@@ -2468,12 +2590,13 @@ namespace Test.Automated
                 AssertStatusCode(response, HttpStatusCode.NoContent);
             }
 
-            // Delete batch documents
-            foreach (string batchKey in _TestBatchDocumentKeys)
+            // Delete batch documents using batch delete endpoint
+            if (_TestBatchDocumentKeys.Count > 0)
             {
-                string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/" + batchKey;
-                using HttpResponseMessage response = await DeleteAsync(_AdminClient, path).ConfigureAwait(false);
-                AssertStatusCode(response, HttpStatusCode.NoContent);
+                string batchDeletePath = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/batch/delete";
+                object batchDeleteBody = new { DocumentKeys = _TestBatchDocumentKeys };
+                using HttpResponseMessage batchResp = await PostAsync(_AdminClient, batchDeletePath, batchDeleteBody).ConfigureAwait(false);
+                AssertStatusCode(batchResp, HttpStatusCode.NoContent);
             }
         }
 

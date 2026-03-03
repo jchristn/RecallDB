@@ -412,6 +412,31 @@ class RecallDbClient {
             documents);
     }
 
+    /**
+     * Batch delete documents by their document keys.
+     * @param {string} tenantId - Tenant ID.
+     * @param {string} collectionId - Collection ID.
+     * @param {Array<string>} documentKeys - List of document keys to delete.
+     */
+    async deleteDocumentBatch(tenantId, collectionId, documentKeys) {
+        await this._post(
+            `/v1.0/tenants/${tenantId}/collections/${collectionId}/documents/batch/delete`,
+            { DocumentKeys: documentKeys });
+    }
+
+    /**
+     * Delete documents matching filter criteria.
+     * @param {string} tenantId - Tenant ID.
+     * @param {string} collectionId - Collection ID.
+     * @param {Object} [filterQuery={}] - Enumeration query with filter criteria.
+     * @returns {Promise<Object>} Delete result with DocumentsDeleted count.
+     */
+    async deleteDocumentsByFilter(tenantId, collectionId, filterQuery) {
+        return this._post(
+            `/v1.0/tenants/${tenantId}/collections/${collectionId}/documents/delete/filter`,
+            filterQuery || {});
+    }
+
     // -------------------------------------------------------------------------
     // Labels
     // -------------------------------------------------------------------------

@@ -262,6 +262,10 @@ namespace RecallDb.Sdk.TestHarness
             // 25. Authorization
             await RunTest("Authorization: non-admin cannot create tenant", TestAuthorizationNonAdmin);
 
+            // 25b. Batch Delete
+            await RunTest("Batch delete: delete by keys", TestBatchDeleteByKeys);
+            await RunTest("Batch delete: delete by filter", TestDeleteByFilter);
+
             // 26. Cleanup
             await RunTest("Cleanup: delete search labels", TestCleanupSearchLabels);
             await RunTest("Cleanup: delete search tags", TestCleanupSearchTags);
@@ -1983,6 +1987,100 @@ namespace RecallDb.Sdk.TestHarness
 
         #endregion
 
+        #region Test-25b-Batch-Delete
+
+        private static async Task TestBatchDeleteByKeys()
+        {
+            // Create batch documents for deletion
+            List<DocumentRecord> docs = new List<DocumentRecord>();
+            List<string> keysToDelete = new List<string>();
+
+            for (int i = 0; i < 3; i++)
+            {
+                string key = "batchdel-" + i + "-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+                keysToDelete.Add(key);
+
+                float baseVal = (i + 1) * 0.1f;
+                DocumentRecord doc = new DocumentRecord();
+                doc.DocumentKey = key;
+                doc.DocumentId = "batchdel-docid";
+                doc.Content = "Batch delete test document " + i;
+                doc.ContentType = "Text";
+                doc.Position = 0;
+                doc.Embeddings = new List<float> { baseVal, baseVal + 0.1f, baseVal + 0.2f };
+                docs.Add(doc);
+            }
+
+            await _AdminClient.CreateDocumentBatchAsync(_TestTenantId, _TestCollectionId, docs).ConfigureAwait(false);
+
+            // Verify documents exist
+            foreach (string key in keysToDelete)
+            {
+                bool exists = await _AdminClient.DocumentExistsAsync(_TestTenantId, _TestCollectionId, key).ConfigureAwait(false);
+                AssertTrue(exists, "Document " + key + " should exist before batch delete");
+            }
+
+            // Batch delete by keys
+            await _AdminClient.DeleteDocumentBatchAsync(_TestTenantId, _TestCollectionId, keysToDelete).ConfigureAwait(false);
+
+            // Verify documents no longer exist
+            foreach (string key in keysToDelete)
+            {
+                bool exists = await _AdminClient.DocumentExistsAsync(_TestTenantId, _TestCollectionId, key).ConfigureAwait(false);
+                AssertTrue(!exists, "Document " + key + " should not exist after batch delete");
+            }
+        }
+
+        private static async Task TestDeleteByFilter()
+        {
+            // Create documents with a specific DocumentId for filter deletion
+            string filterDocId = "filterdel-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            List<DocumentRecord> docs = new List<DocumentRecord>();
+            List<string> keysToDelete = new List<string>();
+
+            for (int i = 0; i < 3; i++)
+            {
+                string key = "filterdel-" + i + "-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+                keysToDelete.Add(key);
+
+                float baseVal = (i + 1) * 0.1f;
+                DocumentRecord doc = new DocumentRecord();
+                doc.DocumentKey = key;
+                doc.DocumentId = filterDocId;
+                doc.Content = "Filter delete test document " + i;
+                doc.ContentType = "Text";
+                doc.Position = 0;
+                doc.Embeddings = new List<float> { baseVal, baseVal + 0.1f, baseVal + 0.2f };
+                docs.Add(doc);
+            }
+
+            await _AdminClient.CreateDocumentBatchAsync(_TestTenantId, _TestCollectionId, docs).ConfigureAwait(false);
+
+            // Verify documents exist
+            foreach (string key in keysToDelete)
+            {
+                bool exists = await _AdminClient.DocumentExistsAsync(_TestTenantId, _TestCollectionId, key).ConfigureAwait(false);
+                AssertTrue(exists, "Document " + key + " should exist before filter delete");
+            }
+
+            // Delete by filter using DocumentIds via raw HTTP (EnumerationQuery model lacks DocumentIds)
+            string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/documents/delete/filter";
+            using HttpResponseMessage response = await RawPostAsync(_RawAdminClient, path, new { DocumentIds = new List<string> { filterDocId } }).ConfigureAwait(false);
+            AssertStatusCode(response, HttpStatusCode.OK);
+            JsonElement json = await ReadJsonResponse(response).ConfigureAwait(false);
+            long deleted = json.GetProperty("DocumentsDeleted").GetInt64();
+            AssertEqual(3, (int)deleted, "DocumentsDeleted count");
+
+            // Verify documents no longer exist
+            foreach (string key in keysToDelete)
+            {
+                bool exists = await _AdminClient.DocumentExistsAsync(_TestTenantId, _TestCollectionId, key).ConfigureAwait(false);
+                AssertTrue(!exists, "Document " + key + " should not exist after filter delete");
+            }
+        }
+
+        #endregion
+
         #region Test-26-Cleanup
 
         private static async Task TestCleanupSearchLabels()
@@ -2037,10 +2135,10 @@ namespace RecallDb.Sdk.TestHarness
                 await _AdminClient.DeleteDocumentAsync(_TestTenantId, _TestCollectionId, _TestDocumentKey).ConfigureAwait(false);
             }
 
-            // Delete batch documents
-            foreach (string batchKey in _TestBatchDocumentKeys)
+            // Delete batch documents using batch delete
+            if (_TestBatchDocumentKeys.Count > 0)
             {
-                await _AdminClient.DeleteDocumentAsync(_TestTenantId, _TestCollectionId, batchKey).ConfigureAwait(false);
+                await _AdminClient.DeleteDocumentBatchAsync(_TestTenantId, _TestCollectionId, _TestBatchDocumentKeys).ConfigureAwait(false);
             }
         }
 

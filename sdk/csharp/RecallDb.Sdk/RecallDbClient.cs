@@ -578,6 +578,43 @@ namespace RecallDb.Sdk
                 documents, token).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Batch delete documents by their document keys.
+        /// </summary>
+        /// <param name="tenantId">Tenant ID.</param>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <param name="documentKeys">List of document keys to delete.</param>
+        /// <param name="token">Cancellation token.</param>
+        public async Task DeleteDocumentBatchAsync(string tenantId, string collectionId, List<string> documentKeys, CancellationToken token = default)
+        {
+            if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
+            if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
+            if (documentKeys == null) throw new ArgumentNullException(nameof(documentKeys));
+            BatchDeleteRequest req = new BatchDeleteRequest();
+            req.DocumentKeys = documentKeys;
+            await PostAsync(
+                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/documents/batch/delete",
+                req, token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Delete documents matching filter criteria.
+        /// </summary>
+        /// <param name="tenantId">Tenant ID.</param>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <param name="filter">Enumeration query with filter criteria.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Delete result with count of deleted documents.</returns>
+        public async Task<DeleteResult> DeleteDocumentsByFilterAsync(string tenantId, string collectionId, EnumerationQuery filter, CancellationToken token = default)
+        {
+            if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
+            if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
+            if (filter == null) filter = new EnumerationQuery();
+            return await PostAsync<DeleteResult>(
+                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/documents/delete/filter",
+                filter, token).ConfigureAwait(false);
+        }
+
         #endregion
 
         #region Labels
@@ -781,6 +818,18 @@ namespace RecallDb.Sdk
             using StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
             using HttpResponseMessage response = await _HttpClient.PostAsync(_Endpoint + path, content, token).ConfigureAwait(false);
             return await HandleResponseAsync<T>(response).ConfigureAwait(false);
+        }
+
+        private async Task PostAsync(string path, object body, CancellationToken token)
+        {
+            string json = JsonSerializer.Serialize(body, _JsonOptions);
+            using StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
+            using HttpResponseMessage response = await _HttpClient.PostAsync(_Endpoint + path, content, token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode && response.StatusCode != HttpStatusCode.NoContent)
+            {
+                string responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                throw new RecallDbException(response.StatusCode, responseBody);
+            }
         }
 
         private async Task<T> PutAsync<T>(string path, object body, CancellationToken token)

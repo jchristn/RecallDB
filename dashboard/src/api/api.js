@@ -128,6 +128,8 @@ class RecallDbApi {
   async updateDocument(tid, cid, docKey, doc) { return this.request('PUT', `/v1.0/tenants/${tid}/collections/${cid}/documents/${docKey}`, doc); }
   async deleteDocument(tid, cid, docKey) { return this.request('DELETE', `/v1.0/tenants/${tid}/collections/${cid}/documents/${docKey}`); }
   async batchCreateDocuments(tid, cid, docs) { return this.request('POST', `/v1.0/tenants/${tid}/collections/${cid}/documents/batch`, docs); }
+  async batchDeleteDocuments(tid, cid, documentKeys) { return this.request('POST', `/v1.0/tenants/${tid}/collections/${cid}/documents/batch/delete`, { DocumentKeys: documentKeys }); }
+  async deleteDocumentsByFilter(tid, cid, filter) { return this.request('POST', `/v1.0/tenants/${tid}/collections/${cid}/documents/delete/filter`, filter || {}); }
   async documentStats(tid, cid, docKey) { return this.request('GET', `/v1.0/tenants/${tid}/collections/${cid}/documents/stats/${docKey}`); }
 
   // Labels

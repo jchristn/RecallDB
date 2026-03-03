@@ -1386,6 +1386,94 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "Batch Delete Documents",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1.0/tenants/{{tenant_id}}/collections/{{collection_id}}/documents/batch/delete",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1.0",
+                "tenants",
+                "{{tenant_id}}",
+                "collections",
+                "{{collection_id}}",
+                "documents",
+                "batch",
+                "delete"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"DocumentKeys\": [\"doc_key_1\", \"doc_key_2\", \"doc_key_3\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Documents by Filter",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1.0/tenants/{{tenant_id}}/collections/{{collection_id}}/documents/delete/filter",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1.0",
+                "tenants",
+                "{{tenant_id}}",
+                "collections",
+                "{{collection_id}}",
+                "documents",
+                "delete",
+                "filter"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"DocumentIds\": [\"paper-123\"],\n  \"CreatedBefore\": \"2025-12-31T23:59:59Z\",\n  \"CreatedAfter\": \"2025-01-01T00:00:00Z\",\n  \"LabelFilter\": {\n    \"Required\": [\"important\"],\n    \"Excluded\": [\"draft\"]\n  },\n  \"TagFilter\": {\n    \"Required\": [\n      { \"Key\": \"source\", \"Condition\": \"Equals\", \"Value\": \"arxiv\" }\n    ],\n    \"Excluded\": []\n  },\n  \"Terms\": {\n    \"Required\": [\"machine learning\"],\n    \"Excluded\": [\"deprecated\"]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
         }
       ]
     },

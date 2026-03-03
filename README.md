@@ -48,7 +48,7 @@ This isn't a thin wrapper around pgvector. It's an **opinionated persistence sch
 - **Three search modes** &mdash; vector similarity (nearest-neighbor), full-text relevance (ts_rank/ts_rank_cd scored), and hybrid (blended vector + full-text scoring with configurable weights). Mix and match in a single request.
 - **Compound search queries** &mdash; combine any search mode with label filters, tag conditions, content term matching, and date ranges in a single request.
 - **Bring your own embeddings** &mdash; no vendor lock-in to any embedding provider. Use OpenAI, Cohere, Ollama, or anything that outputs a float array.
-- **40+ REST endpoints** &mdash; full CRUD for tenants, users, credentials, collections, documents, labels, and tags.
+- **40+ REST endpoints** &mdash; full CRUD for tenants, users, credentials, collections, documents, labels, and tags. Includes batch delete by keys and filter-based delete for bulk operations.
 - **SDKs in C#, Python, and JavaScript** &mdash; typed clients ready to drop into your stack.
 - **React dashboard** &mdash; manage tenants, collections, and documents visually. Search with a query builder.
 - **Docker Compose deployment** &mdash; Postgres + pgvector, API server, and dashboard in one command.

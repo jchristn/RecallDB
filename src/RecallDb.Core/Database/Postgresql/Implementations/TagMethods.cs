@@ -289,6 +289,32 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
             if (_Logging != null) _Logging.Debug(_Header + "deleted tags for document " + documentKey + " from " + collectionId);
         }
 
+        /// <summary>
+        /// Delete all tag records for multiple document keys.
+        /// </summary>
+        public async Task DeleteByDocumentKeysAsync(string collectionId, List<string> documentKeys, CancellationToken token = default)
+        {
+            if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
+            if (documentKeys == null) throw new ArgumentNullException(nameof(documentKeys));
+            if (documentKeys.Count == 0) return;
+
+            string tableName = "collection_" + SanitizeTableName(collectionId) + "_tags";
+
+            List<string> sanitizedKeys = new List<string>();
+            foreach (string key in documentKeys)
+            {
+                sanitizedKeys.Add("'" + _Driver.Sanitize(key) + "'");
+            }
+
+            string query =
+                "DELETE FROM " + tableName + " " +
+                "WHERE document_key IN (" + string.Join(", ", sanitizedKeys) + ")";
+
+            await _Driver.ExecuteQueryAsync(query, true, token).ConfigureAwait(false);
+
+            if (_Logging != null) _Logging.Debug(_Header + "batch deleted tags for " + documentKeys.Count + " documents from " + collectionId);
+        }
+
         #endregion
 
         #region Private-Methods

@@ -317,6 +317,36 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
         }
 
         /// <summary>
+        /// Delete multiple document records by collection ID and a list of document keys.
+        /// </summary>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <param name="documentKeys">List of document keys to delete.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Task.</returns>
+        public async Task DeleteBatchAsync(string collectionId, List<string> documentKeys, CancellationToken token = default)
+        {
+            if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
+            if (documentKeys == null) throw new ArgumentNullException(nameof(documentKeys));
+            if (documentKeys.Count == 0) return;
+
+            string tableName = "collection_" + SanitizeTableName(collectionId);
+
+            List<string> sanitizedKeys = new List<string>();
+            foreach (string key in documentKeys)
+            {
+                sanitizedKeys.Add("'" + _Driver.Sanitize(key) + "'");
+            }
+
+            string query =
+                "DELETE FROM " + tableName + " " +
+                "WHERE document_key IN (" + string.Join(", ", sanitizedKeys) + ")";
+
+            await _Driver.ExecuteQueryAsync(query, true, token).ConfigureAwait(false);
+
+            if (_Logging != null) _Logging.Debug(_Header + "batch deleted " + documentKeys.Count + " documents from " + collectionId);
+        }
+
+        /// <summary>
         /// Check whether a document record exists by collection ID and document key.
         /// </summary>
         /// <param name="collectionId">Collection ID.</param>

@@ -1,7 +1,21 @@
 {
   "permissions": {
     "allow": [
-      "Bash(tail:*)"
+      "Bash(tail:*)",
+      "Bash(dotnet build src/RecallDb.Server/RecallDb.Server.csproj)",
+      "Bash(dotnet build sdk/csharp/RecallDb.Sdk/RecallDb.Sdk.csproj)",
+      "Bash(dotnet build sdk/csharp/RecallDb.Sdk.TestHarness/RecallDb.Sdk.TestHarness.csproj)",
+      "Bash(dotnet build src/Test.Automated/Test.Automated.csproj)",
+      "Bash(dotnet run --project src/RecallDb.Server/RecallDb.Server.csproj)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8701/v1.0/health)",
+      "Bash(docker run -d --name recalldb-postgres -e POSTGRES_USER=recalldb -e POSTGRES_PASSWORD=recalldb -e POSTGRES_DB=recalldb -p 5432:5432 pgvector/pgvector:pg17)",
+      "Bash(docker exec recalldb-postgres pg_isready -U recalldb)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8600/v1.0/health)",
+      "Bash(dotnet run)",
+      "Bash(docker stop recalldb-postgres)",
+      "Bash(docker rm recalldb-postgres)",
+      "Bash(python test_harness.py)",
+      "Bash(node test-harness.js)"
     ]
   }
 }

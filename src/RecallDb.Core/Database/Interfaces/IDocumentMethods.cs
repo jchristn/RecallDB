@@ -84,6 +84,15 @@ namespace RecallDb.Core.Database.Interfaces
         Task DeleteByDocumentKeyAsync(string collectionId, string documentKey, CancellationToken token = default);
 
         /// <summary>
+        /// Delete multiple document records by collection ID and a list of document keys.
+        /// </summary>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <param name="documentKeys">List of document keys to delete.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Task.</returns>
+        Task DeleteBatchAsync(string collectionId, List<string> documentKeys, CancellationToken token = default);
+
+        /// <summary>
         /// Check whether a document record exists by collection ID and document key.
         /// </summary>
         /// <param name="collectionId">Collection ID.</param>

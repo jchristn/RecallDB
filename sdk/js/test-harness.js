@@ -759,7 +759,7 @@ async function testNeighborDataSetup() {
         { DocumentKey: "nbr-doc-4", DocumentId: "nbr-group-a", Position: 4, Content: "Chapter five conclusion and future work", ContentType: "Text", Embeddings: [0.7, 0.2, 0.15] },
         { DocumentKey: "nbr-doc-5", DocumentId: "nbr-group-b", Position: 0, Content: "Standalone single chunk document", ContentType: "Text", Embeddings: [0.6, 0.3, 0.2] },
     ];
-    await _adminClient.createDocumentsBatch(_testTenantId, _testCollectionId, docs);
+    await _adminClient.createDocumentBatch(_testTenantId, _testCollectionId, docs);
 }
 
 async function testNeighborSearchWithNeighbors() {
@@ -929,6 +929,83 @@ async function testAuthorizationNonAdmin() {
 }
 
 // ---------------------------------------------------------------------------
+// Test-25b: Batch Delete
+// ---------------------------------------------------------------------------
+
+async function testBatchDeleteByKeys() {
+    // Create batch documents for deletion
+    const keysToDelete = [];
+    const docs = [];
+    for (let i = 0; i < 3; i++) {
+        const key = "batchdel-" + i + "-" + shortId();
+        keysToDelete.push(key);
+        const baseVal = (i + 1) * 0.1;
+        docs.push({
+            DocumentKey: key,
+            DocumentId: "batchdel-docid",
+            Content: "Batch delete test document " + i,
+            ContentType: "Text",
+            Position: 0,
+            Embeddings: [baseVal, baseVal + 0.1, baseVal + 0.2]
+        });
+    }
+    await _adminClient.createDocumentBatch(_testTenantId, _testCollectionId, docs);
+
+    // Verify documents exist
+    for (const key of keysToDelete) {
+        const exists = await _adminClient.documentExists(_testTenantId, _testCollectionId, key);
+        assertTrue(exists, "Document " + key + " should exist before batch delete");
+    }
+
+    // Batch delete by keys
+    await _adminClient.deleteDocumentBatch(_testTenantId, _testCollectionId, keysToDelete);
+
+    // Verify documents no longer exist
+    for (const key of keysToDelete) {
+        const exists = await _adminClient.documentExists(_testTenantId, _testCollectionId, key);
+        assertTrue(!exists, "Document " + key + " should not exist after batch delete");
+    }
+}
+
+async function testDeleteByFilter() {
+    // Create documents with a specific DocumentId for filter deletion
+    const filterDocId = "filterdel-" + shortId();
+    const keysToDelete = [];
+    const docs = [];
+    for (let i = 0; i < 3; i++) {
+        const key = "filterdel-" + i + "-" + shortId();
+        keysToDelete.push(key);
+        const baseVal = (i + 1) * 0.1;
+        docs.push({
+            DocumentKey: key,
+            DocumentId: filterDocId,
+            Content: "Filter delete test document " + i,
+            ContentType: "Text",
+            Position: 0,
+            Embeddings: [baseVal, baseVal + 0.1, baseVal + 0.2]
+        });
+    }
+    await _adminClient.createDocumentBatch(_testTenantId, _testCollectionId, docs);
+
+    // Verify documents exist
+    for (const key of keysToDelete) {
+        const exists = await _adminClient.documentExists(_testTenantId, _testCollectionId, key);
+        assertTrue(exists, "Document " + key + " should exist before filter delete");
+    }
+
+    // Delete by filter using DocumentIds
+    const result = await _adminClient.deleteDocumentsByFilter(
+        _testTenantId, _testCollectionId, { DocumentIds: [filterDocId] });
+    assertEqual(3, result.DocumentsDeleted, "DocumentsDeleted count");
+
+    // Verify documents no longer exist
+    for (const key of keysToDelete) {
+        const exists = await _adminClient.documentExists(_testTenantId, _testCollectionId, key);
+        assertTrue(!exists, "Document " + key + " should not exist after filter delete");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Test-26: Cleanup
 // ---------------------------------------------------------------------------
 
@@ -940,7 +1017,7 @@ async function testCleanupTags() { if (!_testTagId || !_testCollectionId) return
 async function testCleanupDocuments() {
     if (!_testCollectionId) return;
     if (_testDocumentKey) await _adminClient.deleteDocument(_testTenantId, _testCollectionId, _testDocumentKey);
-    for (const key of _testBatchDocumentKeys) await _adminClient.deleteDocument(_testTenantId, _testCollectionId, key);
+    if (_testBatchDocumentKeys.length > 0) await _adminClient.deleteDocumentBatch(_testTenantId, _testCollectionId, _testBatchDocumentKeys);
 }
 async function testCleanupCollection() { if (!_testCollectionId) return; await _adminClient.deleteCollection(_testTenantId, _testCollectionId); }
 async function testCleanupCredential() { if (!_testCredentialId) return; await _adminClient.deleteCredential(_testTenantId, _testCredentialId); }
@@ -1153,6 +1230,10 @@ async function main() {
 
     // 25. Authorization
     await runTest("Authorization: non-admin cannot create tenant", testAuthorizationNonAdmin);
+
+    // 25b. Batch Delete
+    await runTest("Batch delete: delete by keys", testBatchDeleteByKeys);
+    await runTest("Batch delete: delete by filter", testDeleteByFilter);
 
     // 26. Cleanup
     await runTest("Cleanup: delete search labels", testCleanupSearchLabels);

@@ -519,6 +519,37 @@ class RecallDbClient:
             f"/v1.0/tenants/{tenant_id}/collections/{collection_id}/documents/batch",
             documents)
 
+    def delete_document_batch(self, tenant_id, collection_id, document_keys):
+        """
+        Batch delete documents by their document keys.
+
+        Args:
+            tenant_id: Tenant ID.
+            collection_id: Collection ID.
+            document_keys: list of document key strings to delete.
+        """
+        self._post(
+            f"/v1.0/tenants/{tenant_id}/collections/{collection_id}/documents/batch/delete",
+            {"DocumentKeys": document_keys})
+
+    def delete_documents_by_filter(self, tenant_id, collection_id, filter_query=None):
+        """
+        Delete documents matching filter criteria.
+
+        Args:
+            tenant_id: Tenant ID.
+            collection_id: Collection ID.
+            filter_query: dict with enumeration query filter parameters.
+
+        Returns:
+            dict: Delete result with DocumentsDeleted count.
+        """
+        if filter_query is None:
+            filter_query = {}
+        return self._post(
+            f"/v1.0/tenants/{tenant_id}/collections/{collection_id}/documents/delete/filter",
+            filter_query)
+
     # -------------------------------------------------------------------------
     # Labels
     # -------------------------------------------------------------------------

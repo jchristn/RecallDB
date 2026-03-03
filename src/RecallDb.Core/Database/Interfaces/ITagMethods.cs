@@ -73,5 +73,14 @@ namespace RecallDb.Core.Database.Interfaces
         /// <param name="token">Cancellation token.</param>
         /// <returns>Task.</returns>
         Task DeleteByDocumentKeyAsync(string collectionId, string documentKey, CancellationToken token = default);
+
+        /// <summary>
+        /// Delete all tag records for multiple document keys.
+        /// </summary>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <param name="documentKeys">List of document keys.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Task.</returns>
+        Task DeleteByDocumentKeysAsync(string collectionId, List<string> documentKeys, CancellationToken token = default);
     }
 }

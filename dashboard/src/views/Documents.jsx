@@ -31,6 +31,8 @@ export default function Documents() {
   const [editTarget, setEditTarget] = useState(null)
   const [editForm, setEditForm] = useState({ Content: '', ContentType: 'Text', DocumentId: '', Position: 0, Labels: [], Tags: [{ key: '', value: '' }] })
   const [loading, setLoading] = useState(false)
+  const [selectedKeys, setSelectedKeys] = useState(new Set())
+  const [batchDeleteTarget, setBatchDeleteTarget] = useState(null)
 
   useEffect(() => { loadDocuments(0, pageSize) }, [tenantId, collectionId])
 
@@ -85,6 +87,26 @@ export default function Documents() {
     setDeleteTarget(null)
   }
 
+  const handleBatchDelete = async () => {
+    if (!batchDeleteTarget || batchDeleteTarget.length === 0) return
+    try { await api.batchDeleteDocuments(tenantId, collectionId, batchDeleteTarget); setSelectedKeys(new Set()); loadDocuments(pageIndex, pageSize) } catch (err) { setError(err) }
+    setBatchDeleteTarget(null)
+  }
+
+  const toggleSelect = (key) => {
+    setSelectedKeys(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedKeys.size === documents.length) setSelectedKeys(new Set())
+    else setSelectedKeys(new Set(documents.map(d => d.DocumentKey)))
+  }
+
   const openStats = async (d) => {
     setStatsLoading(true)
     setStatsModal({ document: d, stats: null })
@@ -136,6 +158,13 @@ export default function Documents() {
 
   const columns = [
     {
+      key: '_select',
+      label: <input type="checkbox" checked={documents.length > 0 && selectedKeys.size === documents.length} onChange={toggleSelectAll} />,
+      width: '40px',
+      render: (d) => <input type="checkbox" checked={selectedKeys.has(d.DocumentKey)} onChange={() => toggleSelect(d.DocumentKey)} />,
+      noSort: true
+    },
+    {
       key: 'DocumentKey',
       label: 'Key',
       width: '220px',
@@ -177,6 +206,9 @@ export default function Documents() {
       <div className="page-header">
         <h1>Documents</h1>
         <div>
+          {selectedKeys.size > 0 && (
+            <button className="btn btn-danger" style={{marginRight:8}} onClick={() => setBatchDeleteTarget([...selectedKeys])}>Delete Selected ({selectedKeys.size})</button>
+          )}
           <Link to={`/tenants/${tenantId}/collections/${collectionId}/search`} className="btn btn-secondary" style={{marginRight:8}}>Search</Link>
           <Link to={`/tenants/${tenantId}/collections/${collectionId}/query`} className="btn btn-secondary" style={{marginRight:8}}>Query</Link>
           <button className="btn btn-primary" onClick={() => setShowCreate(true)}>Add Document</button>
@@ -239,6 +271,16 @@ export default function Documents() {
           danger
           onConfirm={handleDelete}
           onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {batchDeleteTarget && (
+        <ConfirmModal
+          title="Delete Selected Documents"
+          message={`Are you sure you want to delete ${batchDeleteTarget.length} document(s)? This action cannot be undone.`}
+          danger
+          onConfirm={handleBatchDelete}
+          onCancel={() => setBatchDeleteTarget(null)}
         />
       )}
 
