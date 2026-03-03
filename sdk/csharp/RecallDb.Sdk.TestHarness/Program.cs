@@ -133,10 +133,12 @@ namespace RecallDb.Sdk.TestHarness
             // 9. Label CRUD
             await RunTest("Label: PUT create", TestLabelCreate);
             await RunTest("Label: GET list", TestLabelList);
+            await RunTest("Label: GET distinct", TestLabelDistinct);
 
             // 10. Tag CRUD
             await RunTest("Tag: PUT create", TestTagCreate);
             await RunTest("Tag: GET list", TestTagList);
+            await RunTest("Tag: GET distinct keys", TestTagDistinct);
 
             // 11. Search Data Setup
             await RunTest("Search data: setup test documents, labels, and tags", TestSearchDataSetup);
@@ -844,6 +846,13 @@ namespace RecallDb.Sdk.TestHarness
             AssertTrue(result.TotalRecords >= 1, "TotalRecords should be >= 1");
         }
 
+        private static async Task TestLabelDistinct()
+        {
+            List<string> result = await _AdminClient.DistinctLabelsAsync(_TestTenantId, _TestCollectionId).ConfigureAwait(false);
+            AssertTrue(result.Count >= 1, "Distinct labels count should be >= 1");
+            AssertTrue(result.Contains("integration-test-label"), "Distinct labels should contain 'integration-test-label'");
+        }
+
         #endregion
 
         #region Test-10-Tag-CRUD
@@ -864,6 +873,13 @@ namespace RecallDb.Sdk.TestHarness
         {
             EnumerationResult<TagRecord> result = await _AdminClient.ListTagsAsync(_TestTenantId, _TestCollectionId).ConfigureAwait(false);
             AssertTrue(result.TotalRecords >= 1, "TotalRecords should be >= 1");
+        }
+
+        private static async Task TestTagDistinct()
+        {
+            List<string> result = await _AdminClient.DistinctTagKeysAsync(_TestTenantId, _TestCollectionId).ConfigureAwait(false);
+            AssertTrue(result.Count >= 1, "Distinct tag keys count should be >= 1");
+            AssertTrue(result.Contains("environment"), "Distinct tag keys should contain 'environment'");
         }
 
         #endregion

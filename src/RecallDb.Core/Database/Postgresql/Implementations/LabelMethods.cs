@@ -313,6 +313,33 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
             if (_Logging != null) _Logging.Debug(_Header + "batch deleted labels for " + documentKeys.Count + " documents from " + collectionId);
         }
 
+        /// <summary>
+        /// Retrieve the set of distinct label values across all documents in a collection.
+        /// </summary>
+        public async Task<List<string>> DistinctAsync(string collectionId, CancellationToken token = default)
+        {
+            if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
+
+            string tableName = "collection_" + SanitizeTableName(collectionId) + "_labels";
+
+            string query =
+                "SELECT DISTINCT label FROM " + tableName + " " +
+                "ORDER BY label ASC";
+
+            DataTable dt = await _Driver.ExecuteQueryAsync(query, false, token).ConfigureAwait(false);
+
+            List<string> labels = new List<string>();
+            if (dt != null && dt.Rows.Count > 0)
+            {
+                foreach (DataRow row in dt.Rows)
+                {
+                    labels.Add(DataTableHelper.GetStringValue(row, "label"));
+                }
+            }
+
+            return labels;
+        }
+
         #endregion
 
         #region Private-Methods

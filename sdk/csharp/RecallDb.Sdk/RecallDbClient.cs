@@ -688,6 +688,22 @@ namespace RecallDb.Sdk
                 token).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Retrieve distinct label values in a collection.
+        /// </summary>
+        /// <param name="tenantId">Tenant ID.</param>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>List of distinct label strings.</returns>
+        public async Task<List<string>> DistinctLabelsAsync(string tenantId, string collectionId, CancellationToken token = default)
+        {
+            if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
+            if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
+            return await GetAsync<List<string>>(
+                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/labels/distinct",
+                token).ConfigureAwait(false);
+        }
+
         #endregion
 
         #region Tags
@@ -758,6 +774,22 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             return await GetAsync<EnumerationResult<TagRecord>>(
                 "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/tags",
+                token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Retrieve distinct tag keys in a collection.
+        /// </summary>
+        /// <param name="tenantId">Tenant ID.</param>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>List of distinct tag key strings.</returns>
+        public async Task<List<string>> DistinctTagKeysAsync(string tenantId, string collectionId, CancellationToken token = default)
+        {
+            if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
+            if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
+            return await GetAsync<List<string>>(
+                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/tags/distinct",
                 token).ConfigureAwait(false);
         }
 

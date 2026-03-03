@@ -136,11 +136,13 @@ class RecallDbApi {
   async listLabels(tid, cid) { return this.request('GET', `/v1.0/tenants/${tid}/collections/${cid}/labels`); }
   async createLabel(tid, cid, label) { return this.request('PUT', `/v1.0/tenants/${tid}/collections/${cid}/labels`, label); }
   async deleteLabel(tid, cid, id) { return this.request('DELETE', `/v1.0/tenants/${tid}/collections/${cid}/labels/${id}`); }
+  async distinctLabels(tid, cid) { return this.request('GET', `/v1.0/tenants/${tid}/collections/${cid}/labels/distinct`); }
 
   // Tags
   async listTags(tid, cid) { return this.request('GET', `/v1.0/tenants/${tid}/collections/${cid}/tags`); }
   async createTag(tid, cid, tag) { return this.request('PUT', `/v1.0/tenants/${tid}/collections/${cid}/tags`, tag); }
   async deleteTag(tid, cid, id) { return this.request('DELETE', `/v1.0/tenants/${tid}/collections/${cid}/tags/${id}`); }
+  async distinctTagKeys(tid, cid) { return this.request('GET', `/v1.0/tenants/${tid}/collections/${cid}/tags/distinct`); }
 
   // Search
   async search(tid, cid, query) { return this.request('POST', `/v1.0/tenants/${tid}/collections/${cid}/search`, query); }

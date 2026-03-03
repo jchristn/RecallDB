@@ -1607,6 +1607,35 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "Distinct Labels",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1.0/tenants/{{tenant_id}}/collections/{{collection_id}}/labels/distinct",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1.0",
+                "tenants",
+                "{{tenant_id}}",
+                "collections",
+                "{{collection_id}}",
+                "labels",
+                "distinct"
+              ]
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -1736,6 +1765,35 @@
                 "{{collection_id}}",
                 "tags",
                 "{{tag_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Distinct Tag Keys",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1.0/tenants/{{tenant_id}}/collections/{{collection_id}}/tags/distinct",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1.0",
+                "tenants",
+                "{{tenant_id}}",
+                "collections",
+                "{{collection_id}}",
+                "tags",
+                "distinct"
               ]
             }
           },

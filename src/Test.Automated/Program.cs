@@ -122,10 +122,12 @@ namespace Test.Automated
             // 9. Label CRUD
             await RunTest("Label: PUT create", TestLabelCreate);
             await RunTest("Label: GET list", TestLabelList);
+            await RunTest("Label: GET distinct", TestLabelDistinct);
 
             // 10. Tag CRUD
             await RunTest("Tag: PUT create", TestTagCreate);
             await RunTest("Tag: GET list", TestTagList);
+            await RunTest("Tag: GET distinct keys", TestTagDistinct);
 
             // 11. Search Data Setup
             await RunTest("Search data: setup test documents, labels, and tags", TestSearchDataSetup);
@@ -1075,6 +1077,24 @@ namespace Test.Automated
             AssertTrue(totalElem.GetInt64() >= 1, "TotalRecords should be >= 1");
         }
 
+        private static async Task TestLabelDistinct()
+        {
+            string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/labels/distinct";
+            using HttpResponseMessage response = await GetAsync(_AdminClient, path).ConfigureAwait(false);
+            AssertStatusCode(response, HttpStatusCode.OK);
+
+            JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
+            AssertTrue(json.ValueKind == JsonValueKind.Array, "Response should be a JSON array");
+            AssertTrue(json.GetArrayLength() >= 1, "Distinct labels count should be >= 1");
+
+            bool found = false;
+            foreach (JsonElement elem in json.EnumerateArray())
+            {
+                if (elem.GetString() == "integration-test-label") { found = true; break; }
+            }
+            AssertTrue(found, "Distinct labels should contain 'integration-test-label'");
+        }
+
         #endregion
 
         #region Test-10-Tag-CRUD
@@ -1110,6 +1130,24 @@ namespace Test.Automated
             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
             AssertTrue(json.TryGetProperty("TotalRecords", out JsonElement totalElem), "Response should contain TotalRecords");
             AssertTrue(totalElem.GetInt64() >= 1, "TotalRecords should be >= 1");
+        }
+
+        private static async Task TestTagDistinct()
+        {
+            string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/tags/distinct";
+            using HttpResponseMessage response = await GetAsync(_AdminClient, path).ConfigureAwait(false);
+            AssertStatusCode(response, HttpStatusCode.OK);
+
+            JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
+            AssertTrue(json.ValueKind == JsonValueKind.Array, "Response should be a JSON array");
+            AssertTrue(json.GetArrayLength() >= 1, "Distinct tag keys count should be >= 1");
+
+            bool found = false;
+            foreach (JsonElement elem in json.EnumerateArray())
+            {
+                if (elem.GetString() == "environment") { found = true; break; }
+            }
+            AssertTrue(found, "Distinct tag keys should contain 'environment'");
         }
 
         #endregion

@@ -1199,6 +1199,18 @@ Delete a label by ID.
 
 **Response `204`** — No content.
 
+### `GET /v1.0/tenants/{tid}/collections/{cid}/labels/distinct`
+
+Retrieve the set of distinct label values across all documents in a collection.
+
+**Auth:** Authenticated
+
+**Response `200`**
+
+```json
+["important", "ml", "reviewed"]
+```
+
 ---
 
 ## Tags
@@ -1306,6 +1318,18 @@ Delete a tag by ID.
 **Auth:** Authenticated
 
 **Response `204`** — No content.
+
+### `GET /v1.0/tenants/{tid}/collections/{cid}/tags/distinct`
+
+Retrieve the set of distinct tag keys across all documents in a collection.
+
+**Auth:** Authenticated
+
+**Response `200`**
+
+```json
+["category", "environment", "source"]
+```
 
 ---
 

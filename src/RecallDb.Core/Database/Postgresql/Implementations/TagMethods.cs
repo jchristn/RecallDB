@@ -315,6 +315,33 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
             if (_Logging != null) _Logging.Debug(_Header + "batch deleted tags for " + documentKeys.Count + " documents from " + collectionId);
         }
 
+        /// <summary>
+        /// Retrieve the set of distinct tag keys across all documents in a collection.
+        /// </summary>
+        public async Task<List<string>> DistinctKeysAsync(string collectionId, CancellationToken token = default)
+        {
+            if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
+
+            string tableName = "collection_" + SanitizeTableName(collectionId) + "_tags";
+
+            string query =
+                "SELECT DISTINCT key FROM " + tableName + " " +
+                "ORDER BY key ASC";
+
+            DataTable dt = await _Driver.ExecuteQueryAsync(query, false, token).ConfigureAwait(false);
+
+            List<string> keys = new List<string>();
+            if (dt != null && dt.Rows.Count > 0)
+            {
+                foreach (DataRow row in dt.Rows)
+                {
+                    keys.Add(DataTableHelper.GetStringValue(row, "key"));
+                }
+            }
+
+            return keys;
+        }
+
         #endregion
 
         #region Private-Methods

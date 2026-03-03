@@ -849,6 +849,18 @@ namespace RecallDb.Server
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
                 requireAuthentication: true);
 
+            _App.Rest.Get("/v1.0/tenants/{tid}/collections/{cid}/labels/distinct", LabelDistinctRoute,
+                openApi => openApi
+                    .WithTag("Labels")
+                    .WithSummary("Distinct labels")
+                    .WithDescription("Retrieve distinct label values in a collection.")
+                    .WithOperationId("labelDistinct")
+                    .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
+                    .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
+                    .WithResponse(200, OpenApiResponseMetadata.Create("List of distinct labels"))
+                    .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
+                requireAuthentication: true);
+
             _App.Rest.Get("/v1.0/tenants/{tid}/collections/{cid}/labels/{id}", LabelReadRoute,
                 openApi => openApi
                     .WithTag("Labels")
@@ -900,6 +912,18 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("List of tags"))
+                    .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
+                requireAuthentication: true);
+
+            _App.Rest.Get("/v1.0/tenants/{tid}/collections/{cid}/tags/distinct", TagDistinctRoute,
+                openApi => openApi
+                    .WithTag("Tags")
+                    .WithSummary("Distinct tag keys")
+                    .WithDescription("Retrieve distinct tag keys in a collection.")
+                    .WithOperationId("tagDistinctKeys")
+                    .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
+                    .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
+                    .WithResponse(200, OpenApiResponseMetadata.Create("List of distinct tag keys"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
                 requireAuthentication: true);
 
@@ -2148,6 +2172,19 @@ namespace RecallDb.Server
             return null;
         }
 
+        private static async Task<object> LabelDistinctRoute(AppRequest req)
+        {
+            AuthenticationResult auth = GetAuthResult(req);
+            string tid = req.Parameters["tid"];
+            string cid = req.Parameters["cid"];
+
+            if (!ValidateTenantAccess(auth, tid))
+                return MakeError(req, 403, "Forbidden", "Access denied.");
+
+            List<string> labels = await _Database.Labels.DistinctAsync(cid).ConfigureAwait(false);
+            return labels;
+        }
+
         #endregion
 
         #region Tag-Routes
@@ -2216,6 +2253,19 @@ namespace RecallDb.Server
             await _Database.Tags.DeleteAsync(cid, id).ConfigureAwait(false);
             req.Http.Response.StatusCode = 204;
             return null;
+        }
+
+        private static async Task<object> TagDistinctRoute(AppRequest req)
+        {
+            AuthenticationResult auth = GetAuthResult(req);
+            string tid = req.Parameters["tid"];
+            string cid = req.Parameters["cid"];
+
+            if (!ValidateTenantAccess(auth, tid))
+                return MakeError(req, 403, "Forbidden", "Access denied.");
+
+            List<string> keys = await _Database.Tags.DistinctKeysAsync(cid).ConfigureAwait(false);
+            return keys;
         }
 
         #endregion
