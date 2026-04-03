@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="SwiftStack" Version="*" />
+    <PackageReference Include="Watson" Version="7.*" />
     <PackageReference Include="SyslogLogging" Version="*" />
     <PackageReference Include="Inputty" Version="*" />
   </ItemGroup>

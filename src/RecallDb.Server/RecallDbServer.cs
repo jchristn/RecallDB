@@ -8,10 +8,9 @@ namespace RecallDb.Server
     using System.Threading;
     using System.Threading.Tasks;
     using SyslogLogging;
-    using SwiftStack;
-    using SwiftStack.Rest;
-    using SwiftStack.Rest.OpenApi;
+    using WatsonWebserver;
     using WatsonWebserver.Core;
+    using WatsonWebserver.Core.OpenApi;
     using RecallDb.Core.Database;
     using RecallDb.Core.Database.Postgresql;
     using RecallDb.Core.Enums;
@@ -36,7 +35,7 @@ namespace RecallDb.Server
         private static LoggingModule _Logging = null;
         private static DatabaseDriverBase _Database = null;
         private static AuthenticationService _AuthService = null;
-        private static SwiftStackApp _App = null;
+        private static Webserver _App = null;
         private static DateTime _StartTimeUtc = DateTime.UtcNow;
         private static CancellationTokenSource _TokenSource = new CancellationTokenSource();
 
@@ -128,20 +127,23 @@ namespace RecallDb.Server
 
             #region Initialize-Server
 
-            _App = new SwiftStackApp("RecallDB Server");
-            _App.Rest.WebserverSettings.Hostname = _Settings.Webserver.Hostname;
-            _App.Rest.WebserverSettings.Port = _Settings.Webserver.Port;
-            _App.Rest.WebserverSettings.Ssl.Enable = _Settings.Webserver.Ssl;
+            WatsonWebserver.Core.WebserverSettings webserverSettings = new WatsonWebserver.Core.WebserverSettings();
+            webserverSettings.Hostname = _Settings.Webserver.Hostname;
+            webserverSettings.Port = _Settings.Webserver.Port;
+            webserverSettings.Ssl.Enable = _Settings.Webserver.Ssl;
 
-            _App.Rest.AuthenticationRoute = AuthenticateRequestAsync;
+            _App = new Webserver(webserverSettings, DefaultRoute);
+            _App.Serializer = new RecallDbSerializationHelper();
 
-            _App.Rest.PreRoutingRoute = async (ctx) =>
+            _App.Routes.AuthenticateApiRequest = AuthenticateRequestAsync;
+
+            _App.Routes.PreRouting = async (ctx) =>
             {
                 ctx.Timestamp.Start = DateTime.UtcNow;
                 ctx.Response.ContentType = "application/json";
             };
 
-            _App.Rest.PostRoutingRoute = async (ctx) =>
+            _App.Routes.PostRouting = async (ctx) =>
             {
                 ctx.Timestamp.End = DateTime.UtcNow;
                 _Logging.Debug(
@@ -152,7 +154,7 @@ namespace RecallDb.Server
                     "(" + ctx.Timestamp.TotalMs.Value.ToString("F2").ToString() + "ms)");
             };
 
-            _App.Rest.UseOpenApi(api =>
+            _App.UseOpenApi(api =>
             {
                 api.Info.Title = "RecallDB API";
                 api.Info.Version = _Version;
@@ -160,9 +162,13 @@ namespace RecallDb.Server
                 api.Info.Contact = new OpenApiContact { Name = "RecallDB" };
                 api.Info.License = new OpenApiLicense { Name = "MIT" };
 
-                api.SecuritySchemes["Bearer"] = OpenApiSecurityScheme.Bearer(
-                    "JWT",
-                    "Bearer token authentication. Use an admin API key or a credential bearer token in the Authorization header.");
+                api.SecuritySchemes["Bearer"] = new OpenApiSecurityScheme
+                {
+                    Type = "http",
+                    Scheme = "bearer",
+                    BearerFormat = "JWT",
+                    Description = "Bearer token authentication. Use an admin API key or a credential bearer token in the Authorization header."
+                };
                 api.Security.Add(new Dictionary<string, List<string>> { { "Bearer", new List<string>() } });
 
                 api.Tags.Add(new OpenApiTag { Name = "Health", Description = "Health check endpoints" });
@@ -191,7 +197,7 @@ namespace RecallDb.Server
             Console.WriteLine(RecallDb.Core.Constants.Logo);
 
             _Logging.Info(_Header + "starting on " + _Settings.Webserver.Hostname + ":" + _Settings.Webserver.Port);
-            _ = Task.Run(() => _App.Rest.Run(_TokenSource.Token), _TokenSource.Token);
+            _ = Task.Run(() => _App.Start(_TokenSource.Token), _TokenSource.Token);
 
             Console.WriteLine("RecallDB v" + _Version + " listening on " + _Settings.Webserver.Hostname + ":" + _Settings.Webserver.Port);
             Console.WriteLine("Press CTRL+C to exit");
@@ -272,7 +278,7 @@ namespace RecallDb.Server
         private static void RegisterRoutes()
         {
             // Health routes
-            _App.Rest.Get("/", HealthGetRoute,
+            _App.Get("/", HealthGetRoute,
                 openApi => openApi
                     .WithTag("Health")
                     .WithSummary("Health check")
@@ -280,7 +286,7 @@ namespace RecallDb.Server
                     .WithOperationId("healthGet")
                     .WithResponse(200, OpenApiResponseMetadata.Create("Server health information")));
 
-            _App.Rest.Head("/", HealthHeadRoute,
+            _App.Head("/", HealthHeadRoute,
                 openApi => openApi
                     .WithTag("Health")
                     .WithSummary("Health check (HEAD)")
@@ -289,19 +295,19 @@ namespace RecallDb.Server
                     .WithResponse(200, OpenApiResponseMetadata.Create("Server is running")));
 
             // Authentication route
-            _App.Rest.Post<AuthenticateRequest>("/v1.0/authenticate", AuthenticateRoute,
+            _App.Post<AuthenticateRequest>("/v1.0/authenticate", AuthenticateRoute,
                 openApi => openApi
                     .WithTag("Authentication")
                     .WithSummary("Authenticate")
                     .WithDescription("Authenticate using a bearer token, or using tenant ID, email, and password.")
                     .WithOperationId("authenticate")
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<AuthenticateRequest>("Supply BearerToken or TenantId+Email+Password.", required: true))
-                    .WithResponse(200, OpenApiResponseMetadata.Json<AuthenticateResponse>("Authentication successful"))
-                    .WithResponse(400, OpenApiResponseMetadata.BadRequest("Invalid request body"))
-                    .WithResponse(401, OpenApiResponseMetadata.Unauthorized("Authentication failed")));
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Supply BearerToken or TenantId+Email+Password.", true))
+                    .WithResponse(200, OpenApiResponseMetadata.Json("Authentication successful", null))
+                    .WithResponse(400, OpenApiResponseMetadata.BadRequest())
+                    .WithResponse(401, OpenApiResponseMetadata.Unauthorized()));
 
             // Tenant routes
-            _App.Rest.Get("/v1.0/tenants", TenantListRoute,
+            _App.Get("/v1.0/tenants", TenantListRoute,
                 openApi => openApi
                     .WithTag("Tenants")
                     .WithSummary("List tenants")
@@ -309,21 +315,21 @@ namespace RecallDb.Server
                     .WithOperationId("tenantList")
                     .WithResponse(200, OpenApiResponseMetadata.Create("List of tenants"))
                     .WithResponse(401, OpenApiResponseMetadata.Unauthorized()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Get("/v1.0/tenants/{id}", TenantReadRoute,
+            _App.Get("/v1.0/tenants/{id}", TenantReadRoute,
                 openApi => openApi
                     .WithTag("Tenants")
                     .WithSummary("Read tenant")
                     .WithDescription("Retrieve a tenant by ID.")
                     .WithOperationId("tenantRead")
                     .WithParameter(OpenApiParameterMetadata.Path("id", "Tenant ID"))
-                    .WithResponse(200, OpenApiResponseMetadata.Json<TenantMetadata>("Tenant details"))
+                    .WithResponse(200, OpenApiResponseMetadata.Json("Tenant details", null))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
-                    .WithResponse(404, OpenApiResponseMetadata.NotFound("Tenant not found")),
-                requireAuthentication: true);
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
 
-            _App.Rest.Head("/v1.0/tenants/{id}", TenantExistsRoute,
+            _App.Head("/v1.0/tenants/{id}", TenantExistsRoute,
                 openApi => openApi
                     .WithTag("Tenants")
                     .WithSummary("Check tenant exists")
@@ -333,46 +339,46 @@ namespace RecallDb.Server
                     .WithResponse(200, OpenApiResponseMetadata.Create("Tenant exists"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
                     .WithResponse(404, OpenApiResponseMetadata.NotFound()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Post<EnumerationQuery>("/v1.0/tenants/enumerate", TenantEnumerateRoute,
+            _App.Post<EnumerationQuery>("/v1.0/tenants/enumerate", TenantEnumerateRoute,
                 openApi => openApi
                     .WithTag("Tenants")
                     .WithSummary("Enumerate tenants")
                     .WithDescription("Enumerate tenants with pagination. Admin access required.")
                     .WithOperationId("tenantEnumerate")
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<EnumerationQuery>("Pagination parameters"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Pagination parameters"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("Paginated list of tenants"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Put<TenantMetadata>("/v1.0/tenants", TenantCreateRoute,
+            _App.Put<TenantMetadata>("/v1.0/tenants", TenantCreateRoute,
                 openApi => openApi
                     .WithTag("Tenants")
                     .WithSummary("Create tenant")
                     .WithDescription("Create a new tenant. Admin access required.")
                     .WithOperationId("tenantCreate")
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<TenantMetadata>("Tenant to create", required: true))
-                    .WithResponse(201, OpenApiResponseMetadata.Json<TenantMetadata>("Tenant created"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Tenant to create", true))
+                    .WithResponse(201, OpenApiResponseMetadata.Json("Tenant created", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Put<TenantMetadata>("/v1.0/tenants/{id}", TenantUpdateRoute,
+            _App.Put<TenantMetadata>("/v1.0/tenants/{id}", TenantUpdateRoute,
                 openApi => openApi
                     .WithTag("Tenants")
                     .WithSummary("Update tenant")
                     .WithDescription("Update an existing tenant by ID.")
                     .WithOperationId("tenantUpdate")
                     .WithParameter(OpenApiParameterMetadata.Path("id", "Tenant ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<TenantMetadata>("Updated tenant data", required: true))
-                    .WithResponse(200, OpenApiResponseMetadata.Json<TenantMetadata>("Tenant updated"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Updated tenant data", true))
+                    .WithResponse(200, OpenApiResponseMetadata.Json("Tenant updated", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
-                    .WithResponse(404, OpenApiResponseMetadata.NotFound("Tenant not found")),
-                requireAuthentication: true);
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
 
-            _App.Rest.Delete("/v1.0/tenants/{id}", TenantDeleteRoute,
+            _App.Delete("/v1.0/tenants/{id}", TenantDeleteRoute,
                 openApi => openApi
                     .WithTag("Tenants")
                     .WithSummary("Delete tenant")
@@ -382,10 +388,10 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Query("force", "Force delete including collection tables", required: false))
                     .WithResponse(204, OpenApiResponseMetadata.NoContent())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
             // User routes
-            _App.Rest.Get("/v1.0/tenants/{tid}/users", UserListRoute,
+            _App.Get("/v1.0/tenants/{tid}/users", UserListRoute,
                 openApi => openApi
                     .WithTag("Users")
                     .WithSummary("List users")
@@ -394,9 +400,9 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("List of users"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Get("/v1.0/tenants/{tid}/users/{id}", UserReadRoute,
+            _App.Get("/v1.0/tenants/{tid}/users/{id}", UserReadRoute,
                 openApi => openApi
                     .WithTag("Users")
                     .WithSummary("Read user")
@@ -404,12 +410,12 @@ namespace RecallDb.Server
                     .WithOperationId("userRead")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("id", "User ID"))
-                    .WithResponse(200, OpenApiResponseMetadata.Json<UserMaster>("User details (password redacted)"))
+                    .WithResponse(200, OpenApiResponseMetadata.Json("User details (password redacted)", null))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
-                    .WithResponse(404, OpenApiResponseMetadata.NotFound("User not found")),
-                requireAuthentication: true);
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
 
-            _App.Rest.Head("/v1.0/tenants/{tid}/users/{id}", UserExistsRoute,
+            _App.Head("/v1.0/tenants/{tid}/users/{id}", UserExistsRoute,
                 openApi => openApi
                     .WithTag("Users")
                     .WithSummary("Check user exists")
@@ -420,34 +426,34 @@ namespace RecallDb.Server
                     .WithResponse(200, OpenApiResponseMetadata.Create("User exists"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
                     .WithResponse(404, OpenApiResponseMetadata.NotFound()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Post<EnumerationQuery>("/v1.0/tenants/{tid}/users/enumerate", UserEnumerateRoute,
+            _App.Post<EnumerationQuery>("/v1.0/tenants/{tid}/users/enumerate", UserEnumerateRoute,
                 openApi => openApi
                     .WithTag("Users")
                     .WithSummary("Enumerate users")
                     .WithDescription("Enumerate users for a tenant with pagination.")
                     .WithOperationId("userEnumerate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<EnumerationQuery>("Pagination parameters"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Pagination parameters"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("Paginated list of users"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Put<UserMaster>("/v1.0/tenants/{tid}/users", UserCreateRoute,
+            _App.Put<UserMaster>("/v1.0/tenants/{tid}/users", UserCreateRoute,
                 openApi => openApi
                     .WithTag("Users")
                     .WithSummary("Create user")
                     .WithDescription("Create a new user for a tenant. Admin or tenant admin access required.")
                     .WithOperationId("userCreate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<UserMaster>("User to create", required: true))
-                    .WithResponse(201, OpenApiResponseMetadata.Json<UserMaster>("User created (password redacted)"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "User to create", true))
+                    .WithResponse(201, OpenApiResponseMetadata.Json("User created (password redacted)", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Put<UserMaster>("/v1.0/tenants/{tid}/users/{id}", UserUpdateRoute,
+            _App.Put<UserMaster>("/v1.0/tenants/{tid}/users/{id}", UserUpdateRoute,
                 openApi => openApi
                     .WithTag("Users")
                     .WithSummary("Update user")
@@ -455,14 +461,14 @@ namespace RecallDb.Server
                     .WithOperationId("userUpdate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("id", "User ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<UserMaster>("Updated user data", required: true))
-                    .WithResponse(200, OpenApiResponseMetadata.Json<UserMaster>("User updated (password redacted)"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Updated user data", true))
+                    .WithResponse(200, OpenApiResponseMetadata.Json("User updated (password redacted)", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
-                    .WithResponse(404, OpenApiResponseMetadata.NotFound("User not found")),
-                requireAuthentication: true);
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
 
-            _App.Rest.Delete("/v1.0/tenants/{tid}/users/{id}", UserDeleteRoute,
+            _App.Delete("/v1.0/tenants/{tid}/users/{id}", UserDeleteRoute,
                 openApi => openApi
                     .WithTag("Users")
                     .WithSummary("Delete user")
@@ -472,10 +478,10 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("id", "User ID"))
                     .WithResponse(204, OpenApiResponseMetadata.NoContent())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
             // Credential routes
-            _App.Rest.Get("/v1.0/tenants/{tid}/credentials", CredentialListRoute,
+            _App.Get("/v1.0/tenants/{tid}/credentials", CredentialListRoute,
                 openApi => openApi
                     .WithTag("Credentials")
                     .WithSummary("List credentials")
@@ -484,9 +490,9 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("List of credentials"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Get("/v1.0/tenants/{tid}/credentials/{id}", CredentialReadRoute,
+            _App.Get("/v1.0/tenants/{tid}/credentials/{id}", CredentialReadRoute,
                 openApi => openApi
                     .WithTag("Credentials")
                     .WithSummary("Read credential")
@@ -494,12 +500,12 @@ namespace RecallDb.Server
                     .WithOperationId("credentialRead")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("id", "Credential ID"))
-                    .WithResponse(200, OpenApiResponseMetadata.Json<Credential>("Credential details"))
+                    .WithResponse(200, OpenApiResponseMetadata.Json("Credential details", null))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
-                    .WithResponse(404, OpenApiResponseMetadata.NotFound("Credential not found")),
-                requireAuthentication: true);
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
 
-            _App.Rest.Head("/v1.0/tenants/{tid}/credentials/{id}", CredentialExistsRoute,
+            _App.Head("/v1.0/tenants/{tid}/credentials/{id}", CredentialExistsRoute,
                 openApi => openApi
                     .WithTag("Credentials")
                     .WithSummary("Check credential exists")
@@ -510,34 +516,34 @@ namespace RecallDb.Server
                     .WithResponse(200, OpenApiResponseMetadata.Create("Credential exists"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
                     .WithResponse(404, OpenApiResponseMetadata.NotFound()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Post<EnumerationQuery>("/v1.0/tenants/{tid}/credentials/enumerate", CredentialEnumerateRoute,
+            _App.Post<EnumerationQuery>("/v1.0/tenants/{tid}/credentials/enumerate", CredentialEnumerateRoute,
                 openApi => openApi
                     .WithTag("Credentials")
                     .WithSummary("Enumerate credentials")
                     .WithDescription("Enumerate credentials for a tenant with pagination.")
                     .WithOperationId("credentialEnumerate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<EnumerationQuery>("Pagination parameters"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Pagination parameters"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("Paginated list of credentials"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Put<Credential>("/v1.0/tenants/{tid}/credentials", CredentialCreateRoute,
+            _App.Put<Credential>("/v1.0/tenants/{tid}/credentials", CredentialCreateRoute,
                 openApi => openApi
                     .WithTag("Credentials")
                     .WithSummary("Create credential")
                     .WithDescription("Create a new credential for a tenant. Admin or tenant admin access required.")
                     .WithOperationId("credentialCreate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<Credential>("Credential to create", required: true))
-                    .WithResponse(201, OpenApiResponseMetadata.Json<Credential>("Credential created"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Credential to create", true))
+                    .WithResponse(201, OpenApiResponseMetadata.Json("Credential created", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Put<Credential>("/v1.0/tenants/{tid}/credentials/{id}", CredentialUpdateRoute,
+            _App.Put<Credential>("/v1.0/tenants/{tid}/credentials/{id}", CredentialUpdateRoute,
                 openApi => openApi
                     .WithTag("Credentials")
                     .WithSummary("Update credential")
@@ -545,14 +551,14 @@ namespace RecallDb.Server
                     .WithOperationId("credentialUpdate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("id", "Credential ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<Credential>("Updated credential data", required: true))
-                    .WithResponse(200, OpenApiResponseMetadata.Json<Credential>("Credential updated"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Updated credential data", true))
+                    .WithResponse(200, OpenApiResponseMetadata.Json("Credential updated", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
-                    .WithResponse(404, OpenApiResponseMetadata.NotFound("Credential not found")),
-                requireAuthentication: true);
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
 
-            _App.Rest.Delete("/v1.0/tenants/{tid}/credentials/{id}", CredentialDeleteRoute,
+            _App.Delete("/v1.0/tenants/{tid}/credentials/{id}", CredentialDeleteRoute,
                 openApi => openApi
                     .WithTag("Credentials")
                     .WithSummary("Delete credential")
@@ -562,10 +568,10 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("id", "Credential ID"))
                     .WithResponse(204, OpenApiResponseMetadata.NoContent())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
             // Collection routes
-            _App.Rest.Get("/v1.0/tenants/{tid}/collections", CollectionListRoute,
+            _App.Get("/v1.0/tenants/{tid}/collections", CollectionListRoute,
                 openApi => openApi
                     .WithTag("Collections")
                     .WithSummary("List collections")
@@ -574,9 +580,9 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("List of collections"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Get("/v1.0/tenants/{tid}/collections/{cid}", CollectionReadRoute,
+            _App.Get("/v1.0/tenants/{tid}/collections/{cid}", CollectionReadRoute,
                 openApi => openApi
                     .WithTag("Collections")
                     .WithSummary("Read collection")
@@ -584,12 +590,12 @@ namespace RecallDb.Server
                     .WithOperationId("collectionRead")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithResponse(200, OpenApiResponseMetadata.Json<CollectionMetadata>("Collection details"))
+                    .WithResponse(200, OpenApiResponseMetadata.Json("Collection details", null))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
-                    .WithResponse(404, OpenApiResponseMetadata.NotFound("Collection not found")),
-                requireAuthentication: true);
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
 
-            _App.Rest.Head("/v1.0/tenants/{tid}/collections/{cid}", CollectionExistsRoute,
+            _App.Head("/v1.0/tenants/{tid}/collections/{cid}", CollectionExistsRoute,
                 openApi => openApi
                     .WithTag("Collections")
                     .WithSummary("Check collection exists")
@@ -600,34 +606,34 @@ namespace RecallDb.Server
                     .WithResponse(200, OpenApiResponseMetadata.Create("Collection exists"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
                     .WithResponse(404, OpenApiResponseMetadata.NotFound()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Post<EnumerationQuery>("/v1.0/tenants/{tid}/collections/enumerate", CollectionEnumerateRoute,
+            _App.Post<EnumerationQuery>("/v1.0/tenants/{tid}/collections/enumerate", CollectionEnumerateRoute,
                 openApi => openApi
                     .WithTag("Collections")
                     .WithSummary("Enumerate collections")
                     .WithDescription("Enumerate collections for a tenant with pagination.")
                     .WithOperationId("collectionEnumerate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<EnumerationQuery>("Pagination parameters"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Pagination parameters"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("Paginated list of collections"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Put<CollectionMetadata>("/v1.0/tenants/{tid}/collections", CollectionCreateRoute,
+            _App.Put<CollectionMetadata>("/v1.0/tenants/{tid}/collections", CollectionCreateRoute,
                 openApi => openApi
                     .WithTag("Collections")
                     .WithSummary("Create collection")
                     .WithDescription("Create a new vector collection. This creates the backing document, label, and tag tables with the specified vector dimensionality. Admin or tenant admin access required.")
                     .WithOperationId("collectionCreate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<CollectionMetadata>("Collection to create including Dimensionality", required: true))
-                    .WithResponse(201, OpenApiResponseMetadata.Json<CollectionMetadata>("Collection created"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Collection to create including Dimensionality", true))
+                    .WithResponse(201, OpenApiResponseMetadata.Json("Collection created", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Put<CollectionMetadata>("/v1.0/tenants/{tid}/collections/{cid}", CollectionUpdateRoute,
+            _App.Put<CollectionMetadata>("/v1.0/tenants/{tid}/collections/{cid}", CollectionUpdateRoute,
                 openApi => openApi
                     .WithTag("Collections")
                     .WithSummary("Update collection")
@@ -635,14 +641,14 @@ namespace RecallDb.Server
                     .WithOperationId("collectionUpdate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<CollectionMetadata>("Updated collection data", required: true))
-                    .WithResponse(200, OpenApiResponseMetadata.Json<CollectionMetadata>("Collection updated"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Updated collection data", true))
+                    .WithResponse(200, OpenApiResponseMetadata.Json("Collection updated", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
-                    .WithResponse(404, OpenApiResponseMetadata.NotFound("Collection not found")),
-                requireAuthentication: true);
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
 
-            _App.Rest.Delete("/v1.0/tenants/{tid}/collections/{cid}", CollectionDeleteRoute,
+            _App.Delete("/v1.0/tenants/{tid}/collections/{cid}", CollectionDeleteRoute,
                 openApi => openApi
                     .WithTag("Collections")
                     .WithSummary("Delete collection")
@@ -652,9 +658,9 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
                     .WithResponse(204, OpenApiResponseMetadata.NoContent())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Get("/v1.0/tenants/{tid}/collections/{cid}/stats", CollectionStatsRoute,
+            _App.Get("/v1.0/tenants/{tid}/collections/{cid}/stats", CollectionStatsRoute,
                 openApi => openApi
                     .WithTag("Collections")
                     .WithSummary("Get collection statistics")
@@ -664,11 +670,11 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("Collection statistics"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
-                    .WithResponse(404, OpenApiResponseMetadata.NotFound("Collection not found")),
-                requireAuthentication: true);
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
 
             // Document routes
-            _App.Rest.Get("/v1.0/tenants/{tid}/collections/{cid}/documents", DocumentListRoute,
+            _App.Get("/v1.0/tenants/{tid}/collections/{cid}/documents", DocumentListRoute,
                 openApi => openApi
                     .WithTag("Documents")
                     .WithSummary("List documents")
@@ -678,9 +684,9 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("List of documents"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Get("/v1.0/tenants/{tid}/collections/{cid}/documents/{docKey}", DocumentReadRoute,
+            _App.Get("/v1.0/tenants/{tid}/collections/{cid}/documents/{docKey}", DocumentReadRoute,
                 openApi => openApi
                     .WithTag("Documents")
                     .WithSummary("Read document by key")
@@ -689,12 +695,12 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("docKey", "Document key"))
-                    .WithResponse(200, OpenApiResponseMetadata.Json<DocumentRecord>("Document details"))
+                    .WithResponse(200, OpenApiResponseMetadata.Json("Document details", null))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
-                    .WithResponse(404, OpenApiResponseMetadata.NotFound("Document not found")),
-                requireAuthentication: true);
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
 
-            _App.Rest.Get("/v1.0/tenants/{tid}/collections/{cid}/documents/{docId}/{position}", DocumentReadByPositionRoute,
+            _App.Get("/v1.0/tenants/{tid}/collections/{cid}/documents/{docId}/{position}", DocumentReadByPositionRoute,
                 openApi => openApi
                     .WithTag("Documents")
                     .WithSummary("Read document by ID and position")
@@ -704,13 +710,13 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("docId", "Document ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("position", "Position index (0-based)"))
-                    .WithResponse(200, OpenApiResponseMetadata.Json<DocumentRecord>("Document chunk details"))
-                    .WithResponse(400, OpenApiResponseMetadata.BadRequest("Position must be an integer"))
+                    .WithResponse(200, OpenApiResponseMetadata.Json("Document chunk details", null))
+                    .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
-                    .WithResponse(404, OpenApiResponseMetadata.NotFound("Document chunk not found")),
-                requireAuthentication: true);
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
 
-            _App.Rest.Head("/v1.0/tenants/{tid}/collections/{cid}/documents/{docKey}", DocumentExistsRoute,
+            _App.Head("/v1.0/tenants/{tid}/collections/{cid}/documents/{docKey}", DocumentExistsRoute,
                 openApi => openApi
                     .WithTag("Documents")
                     .WithSummary("Check document exists")
@@ -722,9 +728,9 @@ namespace RecallDb.Server
                     .WithResponse(200, OpenApiResponseMetadata.Create("Document exists"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
                     .WithResponse(404, OpenApiResponseMetadata.NotFound()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Post<EnumerationQuery>("/v1.0/tenants/{tid}/collections/{cid}/documents/enumerate", DocumentEnumerateRoute,
+            _App.Post<EnumerationQuery>("/v1.0/tenants/{tid}/collections/{cid}/documents/enumerate", DocumentEnumerateRoute,
                 openApi => openApi
                     .WithTag("Documents")
                     .WithSummary("Enumerate documents")
@@ -732,12 +738,12 @@ namespace RecallDb.Server
                     .WithOperationId("documentEnumerate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<EnumerationQuery>("Pagination parameters"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Pagination parameters"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("Paginated list of documents"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Post<List<DocumentRecord>>("/v1.0/tenants/{tid}/collections/{cid}/documents/batch", DocumentBatchRoute,
+            _App.Post<List<DocumentRecord>>("/v1.0/tenants/{tid}/collections/{cid}/documents/batch", DocumentBatchRoute,
                 openApi => openApi
                     .WithTag("Documents")
                     .WithSummary("Batch create documents")
@@ -745,13 +751,13 @@ namespace RecallDb.Server
                     .WithOperationId("documentBatchCreate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<List<DocumentRecord>>("List of documents to create", required: true))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "List of documents to create", true))
                     .WithResponse(201, OpenApiResponseMetadata.Create("Documents created"))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Put<DocumentRecord>("/v1.0/tenants/{tid}/collections/{cid}/documents", DocumentCreateRoute,
+            _App.Put<DocumentRecord>("/v1.0/tenants/{tid}/collections/{cid}/documents", DocumentCreateRoute,
                 openApi => openApi
                     .WithTag("Documents")
                     .WithSummary("Create document")
@@ -759,13 +765,13 @@ namespace RecallDb.Server
                     .WithOperationId("documentCreate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<DocumentRecord>("Document to create", required: true))
-                    .WithResponse(201, OpenApiResponseMetadata.Json<DocumentRecord>("Document created"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Document to create", true))
+                    .WithResponse(201, OpenApiResponseMetadata.Json("Document created", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Put<DocumentRecord>("/v1.0/tenants/{tid}/collections/{cid}/documents/{docKey}", DocumentUpdateRoute,
+            _App.Put<DocumentRecord>("/v1.0/tenants/{tid}/collections/{cid}/documents/{docKey}", DocumentUpdateRoute,
                 openApi => openApi
                     .WithTag("Documents")
                     .WithSummary("Update document")
@@ -774,14 +780,14 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("docKey", "Document key"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<DocumentRecord>("Updated document data", required: true))
-                    .WithResponse(200, OpenApiResponseMetadata.Json<DocumentRecord>("Document updated"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Updated document data", true))
+                    .WithResponse(200, OpenApiResponseMetadata.Json("Document updated", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
-                    .WithResponse(404, OpenApiResponseMetadata.NotFound("Document not found")),
-                requireAuthentication: true);
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
 
-            _App.Rest.Delete("/v1.0/tenants/{tid}/collections/{cid}/documents/{docKey}", DocumentDeleteRoute,
+            _App.Delete("/v1.0/tenants/{tid}/collections/{cid}/documents/{docKey}", DocumentDeleteRoute,
                 openApi => openApi
                     .WithTag("Documents")
                     .WithSummary("Delete document")
@@ -792,9 +798,9 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("docKey", "Document key"))
                     .WithResponse(204, OpenApiResponseMetadata.NoContent())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Post<BatchDeleteRequest>("/v1.0/tenants/{tid}/collections/{cid}/documents/batch/delete", DocumentBatchDeleteRoute,
+            _App.Post<BatchDeleteRequest>("/v1.0/tenants/{tid}/collections/{cid}/documents/batch/delete", DocumentBatchDeleteRoute,
                 openApi => openApi
                     .WithTag("Documents")
                     .WithSummary("Batch delete documents")
@@ -802,13 +808,13 @@ namespace RecallDb.Server
                     .WithOperationId("documentBatchDelete")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<BatchDeleteRequest>("Batch delete request containing document keys", required: true))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Batch delete request containing document keys", true))
                     .WithResponse(204, OpenApiResponseMetadata.NoContent())
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Post<EnumerationQuery>("/v1.0/tenants/{tid}/collections/{cid}/documents/delete/filter", DocumentDeleteByFilterRoute,
+            _App.Post<EnumerationQuery>("/v1.0/tenants/{tid}/collections/{cid}/documents/delete/filter", DocumentDeleteByFilterRoute,
                 openApi => openApi
                     .WithTag("Documents")
                     .WithSummary("Delete documents by filter")
@@ -816,13 +822,13 @@ namespace RecallDb.Server
                     .WithOperationId("documentDeleteByFilter")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<EnumerationQuery>("Filter criteria for documents to delete", required: true))
-                    .WithResponse(200, OpenApiResponseMetadata.Json<DeleteResult>("Delete result with count of deleted documents"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Filter criteria for documents to delete", true))
+                    .WithResponse(200, OpenApiResponseMetadata.Json("Delete result with count of deleted documents", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Get("/v1.0/tenants/{tid}/collections/{cid}/documents/stats/{docKey}", DocumentStatsRoute,
+            _App.Get("/v1.0/tenants/{tid}/collections/{cid}/documents/stats/{docKey}", DocumentStatsRoute,
                 openApi => openApi
                     .WithTag("Documents")
                     .WithSummary("Get document statistics")
@@ -833,11 +839,11 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("docKey", "Document key"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("Document statistics"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
-                    .WithResponse(404, OpenApiResponseMetadata.NotFound("Document not found")),
-                requireAuthentication: true);
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
 
             // Label routes
-            _App.Rest.Get("/v1.0/tenants/{tid}/collections/{cid}/labels", LabelListRoute,
+            _App.Get("/v1.0/tenants/{tid}/collections/{cid}/labels", LabelListRoute,
                 openApi => openApi
                     .WithTag("Labels")
                     .WithSummary("List labels")
@@ -847,9 +853,9 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("List of labels"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Get("/v1.0/tenants/{tid}/collections/{cid}/labels/distinct", LabelDistinctRoute,
+            _App.Get("/v1.0/tenants/{tid}/collections/{cid}/labels/distinct", LabelDistinctRoute,
                 openApi => openApi
                     .WithTag("Labels")
                     .WithSummary("Distinct labels")
@@ -859,9 +865,9 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("List of distinct labels"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Get("/v1.0/tenants/{tid}/collections/{cid}/labels/{id}", LabelReadRoute,
+            _App.Get("/v1.0/tenants/{tid}/collections/{cid}/labels/{id}", LabelReadRoute,
                 openApi => openApi
                     .WithTag("Labels")
                     .WithSummary("Read label")
@@ -870,12 +876,12 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("id", "Label ID"))
-                    .WithResponse(200, OpenApiResponseMetadata.Json<LabelRecord>("Label details"))
+                    .WithResponse(200, OpenApiResponseMetadata.Json("Label details", null))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
-                    .WithResponse(404, OpenApiResponseMetadata.NotFound("Label not found")),
-                requireAuthentication: true);
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
 
-            _App.Rest.Put<LabelRecord>("/v1.0/tenants/{tid}/collections/{cid}/labels", LabelCreateRoute,
+            _App.Put<LabelRecord>("/v1.0/tenants/{tid}/collections/{cid}/labels", LabelCreateRoute,
                 openApi => openApi
                     .WithTag("Labels")
                     .WithSummary("Create label")
@@ -883,13 +889,13 @@ namespace RecallDb.Server
                     .WithOperationId("labelCreate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<LabelRecord>("Label to create", required: true))
-                    .WithResponse(201, OpenApiResponseMetadata.Json<LabelRecord>("Label created"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Label to create", true))
+                    .WithResponse(201, OpenApiResponseMetadata.Json("Label created", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Delete("/v1.0/tenants/{tid}/collections/{cid}/labels/{id}", LabelDeleteRoute,
+            _App.Delete("/v1.0/tenants/{tid}/collections/{cid}/labels/{id}", LabelDeleteRoute,
                 openApi => openApi
                     .WithTag("Labels")
                     .WithSummary("Delete label")
@@ -900,10 +906,10 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("id", "Label ID"))
                     .WithResponse(204, OpenApiResponseMetadata.NoContent())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
             // Tag routes
-            _App.Rest.Get("/v1.0/tenants/{tid}/collections/{cid}/tags", TagListRoute,
+            _App.Get("/v1.0/tenants/{tid}/collections/{cid}/tags", TagListRoute,
                 openApi => openApi
                     .WithTag("Tags")
                     .WithSummary("List tags")
@@ -913,9 +919,9 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("List of tags"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Get("/v1.0/tenants/{tid}/collections/{cid}/tags/distinct", TagDistinctRoute,
+            _App.Get("/v1.0/tenants/{tid}/collections/{cid}/tags/distinct", TagDistinctRoute,
                 openApi => openApi
                     .WithTag("Tags")
                     .WithSummary("Distinct tag keys")
@@ -925,9 +931,9 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("List of distinct tag keys"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Get("/v1.0/tenants/{tid}/collections/{cid}/tags/{id}", TagReadRoute,
+            _App.Get("/v1.0/tenants/{tid}/collections/{cid}/tags/{id}", TagReadRoute,
                 openApi => openApi
                     .WithTag("Tags")
                     .WithSummary("Read tag")
@@ -936,12 +942,12 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("id", "Tag ID"))
-                    .WithResponse(200, OpenApiResponseMetadata.Json<TagRecord>("Tag details"))
+                    .WithResponse(200, OpenApiResponseMetadata.Json("Tag details", null))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
-                    .WithResponse(404, OpenApiResponseMetadata.NotFound("Tag not found")),
-                requireAuthentication: true);
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
 
-            _App.Rest.Put<TagRecord>("/v1.0/tenants/{tid}/collections/{cid}/tags", TagCreateRoute,
+            _App.Put<TagRecord>("/v1.0/tenants/{tid}/collections/{cid}/tags", TagCreateRoute,
                 openApi => openApi
                     .WithTag("Tags")
                     .WithSummary("Create tag")
@@ -949,13 +955,13 @@ namespace RecallDb.Server
                     .WithOperationId("tagCreate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<TagRecord>("Tag to create", required: true))
-                    .WithResponse(201, OpenApiResponseMetadata.Json<TagRecord>("Tag created"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Tag to create", true))
+                    .WithResponse(201, OpenApiResponseMetadata.Json("Tag created", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
-            _App.Rest.Delete("/v1.0/tenants/{tid}/collections/{cid}/tags/{id}", TagDeleteRoute,
+            _App.Delete("/v1.0/tenants/{tid}/collections/{cid}/tags/{id}", TagDeleteRoute,
                 openApi => openApi
                     .WithTag("Tags")
                     .WithSummary("Delete tag")
@@ -966,10 +972,10 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("id", "Tag ID"))
                     .WithResponse(204, OpenApiResponseMetadata.NoContent())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
-                requireAuthentication: true);
+                auth: true);
 
             // Search route
-            _App.Rest.Post<SearchQuery>("/v1.0/tenants/{tid}/collections/{cid}/search", SearchRoute,
+            _App.Post<SearchQuery>("/v1.0/tenants/{tid}/collections/{cid}/search", SearchRoute,
                 openApi => openApi
                     .WithTag("Search")
                     .WithSummary("Search")
@@ -977,12 +983,23 @@ namespace RecallDb.Server
                     .WithOperationId("search")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json<SearchQuery>("Search parameters including vector, filters, and pagination", required: true))
-                    .WithResponse(200, OpenApiResponseMetadata.Json<SearchResult>("Search results with scored documents"))
-                    .WithResponse(400, OpenApiResponseMetadata.BadRequest("Invalid search query"))
+                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Search parameters including vector, filters, and pagination", true))
+                    .WithResponse(200, OpenApiResponseMetadata.Json("Search results with scored documents", null))
+                    .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
-                    .WithResponse(404, OpenApiResponseMetadata.NotFound("Collection not found")),
-                requireAuthentication: true);
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
+        }
+
+        #endregion
+
+        #region Default-Route
+
+        private static async Task DefaultRoute(HttpContextBase ctx)
+        {
+            ctx.Response.StatusCode = 404;
+            ctx.Response.ContentType = "application/json";
+            await ctx.Response.Send(Serializer.SerializeJson(new { Error = "Not found", StatusCode = 404 })).ConfigureAwait(false);
         }
 
         #endregion
@@ -1007,6 +1024,9 @@ namespace RecallDb.Server
             result.AuthenticationResult = authResult.IsAuthenticated
                 ? AuthenticationResultEnum.Success
                 : AuthenticationResultEnum.Invalid;
+            result.AuthorizationResult = authResult.IsAuthenticated
+                ? AuthorizationResultEnum.Permitted
+                : AuthorizationResultEnum.DeniedImplicit;
             return result;
         }
 
@@ -1014,12 +1034,12 @@ namespace RecallDb.Server
 
         #region Route-Helpers
 
-        private static AuthenticationResult GetAuthResult(AppRequest req)
+        private static AuthenticationResult GetAuthResult(ApiRequest req)
         {
             return req.Http.Metadata as AuthenticationResult;
         }
 
-        private static object MakeError(AppRequest req, int statusCode, string error, string context = null)
+        private static object MakeError(ApiRequest req, int statusCode, string error, string context = null)
         {
             req.Http.Response.StatusCode = statusCode;
             return new { Error = error, StatusCode = statusCode, Context = context };
@@ -1036,7 +1056,7 @@ namespace RecallDb.Server
 
         #region Health-Routes
 
-        private static async Task<object> HealthGetRoute(AppRequest req)
+        private static async Task<object> HealthGetRoute(ApiRequest req)
         {
             double uptimeMs = (DateTime.UtcNow - _StartTimeUtc).TotalMilliseconds;
             return new
@@ -1047,7 +1067,7 @@ namespace RecallDb.Server
             };
         }
 
-        private static async Task<object> HealthHeadRoute(AppRequest req)
+        private static async Task<object> HealthHeadRoute(ApiRequest req)
         {
             req.Http.Response.StatusCode = 200;
             return null;
@@ -1057,7 +1077,7 @@ namespace RecallDb.Server
 
         #region Authenticate-Route
 
-        private static async Task<object> AuthenticateRoute(AppRequest req)
+        private static async Task<object> AuthenticateRoute(ApiRequest req)
         {
             AuthenticateRequest body = req.Data as AuthenticateRequest;
             if (body == null)
@@ -1093,7 +1113,7 @@ namespace RecallDb.Server
 
         #region Tenant-Routes
 
-        private static async Task<object> TenantListRoute(AppRequest req)
+        private static async Task<object> TenantListRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             EnumerationQuery query = new EnumerationQuery();
@@ -1122,7 +1142,7 @@ namespace RecallDb.Server
             }
         }
 
-        private static async Task<object> TenantReadRoute(AppRequest req)
+        private static async Task<object> TenantReadRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string id = req.Parameters["id"];
@@ -1137,7 +1157,7 @@ namespace RecallDb.Server
             return tenant;
         }
 
-        private static async Task<object> TenantExistsRoute(AppRequest req)
+        private static async Task<object> TenantExistsRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string id = req.Parameters["id"];
@@ -1153,7 +1173,7 @@ namespace RecallDb.Server
             return null;
         }
 
-        private static async Task<object> TenantEnumerateRoute(AppRequest req)
+        private static async Task<object> TenantEnumerateRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
 
@@ -1169,7 +1189,7 @@ namespace RecallDb.Server
             return result;
         }
 
-        private static async Task<object> TenantCreateRoute(AppRequest req)
+        private static async Task<object> TenantCreateRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
 
@@ -1185,7 +1205,7 @@ namespace RecallDb.Server
             return tenant;
         }
 
-        private static async Task<object> TenantUpdateRoute(AppRequest req)
+        private static async Task<object> TenantUpdateRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string id = req.Parameters["id"];
@@ -1205,7 +1225,7 @@ namespace RecallDb.Server
             return tenant;
         }
 
-        private static async Task<object> TenantDeleteRoute(AppRequest req)
+        private static async Task<object> TenantDeleteRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
 
@@ -1226,7 +1246,7 @@ namespace RecallDb.Server
 
         #region User-Routes
 
-        private static async Task<object> UserListRoute(AppRequest req)
+        private static async Task<object> UserListRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1241,7 +1261,7 @@ namespace RecallDb.Server
             return result;
         }
 
-        private static async Task<object> UserReadRoute(AppRequest req)
+        private static async Task<object> UserReadRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1257,7 +1277,7 @@ namespace RecallDb.Server
             return UserMaster.Redact(user);
         }
 
-        private static async Task<object> UserExistsRoute(AppRequest req)
+        private static async Task<object> UserExistsRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1274,7 +1294,7 @@ namespace RecallDb.Server
             return null;
         }
 
-        private static async Task<object> UserEnumerateRoute(AppRequest req)
+        private static async Task<object> UserEnumerateRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1291,7 +1311,7 @@ namespace RecallDb.Server
             return result;
         }
 
-        private static async Task<object> UserCreateRoute(AppRequest req)
+        private static async Task<object> UserCreateRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1312,7 +1332,7 @@ namespace RecallDb.Server
             return UserMaster.Redact(user);
         }
 
-        private static async Task<object> UserUpdateRoute(AppRequest req)
+        private static async Task<object> UserUpdateRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1337,7 +1357,7 @@ namespace RecallDb.Server
             return UserMaster.Redact(user);
         }
 
-        private static async Task<object> UserDeleteRoute(AppRequest req)
+        private static async Task<object> UserDeleteRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1359,7 +1379,7 @@ namespace RecallDb.Server
 
         #region Credential-Routes
 
-        private static async Task<object> CredentialListRoute(AppRequest req)
+        private static async Task<object> CredentialListRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1374,7 +1394,7 @@ namespace RecallDb.Server
             return result;
         }
 
-        private static async Task<object> CredentialReadRoute(AppRequest req)
+        private static async Task<object> CredentialReadRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1390,7 +1410,7 @@ namespace RecallDb.Server
             return cred;
         }
 
-        private static async Task<object> CredentialExistsRoute(AppRequest req)
+        private static async Task<object> CredentialExistsRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1407,7 +1427,7 @@ namespace RecallDb.Server
             return null;
         }
 
-        private static async Task<object> CredentialEnumerateRoute(AppRequest req)
+        private static async Task<object> CredentialEnumerateRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1424,7 +1444,7 @@ namespace RecallDb.Server
             return result;
         }
 
-        private static async Task<object> CredentialCreateRoute(AppRequest req)
+        private static async Task<object> CredentialCreateRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1445,7 +1465,7 @@ namespace RecallDb.Server
             return cred;
         }
 
-        private static async Task<object> CredentialUpdateRoute(AppRequest req)
+        private static async Task<object> CredentialUpdateRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1470,7 +1490,7 @@ namespace RecallDb.Server
             return cred;
         }
 
-        private static async Task<object> CredentialDeleteRoute(AppRequest req)
+        private static async Task<object> CredentialDeleteRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1491,7 +1511,7 @@ namespace RecallDb.Server
 
         #region Collection-Routes
 
-        private static async Task<object> CollectionListRoute(AppRequest req)
+        private static async Task<object> CollectionListRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1506,7 +1526,7 @@ namespace RecallDb.Server
             return result;
         }
 
-        private static async Task<object> CollectionReadRoute(AppRequest req)
+        private static async Task<object> CollectionReadRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1522,7 +1542,7 @@ namespace RecallDb.Server
             return col;
         }
 
-        private static async Task<object> CollectionExistsRoute(AppRequest req)
+        private static async Task<object> CollectionExistsRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1539,7 +1559,7 @@ namespace RecallDb.Server
             return null;
         }
 
-        private static async Task<object> CollectionEnumerateRoute(AppRequest req)
+        private static async Task<object> CollectionEnumerateRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1556,7 +1576,7 @@ namespace RecallDb.Server
             return result;
         }
 
-        private static async Task<object> CollectionCreateRoute(AppRequest req)
+        private static async Task<object> CollectionCreateRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1577,7 +1597,7 @@ namespace RecallDb.Server
             return col;
         }
 
-        private static async Task<object> CollectionUpdateRoute(AppRequest req)
+        private static async Task<object> CollectionUpdateRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1599,7 +1619,7 @@ namespace RecallDb.Server
             return col;
         }
 
-        private static async Task<object> CollectionDeleteRoute(AppRequest req)
+        private static async Task<object> CollectionDeleteRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1616,7 +1636,7 @@ namespace RecallDb.Server
             return null;
         }
 
-        private static async Task<object> CollectionStatsRoute(AppRequest req)
+        private static async Task<object> CollectionStatsRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1731,7 +1751,7 @@ namespace RecallDb.Server
 
         #region Document-Routes
 
-        private static async Task<object> DocumentListRoute(AppRequest req)
+        private static async Task<object> DocumentListRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1748,7 +1768,7 @@ namespace RecallDb.Server
             return result;
         }
 
-        private static async Task<object> DocumentReadRoute(AppRequest req)
+        private static async Task<object> DocumentReadRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1766,7 +1786,7 @@ namespace RecallDb.Server
             return doc;
         }
 
-        private static async Task<object> DocumentReadByPositionRoute(AppRequest req)
+        private static async Task<object> DocumentReadByPositionRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1788,7 +1808,7 @@ namespace RecallDb.Server
             return doc;
         }
 
-        private static async Task<object> DocumentExistsRoute(AppRequest req)
+        private static async Task<object> DocumentExistsRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1806,7 +1826,7 @@ namespace RecallDb.Server
             return null;
         }
 
-        private static async Task<object> DocumentEnumerateRoute(AppRequest req)
+        private static async Task<object> DocumentEnumerateRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1825,7 +1845,7 @@ namespace RecallDb.Server
             return result;
         }
 
-        private static async Task<object> DocumentCreateRoute(AppRequest req)
+        private static async Task<object> DocumentCreateRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1859,7 +1879,7 @@ namespace RecallDb.Server
             return doc;
         }
 
-        private static async Task<object> DocumentUpdateRoute(AppRequest req)
+        private static async Task<object> DocumentUpdateRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1899,7 +1919,7 @@ namespace RecallDb.Server
             return doc;
         }
 
-        private static async Task<object> DocumentDeleteRoute(AppRequest req)
+        private static async Task<object> DocumentDeleteRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1916,7 +1936,7 @@ namespace RecallDb.Server
             return null;
         }
 
-        private static async Task<object> DocumentBatchDeleteRoute(AppRequest req)
+        private static async Task<object> DocumentBatchDeleteRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1936,7 +1956,7 @@ namespace RecallDb.Server
             return null;
         }
 
-        private static async Task<object> DocumentDeleteByFilterRoute(AppRequest req)
+        private static async Task<object> DocumentDeleteByFilterRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -1983,7 +2003,7 @@ namespace RecallDb.Server
             return deleteResult;
         }
 
-        private static async Task<object> DocumentBatchRoute(AppRequest req)
+        private static async Task<object> DocumentBatchRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -2029,7 +2049,7 @@ namespace RecallDb.Server
             return created;
         }
 
-        private static async Task<object> DocumentStatsRoute(AppRequest req)
+        private static async Task<object> DocumentStatsRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -2106,7 +2126,7 @@ namespace RecallDb.Server
 
         #region Label-Routes
 
-        private static async Task<object> LabelListRoute(AppRequest req)
+        private static async Task<object> LabelListRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -2122,7 +2142,7 @@ namespace RecallDb.Server
             return result;
         }
 
-        private static async Task<object> LabelReadRoute(AppRequest req)
+        private static async Task<object> LabelReadRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -2139,7 +2159,7 @@ namespace RecallDb.Server
             return label;
         }
 
-        private static async Task<object> LabelCreateRoute(AppRequest req)
+        private static async Task<object> LabelCreateRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -2157,7 +2177,7 @@ namespace RecallDb.Server
             return label;
         }
 
-        private static async Task<object> LabelDeleteRoute(AppRequest req)
+        private static async Task<object> LabelDeleteRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -2172,7 +2192,7 @@ namespace RecallDb.Server
             return null;
         }
 
-        private static async Task<object> LabelDistinctRoute(AppRequest req)
+        private static async Task<object> LabelDistinctRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -2189,7 +2209,7 @@ namespace RecallDb.Server
 
         #region Tag-Routes
 
-        private static async Task<object> TagListRoute(AppRequest req)
+        private static async Task<object> TagListRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -2205,7 +2225,7 @@ namespace RecallDb.Server
             return result;
         }
 
-        private static async Task<object> TagReadRoute(AppRequest req)
+        private static async Task<object> TagReadRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -2222,7 +2242,7 @@ namespace RecallDb.Server
             return tag;
         }
 
-        private static async Task<object> TagCreateRoute(AppRequest req)
+        private static async Task<object> TagCreateRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -2240,7 +2260,7 @@ namespace RecallDb.Server
             return tag;
         }
 
-        private static async Task<object> TagDeleteRoute(AppRequest req)
+        private static async Task<object> TagDeleteRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -2255,7 +2275,7 @@ namespace RecallDb.Server
             return null;
         }
 
-        private static async Task<object> TagDistinctRoute(AppRequest req)
+        private static async Task<object> TagDistinctRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -2272,7 +2292,7 @@ namespace RecallDb.Server
 
         #region Search-Route
 
-        private static async Task<object> SearchRoute(AppRequest req)
+        private static async Task<object> SearchRoute(ApiRequest req)
         {
             AuthenticationResult auth = GetAuthResult(req);
             string tid = req.Parameters["tid"];
@@ -2381,5 +2401,23 @@ namespace RecallDb.Server
         }
 
         #endregion
+    }
+
+    /// <summary>
+    /// Extension methods bridging SwiftStack fluent API to Watson 7.
+    /// </summary>
+    internal static class OpenApiRouteMetadataExtensions
+    {
+        public static OpenApiRouteMetadata WithSummary(this OpenApiRouteMetadata metadata, string summary)
+        {
+            metadata.Summary = summary;
+            return metadata;
+        }
+
+        public static OpenApiRouteMetadata WithOperationId(this OpenApiRouteMetadata metadata, string operationId)
+        {
+            metadata.OperationId = operationId;
+            return metadata;
+        }
     }
 }
