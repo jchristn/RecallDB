@@ -137,10 +137,23 @@ namespace RecallDb.Server
 
             _App.Routes.AuthenticateApiRequest = AuthenticateRequestAsync;
 
+            _App.Routes.Preflight = async (ctx) =>
+            {
+                ctx.Response.StatusCode = 200;
+                ctx.Response.Headers["Access-Control-Allow-Origin"] = "*";
+                ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, HEAD, OPTIONS";
+                ctx.Response.Headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type";
+                ctx.Response.ContentType = "text/plain";
+                await ctx.Response.Send().ConfigureAwait(false);
+            };
+
             _App.Routes.PreRouting = async (ctx) =>
             {
                 ctx.Timestamp.Start = DateTime.UtcNow;
                 ctx.Response.ContentType = "application/json";
+                ctx.Response.Headers["Access-Control-Allow-Origin"] = "*";
+                ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, HEAD, OPTIONS";
+                ctx.Response.Headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type";
             };
 
             _App.Routes.PostRouting = async (ctx) =>
