@@ -52,6 +52,7 @@ namespace RecallDb.Core.Database.Postgresql
             Labels = new LabelMethods(this, _Logging);
             Tags = new TagMethods(this, _Logging);
             Search = new SearchMethods(this, _Logging);
+            RequestHistory = new RequestHistoryMethods(this, _Logging);
         }
 
         #endregion
@@ -84,7 +85,16 @@ namespace RecallDb.Core.Database.Postgresql
                 TableQueries.CreateCollectionsTable,
                 TableQueries.CreateCollectionsTenantNameIndex,
                 TableQueries.CreateCollectionsTenantIndex,
-                TableQueries.CreateCollectionsCreatedIndex
+                TableQueries.CreateCollectionsCreatedIndex,
+                TableQueries.CreateRequestHistoryTable,
+                TableQueries.CreateRequestHistoryGuidIndex,
+                TableQueries.CreateRequestHistoryCreatedIndex,
+                TableQueries.CreateRequestHistoryMethodCreatedIndex,
+                TableQueries.CreateRequestHistoryStatusCreatedIndex,
+                TableQueries.CreateRequestHistorySuccessCreatedIndex,
+                // Migrations
+                TableQueries.MigrateAddRequestBody,
+                TableQueries.MigrateAddResponseBody
             };
 
             await ExecuteQueriesAsync(queries, false, token).ConfigureAwait(false);

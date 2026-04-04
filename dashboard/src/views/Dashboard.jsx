@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import api from '../api/api.js'
+
+const TIME_RANGES = [
+  { label: 'Last Hour', value: 'hour', interval: 'minute', stepMs: 60_000, bucketCount: 60 },
+  { label: 'Last Day', value: 'day', interval: '15minute', stepMs: 900_000, bucketCount: 96 },
+  { label: 'Last Week', value: 'week', interval: 'hour', stepMs: 3_600_000, bucketCount: 168 },
+  { label: 'Last Month', value: 'month', interval: '6hour', stepMs: 21_600_000, bucketCount: 120 },
+]
 
 function formatUptime(ms) {
   const totalSeconds = Math.floor(ms / 1000)
@@ -16,15 +24,60 @@ function formatUptime(ms) {
   return parts.join(' ')
 }
 
+function floorToStep(ts, stepMs) {
+  return Math.floor(ts / stepMs) * stepMs
+}
+
+function getQuickRange(rangeValue) {
+  const range = TIME_RANGES.find(r => r.value === rangeValue) || TIME_RANGES[1]
+  const endMs = floorToStep(Date.now(), range.stepMs) + range.stepMs
+  const startMs = endMs - range.bucketCount * range.stepMs
+  return { ...range, startUtc: new Date(startMs), endUtc: new Date(endMs - 1) }
+}
+
+function buildBuckets(serverBuckets, range) {
+  const map = new Map(
+    (serverBuckets || []).map(b => [
+      floorToStep(new Date(b.TimestampUtc).getTime(), range.stepMs), b
+    ])
+  )
+  return Array.from({ length: range.bucketCount }, (_, i) => {
+    const ts = range.startUtc.getTime() + i * range.stepMs
+    const b = map.get(ts)
+    return { ts, s: b?.SuccessCount || 0, f: b?.FailureCount || 0 }
+  })
+}
+
+function formatChartLabel(ts, rangeValue) {
+  const d = new Date(ts)
+  if (rangeValue === 'hour' || rangeValue === 'day')
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  if (rangeValue === 'week')
+    return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit' })
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+
 export default function Dashboard() {
   const { tenant, isAdmin } = useAuth()
+  const navigate = useNavigate()
   const [stats, setStats] = useState({ tenants: 0, collections: 0 })
   const [health, setHealth] = useState(null)
   const [currentTenant, setCurrentTenant] = useState(null)
 
+  // Activity chart state
+  const [activityRange, setActivityRange] = useState('day')
+  const [activityBuckets, setActivityBuckets] = useState([])
+  const [activityTotals, setActivityTotals] = useState({ success: 0, failure: 0 })
+  const [refreshKey, setRefreshKey] = useState(0)
+
   useEffect(() => {
     loadData()
   }, [tenant])
+
+  // Reload chart when range or refresh changes
+  useEffect(() => {
+    loadActivity()
+  }, [activityRange, refreshKey])
 
   const loadData = async () => {
     try {
@@ -35,11 +88,9 @@ export default function Dashboard() {
       const tenantList = tenants?.Objects || []
       let collectionCount = 0
 
-      // Resolve current tenant
       if (tenant) {
         setCurrentTenant(tenant)
       } else if (isAdmin && tenantList.length > 0) {
-        // Admin API key login: default to first tenant (usually "default")
         const defaultTenant = tenantList.find(t => t.Name === 'default' || t.Id === 'default') || tenantList[0]
         setCurrentTenant(defaultTenant)
       }
@@ -49,7 +100,7 @@ export default function Dashboard() {
           try {
             const cols = await api.listCollections(t.Id)
             collectionCount += cols?.Objects?.length || 0
-          } catch (e) { /* skip tenants we can't access */ }
+          } catch (e) { /* skip */ }
         }
       } else if (tenant) {
         try {
@@ -58,14 +109,43 @@ export default function Dashboard() {
         } catch (e) { /* ignore */ }
       }
 
-      setStats({
-        tenants: tenantList.length,
-        collections: collectionCount
-      })
+      setStats({ tenants: tenantList.length, collections: collectionCount })
     } catch (err) {
       console.error('Failed to load dashboard data:', err)
     }
   }
+
+  const loadActivity = async () => {
+    try {
+      const range = getQuickRange(activityRange)
+      const summary = await api.getRequestHistorySummary({
+        startUtc: range.startUtc.toISOString(),
+        endUtc: range.endUtc.toISOString(),
+        interval: range.interval,
+      })
+      const filled = buildBuckets(summary?.Buckets || [], range)
+      setActivityBuckets(filled)
+      setActivityTotals({
+        success: summary?.TotalSuccess || 0,
+        failure: summary?.TotalFailure || 0,
+      })
+    } catch (e) { /* request history may not be available yet */ }
+  }
+
+  // Chart rendering
+  const chartW = 900, chartH = 160, padL = 44, padR = 10, padT = 12, padB = 28
+  const plotW = chartW - padL - padR
+  const plotH = chartH - padT - padB
+  const maxCount = Math.max(1, ...activityBuckets.map(b => b.s + b.f))
+  const barW = activityBuckets.length > 0 ? Math.max(2, plotW / activityBuckets.length - 1) : 4
+  const labelStep = Math.max(1, Math.floor(activityBuckets.length / 8))
+  const range = getQuickRange(activityRange)
+
+  // Y-axis: only maxCount and 0 (2 lines). If maxCount effectively 0, show 0 and 1.
+  const realMax = Math.max(0, ...activityBuckets.map(b => b.s + b.f))
+  const yLines = realMax > 0
+    ? [{ frac: 0, label: '0' }, { frac: 0.25, label: String(Math.round(realMax * 0.25)) }, { frac: 0.5, label: String(Math.round(realMax * 0.5)) }, { frac: 0.75, label: String(Math.round(realMax * 0.75)) }, { frac: 1, label: String(realMax) }]
+    : [{ frac: 0, label: '0' }, { frac: 1, label: '1' }]
 
   return (
     <div>
@@ -96,6 +176,77 @@ export default function Dashboard() {
           <div className="value" style={{ fontSize: 18 }}>{currentTenant?.Name || 'N/A'}</div>
           <p style={{ fontSize: 12, color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{currentTenant?.Id}</p>
         </div>
+      </div>
+
+      {/* Request Activity Chart */}
+      <div className="card" style={{ marginTop: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <h3 style={{ margin: 0, cursor: 'pointer' }} onClick={() => navigate('/request-history')}>
+            Request Activity
+          </h3>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {TIME_RANGES.map(r => (
+              <button
+                key={r.value}
+                className={`btn btn-sm ${activityRange === r.value ? 'btn-primary' : ''}`}
+                style={activityRange !== r.value ? { background: 'var(--border)', color: 'var(--text-secondary)' } : undefined}
+                onClick={() => setActivityRange(r.value)}
+              >
+                {r.label}
+              </button>
+            ))}
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setRefreshKey(k => k + 1)}
+              title="Refresh"
+              style={{ fontSize: '1rem', lineHeight: 1, padding: '4px 8px' }}
+            >
+              &#x21bb;
+            </button>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 16, marginBottom: 12, fontSize: 13, color: 'var(--text-secondary)' }}>
+          <span>Total: <strong style={{ color: 'var(--text)' }}>{activityTotals.success + activityTotals.failure}</strong></span>
+          <span>Success: <strong style={{ color: 'var(--success, #22c55e)' }}>{activityTotals.success}</strong></span>
+          <span>Failed: <strong style={{ color: 'var(--danger, #ef4444)' }}>{activityTotals.failure}</strong></span>
+        </div>
+        <svg viewBox={`0 0 ${chartW} ${chartH}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+          {/* Y-axis: 2 lines */}
+          {yLines.map(({ frac, label }) => {
+            const y = padT + plotH - plotH * frac
+            return (
+              <g key={frac}>
+                <line x1={padL} x2={chartW - padR} y1={y} y2={y} stroke="var(--border)" strokeWidth="0.5" />
+                <text x={padL - 6} y={y + 3} textAnchor="end" fontSize="9" fill="var(--text-secondary)">{label}</text>
+              </g>
+            )
+          })}
+
+          {/* Bars */}
+          {activityBuckets.map((b, i) => {
+            const total = b.s + b.f
+            const h = (total / maxCount) * plotH
+            const fh = (b.f / maxCount) * plotH
+            const x = padL + i * (plotW / activityBuckets.length)
+            return (
+              <g key={i}>
+                {h - fh > 0 && <rect x={x} y={padT + plotH - h} width={barW} height={h - fh} fill="var(--success, #22c55e)" rx="1" />}
+                {fh > 0 && <rect x={x} y={padT + plotH - h + (h - fh)} width={barW} height={fh} fill="var(--danger, #ef4444)" rx="1" />}
+              </g>
+            )
+          })}
+
+          {/* X-axis labels */}
+          {activityBuckets.map((b, i) => {
+            if (i % labelStep !== 0) return null
+            const x = padL + i * (plotW / activityBuckets.length) + barW / 2
+            return (
+              <text key={i} x={x} y={chartH - 4} textAnchor="middle" fontSize="9" fill="var(--text-secondary)">
+                {formatChartLabel(b.ts, activityRange)}
+              </text>
+            )
+          })}
+        </svg>
       </div>
     </div>
   )

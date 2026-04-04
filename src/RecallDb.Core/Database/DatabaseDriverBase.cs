@@ -55,6 +55,11 @@ namespace RecallDb.Core.Database
         /// </summary>
         public ISearchMethods Search { get; protected set; }
 
+        /// <summary>
+        /// Request history data access methods.
+        /// </summary>
+        public IRequestHistoryMethods RequestHistory { get; protected set; }
+
         #endregion
 
         #region Constructors-and-Factories

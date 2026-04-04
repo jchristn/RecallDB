@@ -20,6 +20,8 @@ export default function Sidebar({ onStartTour, onStartWizard }) {
         <NavLink to="/documents" data-tour="documents">Documents</NavLink>
         <NavLink to="/search" data-tour="search">Search</NavLink>
         <NavLink to="/query" data-tour="query">Query</NavLink>
+        <NavLink to="/request-history" data-tour="request-history">Request History</NavLink>
+        <NavLink to="/api-explorer" data-tour="api-explorer">API Explorer</NavLink>
       </nav>
       <div className="sidebar-footer">
         <button onClick={onStartTour} style={{ marginBottom: 8 }}>Take Tour</button>

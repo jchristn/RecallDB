@@ -150,5 +150,69 @@ namespace RecallDb.Core.Database.Postgresql.Queries
         /// </summary>
         public static readonly string CreateCollectionsCreatedIndex =
             "CREATE INDEX IF NOT EXISTS idx_collections_created_utc ON collections (created_utc);";
+
+        /// <summary>
+        /// Create the request_history table.
+        /// </summary>
+        public static readonly string CreateRequestHistoryTable =
+            "CREATE TABLE IF NOT EXISTS request_history (" +
+            "id BIGSERIAL PRIMARY KEY, " +
+            "guid VARCHAR(64) NOT NULL, " +
+            "http_method VARCHAR(16), " +
+            "request_url TEXT, " +
+            "source_ip VARCHAR(128), " +
+            "status_code INTEGER NOT NULL DEFAULT 0, " +
+            "success BOOLEAN NOT NULL DEFAULT TRUE, " +
+            "duration_ms BIGINT NOT NULL DEFAULT 0, " +
+            "request_content_type VARCHAR(256), " +
+            "request_body_length BIGINT NOT NULL DEFAULT 0, " +
+            "response_content_type VARCHAR(256), " +
+            "response_body_length BIGINT NOT NULL DEFAULT 0, " +
+            "request_body TEXT, " +
+            "response_body TEXT, " +
+            "created_utc TIMESTAMPTZ(6) NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')" +
+            ");";
+
+        /// <summary>
+        /// Add request_body column if missing (migration).
+        /// </summary>
+        public static readonly string MigrateAddRequestBody =
+            "ALTER TABLE request_history ADD COLUMN IF NOT EXISTS request_body TEXT;";
+
+        /// <summary>
+        /// Add response_body column if missing (migration).
+        /// </summary>
+        public static readonly string MigrateAddResponseBody =
+            "ALTER TABLE request_history ADD COLUMN IF NOT EXISTS response_body TEXT;";
+
+        /// <summary>
+        /// Create the request_history guid index.
+        /// </summary>
+        public static readonly string CreateRequestHistoryGuidIndex =
+            "CREATE INDEX IF NOT EXISTS idx_request_history_guid ON request_history (guid);";
+
+        /// <summary>
+        /// Create the request_history created_utc index.
+        /// </summary>
+        public static readonly string CreateRequestHistoryCreatedIndex =
+            "CREATE INDEX IF NOT EXISTS idx_request_history_created_utc ON request_history (created_utc);";
+
+        /// <summary>
+        /// Create the request_history http_method + created_utc index.
+        /// </summary>
+        public static readonly string CreateRequestHistoryMethodCreatedIndex =
+            "CREATE INDEX IF NOT EXISTS idx_request_history_method_created ON request_history (http_method, created_utc);";
+
+        /// <summary>
+        /// Create the request_history status_code + created_utc index.
+        /// </summary>
+        public static readonly string CreateRequestHistoryStatusCreatedIndex =
+            "CREATE INDEX IF NOT EXISTS idx_request_history_status_created ON request_history (status_code, created_utc);";
+
+        /// <summary>
+        /// Create the request_history success + created_utc index.
+        /// </summary>
+        public static readonly string CreateRequestHistorySuccessCreatedIndex =
+            "CREATE INDEX IF NOT EXISTS idx_request_history_success_created ON request_history (success, created_utc);";
     }
 }

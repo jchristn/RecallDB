@@ -160,11 +160,55 @@ namespace RecallDb.Server
             {
                 ctx.Timestamp.End = DateTime.UtcNow;
                 _Logging.Debug(
-                    _Header + 
-                    ctx.Request.Method + " " + 
-                    ctx.Request.Url.RawWithQuery + " " + 
+                    _Header +
+                    ctx.Request.Method + " " +
+                    ctx.Request.Url.RawWithQuery + " " +
                     ctx.Response.StatusCode + " " +
                     "(" + ctx.Timestamp.TotalMs.Value.ToString("F2").ToString() + "ms)");
+
+                // Record request history (skip OPTIONS/preflight)
+                if (ctx.Request.Method != HttpMethod.OPTIONS)
+                {
+                    try
+                    {
+                        RequestHistoryEntry histEntry = new RequestHistoryEntry();
+                        histEntry.HttpMethod = ctx.Request.Method.ToString();
+                        histEntry.RequestUrl = ctx.Request.Url.RawWithQuery;
+                        histEntry.SourceIp = ctx.Request.Source.IpAddress;
+                        histEntry.StatusCode = ctx.Response.StatusCode;
+                        histEntry.Success = ctx.Response.StatusCode < 400;
+                        histEntry.DurationMs = (long)(ctx.Timestamp.TotalMs ?? 0);
+                        histEntry.RequestContentType = ctx.Request.ContentType;
+                        histEntry.RequestBodyLength = ctx.Request.ContentLength;
+                        histEntry.ResponseContentType = ctx.Response.ContentType;
+
+                        try
+                        {
+                            string reqBody = ctx.Request.DataAsString;
+                            if (!string.IsNullOrEmpty(reqBody))
+                                histEntry.RequestBody = reqBody.Length > 65536 ? reqBody.Substring(0, 65536) : reqBody;
+                        }
+                        catch { }
+
+                        try
+                        {
+                            string respBody = ctx.Response.DataAsString;
+                            if (!string.IsNullOrEmpty(respBody))
+                            {
+                                histEntry.ResponseBody = respBody.Length > 65536 ? respBody.Substring(0, 65536) : respBody;
+                                histEntry.ResponseBodyLength = respBody.Length;
+                            }
+                        }
+                        catch { }
+
+                        _ = Task.Run(async () =>
+                        {
+                            try { await _Database.RequestHistory.InsertAsync(histEntry).ConfigureAwait(false); }
+                            catch (Exception ex) { _Logging.Warn(_Header + "failed to record request history: " + ex.Message); }
+                        });
+                    }
+                    catch { }
+                }
             };
 
             _App.UseOpenApi(api =>
@@ -1000,6 +1044,47 @@ namespace RecallDb.Server
                     .WithResponse(200, OpenApiResponseMetadata.Json("Search results with scored documents", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
+
+            // Request History Routes
+            _App.Get("/v1.0/requesthistory", RequestHistoryListRoute,
+                openApi => openApi
+                    .WithTag("Request History")
+                    .WithSummary("List request history")
+                    .WithDescription("List request history entries with optional filters and pagination.")
+                    .WithOperationId("requestHistoryList")
+                    .WithResponse(200, OpenApiResponseMetadata.Json("Request history entries", null)),
+                auth: true);
+
+            _App.Get("/v1.0/requesthistory/summary", RequestHistorySummaryRoute,
+                openApi => openApi
+                    .WithTag("Request History")
+                    .WithSummary("Request history summary")
+                    .WithDescription("Get aggregated request history buckets for charts. Supports intervals: minute, 15minute, hour, 6hour, day.")
+                    .WithOperationId("requestHistorySummary")
+                    .WithResponse(200, OpenApiResponseMetadata.Json("Summary buckets with success/failure counts", null)),
+                auth: true);
+
+            _App.Get("/v1.0/requesthistory/{guid}", RequestHistoryReadRoute,
+                openApi => openApi
+                    .WithTag("Request History")
+                    .WithSummary("Get request history entry")
+                    .WithDescription("Get a single request history entry by GUID.")
+                    .WithOperationId("requestHistoryRead")
+                    .WithParameter(OpenApiParameterMetadata.Path("guid", "Request history GUID"))
+                    .WithResponse(200, OpenApiResponseMetadata.Json("Request history entry", null))
+                    .WithResponse(404, OpenApiResponseMetadata.NotFound()),
+                auth: true);
+
+            _App.Delete("/v1.0/requesthistory/{guid}", RequestHistoryDeleteRoute,
+                openApi => openApi
+                    .WithTag("Request History")
+                    .WithSummary("Delete request history entry")
+                    .WithDescription("Delete a single request history entry by GUID.")
+                    .WithOperationId("requestHistoryDelete")
+                    .WithParameter(OpenApiParameterMetadata.Path("guid", "Request history GUID"))
+                    .WithResponse(204, OpenApiResponseMetadata.NoContent())
                     .WithResponse(404, OpenApiResponseMetadata.NotFound()),
                 auth: true);
         }
@@ -2411,6 +2496,109 @@ namespace RecallDb.Server
 
             result.TotalMs = sw.Elapsed.TotalMilliseconds;
             return result;
+        }
+
+        #endregion
+
+        #region Request-History-Routes
+
+        private static async Task<object> RequestHistoryListRoute(ApiRequest req)
+        {
+            AuthenticationResult auth = GetAuthResult(req);
+            if (!auth.IsAdmin)
+                return MakeError(req, 403, "Forbidden", "Admin access required.");
+
+            string method = req.Query["method"];
+            string statusCodeStr = req.Query["statusCode"];
+            string sourceIp = req.Query["sourceIp"];
+            string startUtcStr = req.Query["startUtc"];
+            string endUtcStr = req.Query["endUtc"];
+            string maxResultsStr = req.Query["maxResults"];
+            string offsetStr = req.Query["offset"];
+
+            int? statusCode = null;
+            if (!string.IsNullOrEmpty(statusCodeStr) && int.TryParse(statusCodeStr, out int sc)) statusCode = sc;
+
+            DateTime? startUtc = null;
+            if (!string.IsNullOrEmpty(startUtcStr) && DateTime.TryParse(startUtcStr, null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime su)) startUtc = su;
+
+            DateTime? endUtc = null;
+            if (!string.IsNullOrEmpty(endUtcStr) && DateTime.TryParse(endUtcStr, null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime eu)) endUtc = eu;
+
+            int maxResults = 100;
+            if (!string.IsNullOrEmpty(maxResultsStr) && int.TryParse(maxResultsStr, out int mr)) maxResults = Math.Min(mr, 250);
+
+            int offset = 0;
+            if (!string.IsNullOrEmpty(offsetStr) && int.TryParse(offsetStr, out int o)) offset = o;
+
+            List<RequestHistoryEntry> entries = await _Database.RequestHistory.SearchAsync(
+                method, statusCode, sourceIp, startUtc, endUtc, maxResults, offset).ConfigureAwait(false);
+
+            long totalCount = await _Database.RequestHistory.CountAsync(
+                method, statusCode, sourceIp, startUtc, endUtc).ConfigureAwait(false);
+
+            return new
+            {
+                Success = true,
+                TotalRecords = totalCount,
+                MaxResults = maxResults,
+                Offset = offset,
+                Objects = entries
+            };
+        }
+
+        private static async Task<object> RequestHistorySummaryRoute(ApiRequest req)
+        {
+            AuthenticationResult auth = GetAuthResult(req);
+            if (!auth.IsAdmin)
+                return MakeError(req, 403, "Forbidden", "Admin access required.");
+
+            string startUtcStr = req.Query["startUtc"];
+            string endUtcStr = req.Query["endUtc"];
+            string interval = req.Query["interval"];
+
+            DateTime startUtc = DateTime.UtcNow.AddHours(-24);
+            if (!string.IsNullOrEmpty(startUtcStr) && DateTime.TryParse(startUtcStr, null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime su)) startUtc = su;
+
+            DateTime endUtc = DateTime.UtcNow;
+            if (!string.IsNullOrEmpty(endUtcStr) && DateTime.TryParse(endUtcStr, null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime eu)) endUtc = eu;
+
+            if (string.IsNullOrEmpty(interval)) interval = "hour";
+
+            RequestHistorySummaryResult summary = await _Database.RequestHistory.SummaryAsync(
+                startUtc, endUtc, interval).ConfigureAwait(false);
+
+            return summary;
+        }
+
+        private static async Task<object> RequestHistoryReadRoute(ApiRequest req)
+        {
+            AuthenticationResult auth = GetAuthResult(req);
+            if (!auth.IsAdmin)
+                return MakeError(req, 403, "Forbidden", "Admin access required.");
+
+            string guid = req.Parameters["guid"];
+            RequestHistoryEntry entry = await _Database.RequestHistory.ReadAsync(guid).ConfigureAwait(false);
+            if (entry == null)
+                return MakeError(req, 404, "Not found", "Request history entry not found.");
+
+            return entry;
+        }
+
+        private static async Task<object> RequestHistoryDeleteRoute(ApiRequest req)
+        {
+            AuthenticationResult auth = GetAuthResult(req);
+            if (!auth.IsAdmin)
+                return MakeError(req, 403, "Forbidden", "Admin access required.");
+
+            string guid = req.Parameters["guid"];
+            RequestHistoryEntry entry = await _Database.RequestHistory.ReadAsync(guid).ConfigureAwait(false);
+            if (entry == null)
+                return MakeError(req, 404, "Not found", "Request history entry not found.");
+
+            await _Database.RequestHistory.DeleteAsync(guid).ConfigureAwait(false);
+            req.Http.Response.StatusCode = 204;
+            return null;
         }
 
         #endregion

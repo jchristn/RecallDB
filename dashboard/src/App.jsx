@@ -12,6 +12,8 @@ import DocumentsBrowser from './views/DocumentsBrowser.jsx'
 import Search from './views/Search.jsx'
 import QueryBuilder from './views/QueryBuilder.jsx'
 import SearchQuery from './views/SearchQuery.jsx'
+import RequestHistory from './views/RequestHistory.jsx'
+import ApiExplorer from './views/ApiExplorer.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import Topbar from './components/Topbar.jsx'
 import Tour from './components/Tour.jsx'
@@ -74,6 +76,8 @@ function AppLayout() {
             <Route path="/query" element={<SearchQuery mode="query" />} />
             <Route path="/tenants/:tenantId/collections/:collectionId/search" element={<Search />} />
             <Route path="/tenants/:tenantId/collections/:collectionId/query" element={<QueryBuilder />} />
+            <Route path="/request-history" element={<RequestHistory />} />
+            <Route path="/api-explorer" element={<ApiExplorer />} />
           </Routes>
         </main>
       </div>

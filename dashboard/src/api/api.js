@@ -149,6 +149,30 @@ class RecallDbApi {
 
   // Enumerate documents
   async enumerateDocuments(tid, cid, query) { return this.request('POST', `/v1.0/tenants/${tid}/collections/${cid}/documents/enumerate`, query); }
+
+  // Request History
+  async getRequestHistory(params = {}) {
+    const qs = new URLSearchParams()
+    if (params.method) qs.set('method', params.method)
+    if (params.statusCode) qs.set('statusCode', params.statusCode)
+    if (params.sourceIp) qs.set('sourceIp', params.sourceIp)
+    if (params.startUtc) qs.set('startUtc', params.startUtc)
+    if (params.endUtc) qs.set('endUtc', params.endUtc)
+    if (params.maxResults) qs.set('maxResults', params.maxResults)
+    if (params.offset != null) qs.set('offset', params.offset)
+    const q = qs.toString()
+    return this.request('GET', `/v1.0/requesthistory${q ? '?' + q : ''}`)
+  }
+  async getRequestHistorySummary(params = {}) {
+    const qs = new URLSearchParams()
+    if (params.startUtc) qs.set('startUtc', params.startUtc)
+    if (params.endUtc) qs.set('endUtc', params.endUtc)
+    if (params.interval) qs.set('interval', params.interval)
+    const q = qs.toString()
+    return this.request('GET', `/v1.0/requesthistory/summary${q ? '?' + q : ''}`)
+  }
+  async getRequestHistoryEntry(guid) { return this.request('GET', `/v1.0/requesthistory/${guid}`); }
+  async deleteRequestHistoryEntry(guid) { return this.request('DELETE', `/v1.0/requesthistory/${guid}`); }
 }
 
 const api = new RecallDbApi();

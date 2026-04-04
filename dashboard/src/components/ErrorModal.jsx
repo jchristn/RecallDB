@@ -72,8 +72,8 @@ export default function ErrorModal({ error, onClose }) {
         {data?.Description && (
           <p style={{ color: 'var(--text-secondary)', margin: '0 0 8px' }}>{data.Description}</p>
         )}
-        {data?.Message && (
-          <p style={{ margin: '0 0 12px', fontWeight: 500 }}>{data.Message}</p>
+        {(data?.Context || data?.Message) && (
+          <p style={{ margin: '0 0 12px', fontWeight: 500 }}>{data.Context || data.Message}</p>
         )}
         {data?.Data && (
           <pre style={{ background: 'var(--bg)', padding: 12, borderRadius: 6, fontSize: 12, overflow: 'auto', maxHeight: '40vh', margin: '0 0 12px' }}>
