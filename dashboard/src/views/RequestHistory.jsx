@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import api from '../api/api.js'
+import ConfirmModal from '../components/ConfirmModal.jsx'
 import ErrorModal from '../components/ErrorModal.jsx'
 
 const TIME_RANGES = [
@@ -68,6 +69,17 @@ function formatChartTime(ts, rangeValue) {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
+function formatTooltipTime(ts, rangeValue) {
+  const d = new Date(ts)
+  if (rangeValue === 'hour')
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  if (rangeValue === 'day')
+    return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  if (rangeValue === 'week')
+    return d.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric' })
+  return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric' })
+}
+
 function truncateUrl(url, max = 60) {
   if (!url) return ''
   return url.length > max ? url.substring(0, max) + '...' : url
@@ -119,6 +131,7 @@ export default function RequestHistory() {
   const [entries, setEntries] = useState([])
   const [totalRecords, setTotalRecords] = useState(0)
   const [offset, setOffset] = useState(0)
+  const [deleteTarget, setDeleteTarget] = useState(null)
 
   // Tooltip
   const [tooltip, setTooltip] = useState(null)
@@ -166,13 +179,15 @@ export default function RequestHistory() {
     return () => { cancelled = true }
   }, [rangeValue, refreshKey, offset])
 
-  const handleDelete = async (guid) => {
-    if (!guid) return
+  const handleDelete = async () => {
+    if (!deleteTarget?.Guid) return
     try {
-      await api.deleteRequestHistoryEntry(guid)
+      await api.deleteRequestHistoryEntry(deleteTarget.Guid)
       refresh()
     } catch (err) {
       setError(err)
+    } finally {
+      setDeleteTarget(null)
     }
   }
 
@@ -192,7 +207,8 @@ export default function RequestHistory() {
   const maxCount = buckets.reduce((m, b) => Math.max(m, b.s + b.f), 0)
   const yMax = maxCount > 0 ? maxCount : 1
   const barCount = buckets.length || 1
-  const barW = Math.max(4, (innerW / barCount) - 2)
+  const slotW = innerW / barCount
+  const barW = Math.max(4, slotW - 2)
 
   // Y-axis: 3 values (0, half, max). If maxCount=0, show 0 and 1.
   const yLines = maxCount > 0
@@ -209,10 +225,16 @@ export default function RequestHistory() {
     const el = chartRef.current
     if (!el) return
     const rect = el.getBoundingClientRect()
+
+    const tooltipWidth = 180
+    const tooltipHeight = 90
+    const rawX = e.clientX - rect.left
+    const rawY = e.clientY - rect.top
+
     setTooltip({
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top - 10,
-      time: new Date(bucket.ts).toLocaleString(),
+      left: Math.min(Math.max(rawX + 12, 8), Math.max(8, rect.width - tooltipWidth - 8)),
+      top: Math.min(Math.max(rawY - tooltipHeight - 12, 8), Math.max(8, rect.height - tooltipHeight - 8)),
+      time: formatTooltipTime(bucket.ts, rangeValue),
       total: bucket.s + bucket.f,
       success: bucket.s,
       failure: bucket.f,
@@ -308,25 +330,29 @@ export default function RequestHistory() {
               const total = bucket.s + bucket.f
               const succH = yMax > 0 ? (bucket.s / yMax) * innerH : 0
               const failH = yMax > 0 ? (bucket.f / yMax) * innerH : 0
-              const x = padL + (innerW / barCount) * i
+              const x = padL + slotW * i
               const succY = padT + innerH - succH
               const failY = succY - failH
               return (
-                <g
-                  key={i}
-                  onMouseMove={e => handleBarHover(e, bucket)}
-                  onMouseLeave={() => setTooltip(null)}
-                  style={{ cursor: 'pointer' }}
-                >
+                <g key={i} style={{ cursor: 'pointer' }}>
                   {bucket.s > 0 && (
-                    <rect x={x} y={succY} width={barW} height={succH} fill="var(--success, #22c55e)" rx={1} />
+                    <rect x={x} y={succY} width={barW} height={succH} fill="var(--success, #22c55e)" rx={1} pointerEvents="none" />
                   )}
                   {bucket.f > 0 && (
-                    <rect x={x} y={failY} width={barW} height={failH} fill="var(--danger, #ef4444)" rx={1} />
+                    <rect x={x} y={failY} width={barW} height={failH} fill="var(--danger, #ef4444)" rx={1} pointerEvents="none" />
                   )}
-                  {total === 0 && (
-                    <rect x={x} y={padT} width={barW} height={innerH} fill="transparent" />
-                  )}
+                  <rect
+                    x={x}
+                    y={padT}
+                    width={slotW}
+                    height={innerH}
+                    fill="#fff"
+                    fillOpacity="0"
+                    pointerEvents="all"
+                    onMouseEnter={e => handleBarHover(e, bucket)}
+                    onMouseMove={e => handleBarHover(e, bucket)}
+                    onMouseLeave={() => setTooltip(null)}
+                  />
                 </g>
               )
             })}
@@ -334,7 +360,7 @@ export default function RequestHistory() {
             {/* X-axis labels */}
             {labelIndices.map(idx => {
               if (!buckets[idx]) return null
-              const x = padL + (innerW / barCount) * idx + barW / 2
+              const x = padL + slotW * idx + barW / 2
               return (
                 <text key={idx} x={x} y={svgH - 6} textAnchor="middle" fontSize="10" fill="var(--text-secondary, #888)">
                   {formatChartTime(buckets[idx].ts, rangeValue)}
@@ -345,24 +371,11 @@ export default function RequestHistory() {
 
           {/* Tooltip */}
           {tooltip && (
-            <div style={{
-              position: 'absolute',
-              left: tooltip.x + 12,
-              top: tooltip.y - 60,
-              background: 'rgba(0,0,0,0.88)',
-              color: '#fff',
-              padding: '8px 12px',
-              borderRadius: 6,
-              fontSize: 12,
-              lineHeight: 1.5,
-              pointerEvents: 'none',
-              whiteSpace: 'nowrap',
-              zIndex: 10,
-            }}>
+            <div className="dashboard-chart-tooltip" style={{ left: tooltip.left, top: tooltip.top }}>
               <div style={{ fontWeight: 600, marginBottom: 2 }}>{tooltip.time}</div>
               <div>Total: {tooltip.total}</div>
-              <div style={{ color: '#22c55e' }}>Success: {tooltip.success}</div>
-              <div style={{ color: '#ef4444' }}>Failure: {tooltip.failure}</div>
+              <div style={{ color: 'var(--success, #22c55e)' }}>Success: {tooltip.success}</div>
+              <div style={{ color: 'var(--danger, #ef4444)' }}>Failed: {tooltip.failure}</div>
             </div>
           )}
         </div>
@@ -449,7 +462,7 @@ export default function RequestHistory() {
                             className="btn btn-danger btn-sm"
                             onClick={(e) => {
                               e.stopPropagation()
-                              handleDelete(entry.Guid)
+                              setDeleteTarget(entry)
                             }}
                             title="Delete"
                             style={{ padding: '3px 8px', fontSize: 12, lineHeight: 1 }}
@@ -484,6 +497,16 @@ export default function RequestHistory() {
           </>
         )}
       </div>
+
+      {deleteTarget && (
+        <ConfirmModal
+          title="Delete Request History Entry"
+          message={`Are you sure you want to delete the ${((deleteTarget.HttpMethod || '').toUpperCase()) || 'request'} entry from ${formatTime(deleteTarget.CreatedUtc, rangeValue)}? This action cannot be undone.`}
+          danger
+          onConfirm={handleDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
 
       {/* Detail Modal - fullscreen, matching Verbex pattern */}
       {detailEntry && (() => {
@@ -567,9 +590,9 @@ export default function RequestHistory() {
                     <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{item.label}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                       <strong style={{
-                        fontSize: '1.05rem', color: item.color || 'inherit',
-                        fontFamily: item.mono ? 'monospace' : 'inherit',
                         fontSize: item.mono ? '0.8rem' : '1.05rem',
+                        color: item.color || 'inherit',
+                        fontFamily: item.mono ? 'monospace' : 'inherit',
                         wordBreak: 'break-all',
                       }}>
                         {item.value}
