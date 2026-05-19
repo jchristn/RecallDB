@@ -197,6 +197,17 @@ body {
   padding: 20px;
 }
 
+.dashboard-stats-grid {
+  align-items: start;
+}
+
+.dashboard-stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
 .stat-card h3 {
   font-size: 13px;
   color: var(--text-secondary);

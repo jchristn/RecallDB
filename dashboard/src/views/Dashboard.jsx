@@ -153,25 +153,25 @@ export default function Dashboard() {
         <h1>Dashboard</h1>
       </div>
 
-      <div className="stats-grid">
-        <div className="stat-card">
+      <div className="stats-grid dashboard-stats-grid">
+        <div className="stat-card dashboard-stat-card">
           <h3>Server</h3>
           <div className="value">{health ? 'Online' : 'Loading...'}</div>
           {health && <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>v{health.Version}</p>}
         </div>
-        <div className="stat-card">
+        <div className="stat-card dashboard-stat-card">
           <h3>Uptime</h3>
           <div className="value" style={{ fontSize: 22 }}>{health ? formatUptime(health.UptimeMs) : '-'}</div>
         </div>
-        <div className="stat-card">
+        <div className="stat-card dashboard-stat-card">
           <h3>Tenants</h3>
           <div className="value">{stats.tenants}</div>
         </div>
-        <div className="stat-card">
+        <div className="stat-card dashboard-stat-card">
           <h3>Collections</h3>
           <div className="value">{stats.collections}</div>
         </div>
-        <div className="stat-card">
+        <div className="stat-card dashboard-stat-card">
           <h3>Current Tenant</h3>
           <div className="value" style={{ fontSize: 18 }}>{currentTenant?.Name || 'N/A'}</div>
           <p style={{ fontSize: 12, color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{currentTenant?.Id}</p>
