@@ -176,6 +176,11 @@ export default function RequestHistory() {
     }
   }
 
+  const openDetails = (entry) => {
+    if (!entry) return
+    setDetailEntry(entry)
+  }
+
   // ---------------------------------------------------------------------------
   // Chart geometry
   // ---------------------------------------------------------------------------
@@ -401,7 +406,8 @@ export default function RequestHistory() {
                     return (
                       <tr
                         key={entry.Guid || entry.Id || idx}
-                        style={{ borderBottom: '1px solid var(--border)' }}
+                        style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
+                        onClick={() => openDetails(entry)}
                         onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg)' }}
                         onMouseLeave={e => { e.currentTarget.style.background = '' }}
                       >
@@ -428,15 +434,23 @@ export default function RequestHistory() {
                         </td>
                         <td style={{ padding: '10px 12px', fontSize: 14, whiteSpace: 'nowrap' }}>
                           <button
+                            type="button"
                             className="btn btn-secondary btn-sm"
                             style={{ marginRight: 6 }}
-                            onClick={() => setDetailEntry(entry)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openDetails(entry)
+                            }}
                           >
                             View
                           </button>
                           <button
+                            type="button"
                             className="btn btn-danger btn-sm"
-                            onClick={() => handleDelete(entry.Guid)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDelete(entry.Guid)
+                            }}
                             title="Delete"
                             style={{ padding: '3px 8px', fontSize: 12, lineHeight: 1 }}
                           >

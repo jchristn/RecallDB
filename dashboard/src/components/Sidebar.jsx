@@ -13,15 +13,18 @@ export default function Sidebar({ onStartTour, onStartWizard }) {
       </div>
       <nav>
         <NavLink to="/" end data-tour="dashboard">Dashboard</NavLink>
+        <NavLink to="/search" data-tour="search">Search</NavLink>
+        <NavLink to="/query" data-tour="query">Query</NavLink>
+        <div className="sidebar-separator" aria-hidden="true" />
+        <NavLink to={`/tenants/${tenantId}/collections`} data-tour="collections">Collections</NavLink>
+        <NavLink to="/documents" data-tour="documents">Documents</NavLink>
+        <div className="sidebar-separator" aria-hidden="true" />
+        <NavLink to="/request-history" data-tour="request-history">Request History</NavLink>
+        <NavLink to="/api-explorer" data-tour="api-explorer">API Explorer</NavLink>
+        <div className="sidebar-separator" aria-hidden="true" />
         <NavLink to="/tenants" end data-tour="tenants">Tenants</NavLink>
         <NavLink to={`/tenants/${tenantId}/users`} data-tour="users">Users</NavLink>
         <NavLink to={`/tenants/${tenantId}/credentials`} data-tour="credentials">Credentials</NavLink>
-        <NavLink to={`/tenants/${tenantId}/collections`} data-tour="collections">Collections</NavLink>
-        <NavLink to="/documents" data-tour="documents">Documents</NavLink>
-        <NavLink to="/search" data-tour="search">Search</NavLink>
-        <NavLink to="/query" data-tour="query">Query</NavLink>
-        <NavLink to="/request-history" data-tour="request-history">Request History</NavLink>
-        <NavLink to="/api-explorer" data-tour="api-explorer">API Explorer</NavLink>
       </nav>
       <div className="sidebar-footer">
         <button onClick={onStartTour} style={{ marginBottom: 8 }}>Take Tour</button>

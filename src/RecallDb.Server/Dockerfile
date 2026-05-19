@@ -13,7 +13,7 @@ RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false -a $TARGETARCH
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 RUN for i in 1 2 3; do apt-get update && apt-get install -y --no-install-recommends \
-    iputils-ping traceroute wget curl dnsutils net-tools netcat-openbsd vim iproute2 procps \
+    iputils-ping traceroute wget procps \
     && break || { sleep 5; rm -rf /var/lib/apt/lists/*; }; done
 RUN rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/publish .
