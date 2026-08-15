@@ -14,10 +14,28 @@ namespace Test.Shared
     {
         #region Shared-State
 
-        public static string Endpoint = "http://127.0.0.1:8600";
-        public static string ApiKey = "recalldbadmin";
+        // Endpoint and API key default to the local server, but can be overridden
+        // via the RECALLDB_ENDPOINT / RECALLDB_APIKEY environment variables. This
+        // allows the xUnit and NUnit adapters (which have no command-line arguments)
+        // to target a non-default endpoint, mirroring the Test.Automated CLI flags.
+        public static string Endpoint = ResolveEndpoint();
+        public static string ApiKey = ResolveApiKey();
         public static HttpClient AdminClient = null;
         public static HttpClient UserClient = null;
+
+        private static string ResolveEndpoint()
+        {
+            string env = Environment.GetEnvironmentVariable("RECALLDB_ENDPOINT");
+            if (!string.IsNullOrWhiteSpace(env)) return env.TrimEnd('/');
+            return "http://127.0.0.1:8600";
+        }
+
+        private static string ResolveApiKey()
+        {
+            string env = Environment.GetEnvironmentVariable("RECALLDB_APIKEY");
+            if (!string.IsNullOrWhiteSpace(env)) return env;
+            return "recalldbadmin";
+        }
 
         public static JsonSerializerOptions JsonOptions = new JsonSerializerOptions
         {
