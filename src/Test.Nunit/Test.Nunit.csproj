@@ -13,10 +13,15 @@
 
   <ItemGroup>
     <PackageReference Include="Touchstone.NunitAdapter" Version="0.1.12" />
-    <PackageReference Include="coverlet.collector" Version="6.0.4" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageReference Include="NUnit" Version="4.3.2" />
-    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+    <PackageReference Include="coverlet.collector" Version="10.0.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+    <!-- NUnit3TestAdapter is pinned to the 5.x line: 6.x targets the Microsoft.Testing.Platform
+         runner, which is incompatible with the VSTest-based Touchstone.NunitAdapter used here. -->
+    <PackageReference Include="NUnit" Version="4.6.1" />
+    <PackageReference Include="NUnit3TestAdapter" Version="5.2.0" />
+    <!-- Required by the NUnit3TestAdapter 5.x engine (RuntimeLibrariesStrategy) at load time;
+         it is not otherwise copied to the test output directory. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyModel" Version="8.0.2" />
   </ItemGroup>
 
 </Project>

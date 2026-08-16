@@ -10,7 +10,7 @@
 
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="*" />
-    <PackageReference Include="PrettyId" Version="2.0.0" />
+    <PackageReference Include="PrettyId" Version="2.0.1" />
     <PackageReference Include="SyslogLogging" Version="*" />
     <PackageReference Include="Timestamps" Version="*" />
   </ItemGroup>

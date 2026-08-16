@@ -655,6 +655,147 @@ namespace Test.Shared
                             AssertTrue(found, "Distinct tag keys should contain 'environment'");
                         }),
 
+                        // ───────────────────────────── Negative / error-path tests ─────────────────────────────
+                        // These exercise authentication, authorization, not-found, and validation failure paths.
+                        // They run after the core happy-path CRUD (so the shared tenant/collection/document and the
+                        // non-admin UserClient all exist) and before the search dataset is created.
+
+                        // N1. Authenticate with an invalid bearer token -> 401, Success=false
+                        Case("AuthenticateInvalidBearer", "Negative: authenticate with invalid bearer token", async ct =>
+                        {
+                            object body = new { BearerToken = "invalid-token-" + Guid.NewGuid().ToString("N") };
+                            using HttpResponseMessage response = await PostAsync(AdminClient, "/v1.0/authenticate", body).ConfigureAwait(false);
+                            AssertStatusCode(response, HttpStatusCode.Unauthorized);
+
+                            JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
+                            AssertTrue(json.TryGetProperty("Success", out JsonElement successElem), "Response should contain Success");
+                            AssertTrue(!successElem.GetBoolean(), "Authentication with an invalid bearer token should not succeed");
+                        }),
+
+                        // N2. Authenticate with a wrong password -> 401, Success=false
+                        Case("AuthenticateInvalidPassword", "Negative: authenticate with wrong password", async ct =>
+                        {
+                            object body = new { TenantId = "default", Email = "admin@recall", Password = "definitely-wrong-password" };
+                            using HttpResponseMessage response = await PostAsync(AdminClient, "/v1.0/authenticate", body).ConfigureAwait(false);
+                            AssertStatusCode(response, HttpStatusCode.Unauthorized);
+
+                            JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
+                            AssertTrue(json.TryGetProperty("Success", out JsonElement successElem), "Response should contain Success");
+                            AssertTrue(!successElem.GetBoolean(), "Authentication with a wrong password should not succeed");
+                        }),
+
+                        // N3. Authenticate with neither bearer token nor email/password -> 400
+                        Case("AuthenticateMissingCredentials", "Negative: authenticate with empty body", async ct =>
+                        {
+                            object body = new { };
+                            using HttpResponseMessage response = await PostAsync(AdminClient, "/v1.0/authenticate", body).ConfigureAwait(false);
+                            AssertStatusCode(response, HttpStatusCode.BadRequest);
+                        }),
+
+                        // N4. Protected endpoint with an invalid bearer token -> 401
+                        Case("UnauthenticatedRequestRejected", "Negative: protected endpoint rejects invalid token", async ct =>
+                        {
+                            using HttpClient badClient = CreateHttpClient("invalid-bearer-" + Guid.NewGuid().ToString("N"));
+                            object body = new { MaxResults = 1 };
+                            using HttpResponseMessage response = await PostAsync(badClient, "/v1.0/tenants/enumerate", body).ConfigureAwait(false);
+                            AssertStatusCode(response, HttpStatusCode.Unauthorized);
+                        }),
+
+                        // N5. Read a non-existent tenant -> 404
+                        Case("TenantReadNotFound", "Negative: read non-existent tenant", async ct =>
+                        {
+                            using HttpResponseMessage response = await GetAsync(AdminClient, "/v1.0/tenants/nonexistent-" + Guid.NewGuid().ToString("N")).ConfigureAwait(false);
+                            AssertStatusCode(response, HttpStatusCode.NotFound);
+                        }),
+
+                        // N6. Read a non-existent user -> 404
+                        Case("UserReadNotFound", "Negative: read non-existent user", async ct =>
+                        {
+                            string path = "/v1.0/tenants/" + TestTenantId + "/users/nonexistent-" + Guid.NewGuid().ToString("N");
+                            using HttpResponseMessage response = await GetAsync(AdminClient, path).ConfigureAwait(false);
+                            AssertStatusCode(response, HttpStatusCode.NotFound);
+                        }),
+
+                        // N7. Read a non-existent collection -> 404
+                        Case("CollectionReadNotFound", "Negative: read non-existent collection", async ct =>
+                        {
+                            string path = "/v1.0/tenants/" + TestTenantId + "/collections/nonexistent-" + Guid.NewGuid().ToString("N");
+                            using HttpResponseMessage response = await GetAsync(AdminClient, path).ConfigureAwait(false);
+                            AssertStatusCode(response, HttpStatusCode.NotFound);
+                        }),
+
+                        // N8. Read a non-existent document -> 404
+                        Case("DocumentReadNotFound", "Negative: read non-existent document", async ct =>
+                        {
+                            string path = "/v1.0/tenants/" + TestTenantId + "/collections/" + TestCollectionId + "/documents/nonexistent-" + Guid.NewGuid().ToString("N");
+                            using HttpResponseMessage response = await GetAsync(AdminClient, path).ConfigureAwait(false);
+                            AssertStatusCode(response, HttpStatusCode.NotFound);
+                        }),
+
+                        // N9. Create a document whose embeddings dimensionality mismatches the collection -> 400
+                        Case("DocumentCreateWrongDimensionality", "Negative: document create with wrong embedding dimensionality", async ct =>
+                        {
+                            object body = new
+                            {
+                                DocumentKey = "baddim-" + Guid.NewGuid().ToString("N").Substring(0, 8),
+                                Content = "Wrong dimensionality document",
+                                ContentType = "Text",
+                                Position = 0,
+                                // Collection dimensionality is 3; supply 4 values
+                                Embeddings = new List<float> { 0.1f, 0.2f, 0.3f, 0.4f }
+                            };
+                            string path = "/v1.0/tenants/" + TestTenantId + "/collections/" + TestCollectionId + "/documents";
+                            using HttpResponseMessage response = await PutAsync(AdminClient, path, body).ConfigureAwait(false);
+                            AssertStatusCode(response, HttpStatusCode.BadRequest);
+                        }),
+
+                        // N10. Batch create where one document has wrong dimensionality -> 400 (whole batch rejected)
+                        Case("DocumentBatchWrongDimensionality", "Negative: batch create with wrong embedding dimensionality", async ct =>
+                        {
+                            List<object> docs = new List<object>
+                            {
+                                new { DocumentKey = "batchbad-a-" + Guid.NewGuid().ToString("N").Substring(0, 8), Content = "ok", ContentType = "Text", Embeddings = new List<float> { 0.1f, 0.2f, 0.3f } },
+                                new { DocumentKey = "batchbad-b-" + Guid.NewGuid().ToString("N").Substring(0, 8), Content = "bad", ContentType = "Text", Embeddings = new List<float> { 0.1f, 0.2f } }
+                            };
+                            string path = "/v1.0/tenants/" + TestTenantId + "/collections/" + TestCollectionId + "/documents/batch";
+                            using HttpResponseMessage response = await PostAsync(AdminClient, path, docs).ConfigureAwait(false);
+                            AssertStatusCode(response, HttpStatusCode.BadRequest);
+                        }),
+
+                        // N11. Create a document in a non-existent collection -> 404
+                        Case("DocumentCreateCollectionNotFound", "Negative: document create in non-existent collection", async ct =>
+                        {
+                            object body = new
+                            {
+                                DocumentKey = "orphan-" + Guid.NewGuid().ToString("N").Substring(0, 8),
+                                Content = "Orphan document",
+                                ContentType = "Text",
+                                Position = 0,
+                                Embeddings = new List<float> { 0.1f, 0.2f, 0.3f }
+                            };
+                            string path = "/v1.0/tenants/" + TestTenantId + "/collections/nonexistent-" + Guid.NewGuid().ToString("N") + "/documents";
+                            using HttpResponseMessage response = await PutAsync(AdminClient, path, body).ConfigureAwait(false);
+                            AssertStatusCode(response, HttpStatusCode.NotFound);
+                        }),
+
+                        // N12. Search a non-existent collection -> 404
+                        Case("SearchCollectionNotFound", "Negative: search a non-existent collection", async ct =>
+                        {
+                            object body = new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.1f, 0.2f, 0.3f } }, MaxResults = 5 };
+                            string path = "/v1.0/tenants/" + TestTenantId + "/collections/nonexistent-" + Guid.NewGuid().ToString("N") + "/search";
+                            using HttpResponseMessage response = await PostAsync(AdminClient, path, body).ConfigureAwait(false);
+                            AssertStatusCode(response, HttpStatusCode.NotFound);
+                        }),
+
+                        // N13. Non-admin credential token accessing another tenant -> 403
+                        Case("CrossTenantAccessForbidden", "Negative: non-admin cannot read another tenant", async ct =>
+                        {
+                            AssertNotNull(UserClient, "UserClient should be initialized");
+                            // UserClient is scoped to TestTenantId; reading the built-in "default" tenant must be forbidden.
+                            using HttpResponseMessage response = await GetAsync(UserClient, "/v1.0/tenants/default").ConfigureAwait(false);
+                            AssertStatusCode(response, HttpStatusCode.Forbidden);
+                        }),
+
                         // 36. Search Data Setup
                         Case("SearchDataSetup", "Search data: setup test documents, labels, and tags", async ct =>
                         {

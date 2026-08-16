@@ -13,10 +13,12 @@
 
   <ItemGroup>
     <PackageReference Include="Touchstone.XunitAdapter" Version="0.1.12" />
-    <PackageReference Include="coverlet.collector" Version="6.0.4" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="coverlet.collector" Version="10.0.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+    <!-- xunit.runner.visualstudio is pinned to the 3.x line: 4.x targets xUnit v3,
+         which is incompatible with the xUnit v2 (xunit 2.9.3) test project used here. -->
     <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
   </ItemGroup>
 
 </Project>
