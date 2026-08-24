@@ -123,8 +123,25 @@ namespace RecallDb.Server.Observability
                 autoGenerateServiceInstanceId: string.IsNullOrEmpty(_Settings.ServiceInstanceId),
                 serviceInstanceId: _Settings.ServiceInstanceId);
 
-            BuildMetrics(resourceBuilder);
-            BuildTraces(resourceBuilder);
+            // Build metrics and traces independently so a failure in one pipeline (for example, the Prometheus
+            // HTTP listener failing to bind) never prevents the other from starting.
+            try
+            {
+                BuildMetrics(resourceBuilder);
+            }
+            catch (Exception e)
+            {
+                _Logging.Warn(_Header + "metrics pipeline failed to start: " + e.Message + (e.InnerException != null ? " (" + e.InnerException.Message + ")" : ""));
+            }
+
+            try
+            {
+                BuildTraces(resourceBuilder);
+            }
+            catch (Exception e)
+            {
+                _Logging.Warn(_Header + "trace pipeline failed to start: " + e.Message + (e.InnerException != null ? " (" + e.InnerException.Message + ")" : ""));
+            }
         }
 
         private void BuildMetrics(ResourceBuilder resourceBuilder)
@@ -162,13 +179,37 @@ namespace RecallDb.Server.Observability
 
             if (_Settings.PrometheusEnabled)
             {
+                // The Prometheus exporter builds a System.Uri from Host/Port, and System.Uri cannot parse the
+                // wildcard hosts ("*", "+", "0.0.0.0") that HttpListener needs in order to bind all interfaces and
+                // match any Host header (as a container-network scrape requires). When a wildcard is requested we
+                // give the exporter a parseable placeholder host, then override the listener's prefixes directly
+                // (HttpListener accepts "http://*:<port>/") via ConfigureHttpListener. Concrete hostnames are used
+                // as-is.
+                int port = _Settings.PrometheusPort;
+                string configuredHost = _Settings.PrometheusHostname;
+                bool wildcard =
+                    string.IsNullOrEmpty(configuredHost)
+                    || configuredHost == "*"
+                    || configuredHost == "+"
+                    || configuredHost == "0.0.0.0";
+
                 builder.AddPrometheusHttpListener(options =>
                 {
-                    options.Host = _Settings.PrometheusHostname;
-                    options.Port = _Settings.PrometheusPort;
+                    options.Host = wildcard ? "localhost" : configuredHost;
+                    options.Port = port;
                     options.ScrapeEndpointPath = _Settings.PrometheusPath;
+
+                    if (wildcard)
+                    {
+                        options.ConfigureHttpListener = (listenerOptions, listener) =>
+                        {
+                            listener.Prefixes.Clear();
+                            listener.Prefixes.Add("http://*:" + port + "/");
+                        };
+                    }
                 });
-                _Logging.Info(_Header + "Prometheus scrape endpoint on http://" + _Settings.PrometheusHostname + ":" + _Settings.PrometheusPort + _Settings.PrometheusPath);
+
+                _Logging.Info(_Header + "Prometheus scrape endpoint on http://" + (wildcard ? "*" : configuredHost) + ":" + port + _Settings.PrometheusPath);
             }
 
             _MeterProvider = builder.Build();

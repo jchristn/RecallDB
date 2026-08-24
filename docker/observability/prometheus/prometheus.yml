@@ -1,6 +1,11 @@
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+  # The OpenTelemetry Prometheus exporter emits dotted metric names (e.g. recalldb.http.server.requests_total)
+  # when the scraper negotiates UTF-8 names, which Prometheus 3.x does by default. Our dashboards (and standard
+  # Prometheus convention) use underscore names (recalldb_http_server_requests_total). Requesting the legacy
+  # validation/escaping scheme makes the exporter return underscore-escaped names so the two line up.
+  metric_name_validation_scheme: legacy
 
 scrape_configs:
   # RecallDB server exposes an in-process OpenTelemetry Prometheus scrape endpoint.
