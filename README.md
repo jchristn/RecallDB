@@ -10,6 +10,7 @@
   <a href="MCP_API.md">MCP</a> &middot;
   <a href="#sdks">SDKs</a> &middot;
   <a href="#search">Search</a> &middot;
+  <a href="#observability">Observability</a> &middot;
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
@@ -52,7 +53,8 @@ This isn't a thin wrapper around pgvector. It's an **opinionated persistence sch
 - **40+ REST endpoints** &mdash; full CRUD for tenants, users, credentials, collections, documents, labels, and tags. Includes batch delete by keys and filter-based delete for bulk operations.
 - **SDKs in C#, Python, and JavaScript** &mdash; typed clients ready to drop into your stack.
 - **React dashboard** &mdash; manage tenants, collections, and documents visually. Search with a query builder.
-- **Docker Compose deployment** &mdash; Postgres + pgvector, API server, and dashboard in one command.
+- **Built-in observability** &mdash; OpenTelemetry metrics and distributed tracing across every HTTP, MCP, application, search, and storage path, exported to a pre-provisioned Prometheus + Tempo + Loki + Grafana stack.
+- **Docker Compose deployment** &mdash; Postgres + pgvector, API server, dashboard, and the full observability stack in one command.
 - **MIT licensed** &mdash; use it however you want.
 
 ## Quick Start
@@ -62,7 +64,7 @@ cd docker
 docker compose up
 ```
 
-API at `http://localhost:8600`, dashboard at `http://localhost:8601`.
+API at `http://localhost:8600`, dashboard at `http://localhost:8601`, and Grafana at `http://localhost:3000` (`admin` / `admin`). See [Observability](#observability) for the full stack.
 
 ### Default Credentials
 
@@ -252,7 +254,7 @@ const neighborResults = await client.search('ten_default', 'col_default', {
 
 ## Configuration
 
-Server settings live in `recalldb.json`. Environment variables override database connection settings:
+Server settings live in `recalldb.json`. Environment variables override selected settings:
 
 | Variable | Description |
 |---|---|
@@ -261,6 +263,15 @@ Server settings live in `recalldb.json`. Environment variables override database
 | `RECALLDB_DB_NAME` | Database name |
 | `RECALLDB_DB_USER` | Database username |
 | `RECALLDB_DB_PASS` | Database password |
+| `RECALLDB_MCP_ENABLED` | Enable/disable the MCP server |
+| `RECALLDB_MCP_HOSTNAME` | MCP bind hostname |
+| `RECALLDB_MCP_PORT` | MCP port |
+| `RECALLDB_OBS_ENABLED` | Enable/disable observability |
+| `RECALLDB_OBS_SERVICE_NAME` | OpenTelemetry `service.name` |
+| `RECALLDB_OBS_PROM_HOSTNAME` | Prometheus scrape endpoint bind hostname |
+| `RECALLDB_OBS_PROM_PORT` | Prometheus scrape endpoint port (default `9464`) |
+| `RECALLDB_OTLP_ENDPOINT` | OTLP trace endpoint (e.g. `http://tempo:4317`) |
+| `RECALLDB_OTLP_PROTOCOL` | OTLP protocol (`grpc` or `httpprotobuf`) |
 
 ## Architecture
 
@@ -304,6 +315,33 @@ recalldb mcp install --only cursor
 ```
 
 Per-harness guides: [Claude Code](docs/CONNECTING_CLAUDE.md) · [Cursor](docs/CONNECTING_CURSOR.md) · [Gemini](docs/CONNECTING_GEMINI.md) · [Codex](docs/CONNECTING_CODEX.md) · [Mux](docs/CONNECTING_MUX.md).
+
+## Observability
+
+RecallDB is instrumented end-to-end with [OpenTelemetry](https://opentelemetry.io/) using the .NET base class library (`System.Diagnostics.Metrics.Meter` and `ActivitySource`). A single in-process host owns all wiring, so the instrumentation is a cheap no-op until you turn it on and adds no third-party dependency to the emitting code.
+
+**Coverage** spans every request path:
+
+- **HTTP (REST)** &mdash; request rate, duration, in-flight count, and status classes for every inbound request.
+- **MCP** &mdash; per-tool invocation rate, duration, in-flight count, and outcome.
+- **Application** &mdash; a unified operation family across both transports (labeled `origin=rest|mcp`, resource, and operation).
+- **Search** &mdash; latency and result counts by mode (vector, full-text, hybrid).
+- **Database** &mdash; query rate, duration, in-flight count, and rows returned for the PostgreSQL layer.
+- **Runtime / process** &mdash; .NET GC, threads, exceptions, working-set memory, and uptime.
+
+Distributed traces nest naturally (a REST operation or MCP tool span parents its database query spans) and are exported over OTLP. Metrics are exposed on an in-process Prometheus scrape endpoint.
+
+`docker compose up` provisions the whole stack alongside the database, server, and dashboard &mdash; no extra steps:
+
+| Service | URL | Default credentials | Role |
+|---|---|---|---|
+| **Grafana** | `http://localhost:3000` | `admin` / `admin` | Dashboards (HTTP, MCP, Application, Search, Database, Runtime sections) |
+| **Prometheus** | `http://localhost:9090` | none | Metrics store; scrapes the server at `:9464/metrics` |
+| **Tempo** | `http://localhost:3200` | none | Trace backend (OTLP receiver on `4317`/`4318`) |
+| **Loki** | `http://localhost:3100` | none | Log aggregation |
+| **Alloy** | `http://localhost:12345` | none | Ships container logs to Loki |
+
+The dashboards are pre-provisioned and grouped into folders (sections) by area, and the product dashboard's landing page links out to each service. Configure observability in the `Observability` section of `recalldb.json` or via environment variables (see [Configuration](#configuration)); set `Enabled` to `false` to disable it entirely.
 
 ## API Reference
 

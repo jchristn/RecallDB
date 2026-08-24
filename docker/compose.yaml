@@ -69,7 +69,7 @@ services:
   # ----- Observability stack -----
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.1.0
     container_name: recalldb-prometheus
     ports:
       - "9090:9090"
@@ -83,7 +83,7 @@ services:
     restart: unless-stopped
 
   tempo:
-    image: grafana/tempo:latest
+    image: grafana/tempo:2.7.0
     container_name: recalldb-tempo
     command: ["-config.file=/etc/tempo/tempo.yaml"]
     ports:
@@ -96,7 +96,7 @@ services:
     restart: unless-stopped
 
   loki:
-    image: grafana/loki:latest
+    image: grafana/loki:3.3.2
     container_name: recalldb-loki
     command: ["-config.file=/etc/loki/loki-config.yaml"]
     ports:
@@ -107,7 +107,7 @@ services:
     restart: unless-stopped
 
   alloy:
-    image: grafana/alloy:latest
+    image: grafana/alloy:v1.5.1
     container_name: recalldb-alloy
     command:
       - "run"
@@ -125,7 +125,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.4.0
     container_name: recalldb-grafana
     ports:
       - "3000:3000"
