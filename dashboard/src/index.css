@@ -204,7 +204,7 @@ body {
 }
 
 .dashboard-stats-grid {
-  align-items: start;
+  align-items: stretch;
 }
 
 .dashboard-stat-card {

@@ -298,32 +298,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Observability service links */}
-      <div style={{ marginBottom: 12 }}>
-        <p className="dashboard-section-label">Observability</p>
-        <div className="dashboard-shortcuts">
-          {OBSERVABILITY_SERVICES.map(service => (
-            <a
-              key={service.name}
-              className="dashboard-shortcut-card"
-              href={service.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ textDecoration: 'none' }}
-            >
-              <span className="dashboard-shortcut-eyebrow">Open in new tab</span>
-              <strong>{service.name}</strong>
-              <span>{service.description}</span>
-              <span style={{ marginTop: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
-                <span style={{ fontFamily: 'monospace' }}>{service.url}</span>
-                <br />
-                Credentials: <strong style={{ color: 'var(--text)' }}>{service.credentials}</strong>
-              </span>
-            </a>
-          ))}
-        </div>
-      </div>
-
       {/* Request Activity Chart */}
       <div className="card" style={{ marginTop: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -418,6 +392,32 @@ export default function Dashboard() {
               <div style={{ color: 'var(--danger, #ef4444)' }}>Failed: {activityTooltip.failure}</div>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Observability service links */}
+      <div style={{ marginTop: 20 }}>
+        <p className="dashboard-section-label">Observability</p>
+        <div className="dashboard-shortcuts">
+          {OBSERVABILITY_SERVICES.map(service => (
+            <a
+              key={service.name}
+              className="dashboard-shortcut-card"
+              href={service.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ textDecoration: 'none' }}
+            >
+              <span className="dashboard-shortcut-eyebrow">Open in new tab</span>
+              <strong>{service.name}</strong>
+              <span>{service.description}</span>
+              <span style={{ marginTop: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
+                <span style={{ fontFamily: 'monospace' }}>{service.url}</span>
+                <br />
+                Credentials: <strong style={{ color: 'var(--text)' }}>{service.credentials}</strong>
+              </span>
+            </a>
+          ))}
         </div>
       </div>
     </div>
