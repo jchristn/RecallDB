@@ -12,6 +12,18 @@
   "templating": { "list": [] },
   "panels": [
     {
+      "id": 100,
+      "type": "stat",
+      "title": "Total operations by transport (selected range)",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "horizontal", "textMode": "value_and_name", "colorMode": "value", "graphMode": "none" },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (recalldb_origin) (increase(recalldb_operation_count_total[$__range]))", "legendFormat": "{{recalldb_origin}}", "instant": true }
+      ]
+    },
+    {
       "id": 1,
       "type": "timeseries",
       "title": "Operation rate by transport (origin)",

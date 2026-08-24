@@ -12,6 +12,18 @@
   "templating": { "list": [] },
   "panels": [
     {
+      "id": 100,
+      "type": "stat",
+      "title": "Total requests by status class (selected range)",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "horizontal", "textMode": "value_and_name", "colorMode": "value", "graphMode": "none" },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (http_response_status_class) (increase(recalldb_http_server_requests_total[$__range]))", "legendFormat": "{{http_response_status_class}}", "instant": true }
+      ]
+    },
+    {
       "id": 1,
       "type": "timeseries",
       "title": "Request rate by status class",

@@ -12,6 +12,18 @@
   "templating": { "list": [] },
   "panels": [
     {
+      "id": 100,
+      "type": "stat",
+      "title": "Total queries by operation (selected range)",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "horizontal", "textMode": "value_and_name", "colorMode": "value", "graphMode": "none" },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (db_operation) (increase(recalldb_db_queries_total[$__range]))", "legendFormat": "{{db_operation}}", "instant": true }
+      ]
+    },
+    {
       "id": 1,
       "type": "timeseries",
       "title": "Query rate by operation",
