@@ -65,7 +65,7 @@ Health check. No authentication required.
 ```json
 {
   "Name": "RecallDB",
-  "Version": "1.0.0",
+  "Version": "0.2.0",
   "UptimeMs": 123456.78
 }
 ```

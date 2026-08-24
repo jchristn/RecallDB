@@ -7,6 +7,7 @@
 <p align="center">
   <a href="#quick-start">Quick Start</a> &middot;
   <a href="REST_API.md">API Docs</a> &middot;
+  <a href="MCP_API.md">MCP</a> &middot;
   <a href="#sdks">SDKs</a> &middot;
   <a href="#search">Search</a> &middot;
   <a href="CHANGELOG.md">Changelog</a>
@@ -285,9 +286,28 @@ dotnet restore src/RecallDb.sln
 dotnet build src/RecallDb.sln
 ```
 
+## MCP Server
+
+RecallDB ships an in-process **Model Context Protocol (MCP)** server so agents can drive the database directly. It is hosted inside `RecallDB.Server` (no separate container) over Streamable HTTP at `http://localhost:8620/mcp` (POST for JSON-RPC, GET for the SSE stream).
+
+- The full REST operation set is exposed as MCP tools (`tenant/*`, `user/*`, `credential/*`, `collection/*`, `document/*`, `label/*`, `tag/*`, `search/query`, `requestHistory/*`, `auth/authenticate`, `server/info`).
+- Listing is always paginated (`*/enumerate`) — there are no "get all" tools.
+- Authentication is per-caller bearer, identical to REST: pass your admin API key or credential bearer token as the `bearerToken` tool argument.
+
+Enable/configure it in the `Mcp` section of `recalldb.json` or via `RECALLDB_MCP_*` environment variables. See **[MCP_API.md](MCP_API.md)** for the full tool catalog and examples.
+
+**Connect your agent in one command** — the CLI auto-configures Claude Code, Cursor, Gemini CLI, Codex CLI, and Mux:
+
+```bash
+recalldb mcp install          # all detected harnesses (add --dry-run to preview)
+recalldb mcp install --only cursor
+```
+
+Per-harness guides: [Claude Code](docs/CONNECTING_CLAUDE.md) · [Cursor](docs/CONNECTING_CURSOR.md) · [Gemini](docs/CONNECTING_GEMINI.md) · [Codex](docs/CONNECTING_CODEX.md) · [Mux](docs/CONNECTING_MUX.md).
+
 ## API Reference
 
-See [REST_API.md](REST_API.md) for the complete endpoint reference and request/response examples.
+See [REST_API.md](REST_API.md) for the complete REST endpoint reference and [MCP_API.md](MCP_API.md) for the MCP tool catalog.
 
 A [Postman collection](RecallDB.postman_collection.json) is included for interactive exploration.
 

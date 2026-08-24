@@ -891,6 +891,34 @@
           "response": []
         },
         {
+          "name": "Collection Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1.0/tenants/{{tenant_id}}/collections/{{collection_id}}/stats",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1.0",
+                "tenants",
+                "{{tenant_id}}",
+                "collections",
+                "{{collection_id}}",
+                "stats"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
           "name": "Check Collection Exists",
           "request": {
             "method": "HEAD",
@@ -1153,6 +1181,36 @@
                 "documents",
                 "{{document_id}}",
                 "0"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Document Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1.0/tenants/{{tenant_id}}/collections/{{collection_id}}/documents/stats/{{document_key}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1.0",
+                "tenants",
+                "{{tenant_id}}",
+                "collections",
+                "{{collection_id}}",
+                "documents",
+                "stats",
+                "{{document_key}}"
               ]
             }
           },
@@ -2057,6 +2115,110 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "Request History",
+      "item": [
+        {
+          "name": "List Request History",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1.0/requesthistory",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1.0",
+                "requesthistory"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Request History Summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1.0/requesthistory/summary",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1.0",
+                "requesthistory",
+                "summary"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Read Request History Entry",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1.0/requesthistory/{{request_guid}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1.0",
+                "requesthistory",
+                "{{request_guid}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Request History Entry",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1.0/requesthistory/{{request_guid}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1.0",
+                "requesthistory",
+                "{{request_guid}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
     }
   ],
   "variable": [
@@ -2107,6 +2269,11 @@
     },
     {
       "key": "tag_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "request_guid",
       "value": "",
       "type": "string"
     }

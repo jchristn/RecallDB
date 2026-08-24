@@ -19,6 +19,7 @@ namespace RecallDb.Server
     using RecallDb.Core.Models;
     using RecallDb.Core.Settings;
     using RecallDb.Server.Classes;
+    using RecallDb.Server.Mcp;
     using RecallDb.Server.Services;
 
     /// <summary>
@@ -29,12 +30,14 @@ namespace RecallDb.Server
         #region Private-Members
 
         private static string _Header = "[RecallDb] ";
-        private static string _Version = "1.0.0";
+        private static string _Version = "0.2.0";
         private static string _SettingsFile = "recalldb.json";
         private static ServerSettings _Settings = new ServerSettings();
         private static LoggingModule _Logging = null;
         private static DatabaseDriverBase _Database = null;
         private static AuthenticationService _AuthService = null;
+        private static RecallDbServices _Services = null;
+        private static McpServerService _McpServer = null;
         private static Webserver _App = null;
         private static DateTime _StartTimeUtc = DateTime.UtcNow;
         private static CancellationTokenSource _TokenSource = new CancellationTokenSource();
@@ -49,6 +52,19 @@ namespace RecallDb.Server
         /// <param name="args">Command line arguments.</param>
         public static async Task Main(string[] args)
         {
+            #region CLI-Verbs
+
+            if (args != null && args.Length > 0 && args[0].Equals("mcp", StringComparison.OrdinalIgnoreCase))
+            {
+                LoadSettingsForCli();
+                List<string> subArgs = new List<string>(args);
+                subArgs.RemoveAt(0);
+                Environment.ExitCode = McpInstaller.Run(subArgs, _Settings.Mcp, _Settings.AdminApiKeys, _Version);
+                return;
+            }
+
+            #endregion
+
             #region Load-Settings
 
             if (File.Exists(_SettingsFile))
@@ -59,10 +75,24 @@ namespace RecallDb.Server
             }
             else
             {
-                string json = Serializer.SerializeJson(_Settings);
-                File.WriteAllText(_SettingsFile, json);
-                Console.WriteLine(_Header + "created default settings file " + _SettingsFile);
+                Console.WriteLine(_Header + "settings file " + _SettingsFile + " not found, creating with defaults");
             }
+
+            // Re-write the settings file after load so that any properties added since the last write (for example
+            // the Mcp section) are materialized to disk with their default values. Performed before applying
+            // environment overrides so ephemeral overrides are not persisted.
+            try
+            {
+                string rewritten = Serializer.SerializeJson(_Settings);
+                File.WriteAllText(_SettingsFile, rewritten);
+                Console.WriteLine(_Header + "settings file synchronized: " + _SettingsFile);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(_Header + "unable to write settings file " + _SettingsFile + ": " + e.Message);
+            }
+
+            ApplyMcpEnvironmentOverrides();
 
             #endregion
 
@@ -122,6 +152,7 @@ namespace RecallDb.Server
             #region Initialize-Services
 
             _AuthService = new AuthenticationService(_Settings, _Database, _Logging);
+            _Services = new RecallDbServices(_Database, _Logging, _AuthService);
 
             #endregion
 
@@ -256,7 +287,12 @@ namespace RecallDb.Server
             _Logging.Info(_Header + "starting on " + _Settings.Webserver.Hostname + ":" + _Settings.Webserver.Port);
             _ = Task.Run(() => _App.Start(_TokenSource.Token), _TokenSource.Token);
 
+            _McpServer = new McpServerService(_Settings.Mcp, _Logging, _Services, _AuthService, _Version, _StartTimeUtc);
+            _McpServer.Start(_TokenSource.Token);
+
             Console.WriteLine("RecallDB v" + _Version + " listening on " + _Settings.Webserver.Hostname + ":" + _Settings.Webserver.Port);
+            if (_Settings.Mcp.Enabled)
+                Console.WriteLine("RecallDB MCP server listening on http://" + _Settings.Mcp.Hostname + ":" + _Settings.Mcp.Port + "/mcp");
             Console.WriteLine("Press CTRL+C to exit");
             Console.WriteLine("");
 
@@ -273,6 +309,7 @@ namespace RecallDb.Server
 
             _Logging.Info(_Header + "shutting down");
 
+            if (_McpServer != null) _McpServer.Dispose();
             if (_Database != null) _Database.Dispose();
             if (_Logging != null) _Logging.Dispose();
             if (_TokenSource != null) _TokenSource.Dispose();
@@ -283,6 +320,38 @@ namespace RecallDb.Server
         #endregion
 
         #region Private-Static-Methods
+
+        private static void LoadSettingsForCli()
+        {
+            if (File.Exists(_SettingsFile))
+            {
+                try
+                {
+                    _Settings = Serializer.DeserializeJson<ServerSettings>(File.ReadAllText(_SettingsFile));
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine(_Header + "unable to read settings file " + _SettingsFile + ": " + e.Message);
+                }
+            }
+
+            ApplyMcpEnvironmentOverrides();
+        }
+
+        private static void ApplyMcpEnvironmentOverrides()
+        {
+            string enabled = Environment.GetEnvironmentVariable("RECALLDB_MCP_ENABLED");
+            if (!string.IsNullOrEmpty(enabled) && bool.TryParse(enabled, out bool enabledValue))
+                _Settings.Mcp.Enabled = enabledValue;
+
+            string hostname = Environment.GetEnvironmentVariable("RECALLDB_MCP_HOSTNAME");
+            if (!string.IsNullOrEmpty(hostname))
+                _Settings.Mcp.Hostname = hostname;
+
+            string port = Environment.GetEnvironmentVariable("RECALLDB_MCP_PORT");
+            if (!string.IsNullOrEmpty(port) && int.TryParse(port, out int portValue))
+                _Settings.Mcp.Port = portValue;
+        }
 
         private static async Task InitializeFirstRunAsync()
         {
@@ -350,6 +419,14 @@ namespace RecallDb.Server
                     .WithDescription("Returns 200 if the server is running.")
                     .WithOperationId("healthHead")
                     .WithResponse(200, OpenApiResponseMetadata.Create("Server is running")));
+
+            _App.Get("/v1.0/mcp", McpInfoRoute,
+                openApi => openApi
+                    .WithTag("Health")
+                    .WithSummary("MCP server info")
+                    .WithDescription("Returns MCP server configuration: enabled state, hostname, port, and endpoint.")
+                    .WithOperationId("mcpInfo")
+                    .WithResponse(200, OpenApiResponseMetadata.Create("MCP server information")));
 
             // Authentication route
             _App.Post<AuthenticateRequest>("/v1.0/authenticate", AuthenticateRoute,
@@ -1137,17 +1214,31 @@ namespace RecallDb.Server
             return req.Http.Metadata as AuthenticationResult;
         }
 
-        private static object MakeError(ApiRequest req, int statusCode, string error, string context = null)
+        private static RequestContext BuildContext(ApiRequest req, string requestType)
         {
-            req.Http.Response.StatusCode = statusCode;
-            return new { Error = error, StatusCode = statusCode, Context = context };
+            RequestContext ctx = new RequestContext();
+            ctx.Origin = RequestOriginEnum.Rest;
+            ctx.Auth = GetAuthResult(req);
+            ctx.RequestType = requestType;
+            OperationScope scope = OperationScopeMap.Resolve(requestType);
+            ctx.ResourceType = scope.ResourceType;
+            ctx.Operation = scope.Operation;
+            return ctx;
         }
 
-        private static bool ValidateTenantAccess(AuthenticationResult auth, string tenantId)
+        private static object MapResult(ApiRequest req, ServiceResult result)
         {
-            if (auth.IsAdmin) return true;
-            if (auth.Tenant != null && auth.Tenant.Id == tenantId) return true;
-            return false;
+            req.Http.Response.StatusCode = result.StatusCode;
+            if (!result.Success)
+                return new { Error = result.Error, StatusCode = result.StatusCode, Context = result.Context };
+            if (result.StatusCode == 204) return null;
+            return result.Data;
+        }
+
+        private static object MapExists(ApiRequest req, ServiceResult result)
+        {
+            req.Http.Response.StatusCode = result.StatusCode;
+            return null;
         }
 
         #endregion
@@ -1171,40 +1262,27 @@ namespace RecallDb.Server
             return null;
         }
 
+        private static async Task<object> McpInfoRoute(ApiRequest req)
+        {
+            McpServerInfo info = new McpServerInfo();
+            info.Version = _Version;
+            info.UptimeMs = (DateTime.UtcNow - _StartTimeUtc).TotalMilliseconds;
+            info.Enabled = _Settings.Mcp.Enabled;
+            info.Hostname = _Settings.Mcp.Hostname;
+            info.Port = _Settings.Mcp.Port;
+            return info;
+        }
+
         #endregion
 
         #region Authenticate-Route
 
         private static async Task<object> AuthenticateRoute(ApiRequest req)
         {
-            AuthenticateRequest body = req.Data as AuthenticateRequest;
-            if (body == null)
-                return MakeError(req, 400, "Bad request", "Request body is required.");
-
-            AuthenticationResult authResult = null;
-
-            if (!string.IsNullOrEmpty(body.BearerToken))
-            {
-                authResult = await _AuthService.AuthenticateBearerAsync(body.BearerToken).ConfigureAwait(false);
-            }
-            else if (!string.IsNullOrEmpty(body.Email) && !string.IsNullOrEmpty(body.Password) && !string.IsNullOrEmpty(body.TenantId))
-            {
-                authResult = await _AuthService.AuthenticateEmailPasswordAsync(body.TenantId, body.Email, body.Password).ConfigureAwait(false);
-            }
-            else
-            {
-                return MakeError(req, 400, "Bad request", "Supply BearerToken or TenantId+Email+Password.");
-            }
-
-            AuthenticateResponse resp = new AuthenticateResponse();
-            resp.Success = authResult.IsAuthenticated;
-            resp.Tenant = authResult.Tenant;
-            resp.User = authResult.User != null ? UserMaster.Redact(authResult.User) : null;
-            resp.Credential = authResult.Credential;
-            resp.ErrorMessage = authResult.ErrorMessage;
-
-            if (!authResult.IsAuthenticated) req.Http.Response.StatusCode = 401;
-            return resp;
+            RequestContext ctx = BuildContext(req, OperationScopeMap.AuthAuthenticate);
+            ctx.Payload = req.Data as AuthenticateRequest;
+            ServiceResult result = await _Services.Auth.AuthenticateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         #endregion
@@ -1213,131 +1291,58 @@ namespace RecallDb.Server
 
         private static async Task<object> TenantListRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            EnumerationQuery query = new EnumerationQuery();
-
-            Stopwatch sw = Stopwatch.StartNew();
-
-            if (auth.IsAdmin)
-            {
-                EnumerationResult<TenantMetadata> result = await _Database.Tenants.EnumerateAsync(query).ConfigureAwait(false);
-                result.TotalMs = sw.Elapsed.TotalMilliseconds;
-                return result;
-            }
-            else
-            {
-                List<TenantMetadata> list = new List<TenantMetadata>();
-                if (auth.Tenant != null) list.Add(auth.Tenant);
-                EnumerationResult<TenantMetadata> result = new EnumerationResult<TenantMetadata>();
-                result.Success = true;
-                result.MaxResults = 1;
-                result.EndOfResults = true;
-                result.TotalRecords = list.Count;
-                result.RecordsRemaining = 0;
-                result.Objects = list;
-                result.TotalMs = sw.Elapsed.TotalMilliseconds;
-                return result;
-            }
+            RequestContext ctx = BuildContext(req, "tenant/enumerate");
+            ServiceResult result = await _Services.Tenants.ListAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> TenantReadRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string id = req.Parameters["id"];
-
-            if (!auth.IsAdmin && !ValidateTenantAccess(auth, id))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            TenantMetadata tenant = await _Database.Tenants.ReadAsync(id).ConfigureAwait(false);
-            if (tenant == null)
-                return MakeError(req, 404, "Not found", "Tenant not found.");
-
-            return tenant;
+            RequestContext ctx = BuildContext(req, "tenant/read");
+            ctx.TenantId = req.Parameters["id"];
+            ServiceResult result = await _Services.Tenants.ReadAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> TenantExistsRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string id = req.Parameters["id"];
-
-            if (!auth.IsAdmin && !ValidateTenantAccess(auth, id))
-            {
-                req.Http.Response.StatusCode = 403;
-                return null;
-            }
-
-            bool exists = await _Database.Tenants.ExistsAsync(id).ConfigureAwait(false);
-            req.Http.Response.StatusCode = exists ? 200 : 404;
-            return null;
+            RequestContext ctx = BuildContext(req, "tenant/exists");
+            ctx.TenantId = req.Parameters["id"];
+            ServiceResult result = await _Services.Tenants.ExistsAsync(ctx).ConfigureAwait(false);
+            return MapExists(req, result);
         }
 
         private static async Task<object> TenantEnumerateRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-
-            if (!auth.IsAdmin)
-                return MakeError(req, 403, "Forbidden", "Admin access required.");
-
-            EnumerationQuery query = req.Data as EnumerationQuery;
-            if (query == null) query = new EnumerationQuery();
-
-            Stopwatch sw = Stopwatch.StartNew();
-            EnumerationResult<TenantMetadata> result = await _Database.Tenants.EnumerateAsync(query).ConfigureAwait(false);
-            result.TotalMs = sw.Elapsed.TotalMilliseconds;
-            return result;
+            RequestContext ctx = BuildContext(req, "tenant/enumerate");
+            ctx.Query = req.Data as EnumerationQuery;
+            ServiceResult result = await _Services.Tenants.EnumerateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> TenantCreateRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-
-            if (!auth.IsAdmin)
-                return MakeError(req, 403, "Forbidden", "Admin access required.");
-
-            TenantMetadata tenant = req.Data as TenantMetadata;
-            if (tenant == null)
-                return MakeError(req, 400, "Bad request", "Request body is required.");
-
-            tenant = await _Database.Tenants.CreateAsync(tenant).ConfigureAwait(false);
-            req.Http.Response.StatusCode = 201;
-            return tenant;
+            RequestContext ctx = BuildContext(req, "tenant/create");
+            ctx.Payload = req.Data as TenantMetadata;
+            ServiceResult result = await _Services.Tenants.CreateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> TenantUpdateRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string id = req.Parameters["id"];
-
-            if (!auth.IsAdmin && !ValidateTenantAccess(auth, id))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            TenantMetadata tenant = req.Data as TenantMetadata;
-            if (tenant == null)
-                return MakeError(req, 400, "Bad request", "Request body is required.");
-
-            tenant.Id = id;
-            tenant = await _Database.Tenants.UpdateAsync(tenant).ConfigureAwait(false);
-            if (tenant == null)
-                return MakeError(req, 404, "Not found", "Tenant not found.");
-
-            return tenant;
+            RequestContext ctx = BuildContext(req, "tenant/update");
+            ctx.TenantId = req.Parameters["id"];
+            ctx.Payload = req.Data as TenantMetadata;
+            ServiceResult result = await _Services.Tenants.UpdateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> TenantDeleteRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-
-            if (!auth.IsAdmin)
-                return MakeError(req, 403, "Forbidden", "Admin access required.");
-
-            string id = req.Parameters["id"];
-
-            await _Database.Collections.DeleteByTenantIdAsync(id).ConfigureAwait(false);
-            await _Database.Credentials.DeleteByTenantIdAsync(id).ConfigureAwait(false);
-            await _Database.Users.DeleteByTenantIdAsync(id).ConfigureAwait(false);
-            await _Database.Tenants.DeleteAsync(id).ConfigureAwait(false);
-            req.Http.Response.StatusCode = 204;
-            return null;
+            RequestContext ctx = BuildContext(req, "tenant/delete");
+            ctx.TenantId = req.Parameters["id"];
+            ServiceResult result = await _Services.Tenants.DeleteAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         #endregion
@@ -1346,131 +1351,65 @@ namespace RecallDb.Server
 
         private static async Task<object> UserListRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            Stopwatch sw = Stopwatch.StartNew();
-            EnumerationQuery query = new EnumerationQuery();
-            EnumerationResult<UserMaster> result = await _Database.Users.EnumerateAsync(tid, query).ConfigureAwait(false);
-            result.TotalMs = sw.Elapsed.TotalMilliseconds;
-            return result;
+            RequestContext ctx = BuildContext(req, "user/enumerate");
+            ctx.TenantId = req.Parameters["tid"];
+            ServiceResult result = await _Services.Users.ListAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> UserReadRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string id = req.Parameters["id"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            UserMaster user = await _Database.Users.ReadAsync(tid, id).ConfigureAwait(false);
-            if (user == null)
-                return MakeError(req, 404, "Not found", "User not found.");
-
-            return UserMaster.Redact(user);
+            RequestContext ctx = BuildContext(req, "user/read");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.UserId = req.Parameters["id"];
+            ServiceResult result = await _Services.Users.ReadAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> UserExistsRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string id = req.Parameters["id"];
-
-            if (!ValidateTenantAccess(auth, tid))
-            {
-                req.Http.Response.StatusCode = 403;
-                return null;
-            }
-
-            bool exists = await _Database.Users.ExistsAsync(tid, id).ConfigureAwait(false);
-            req.Http.Response.StatusCode = exists ? 200 : 404;
-            return null;
+            RequestContext ctx = BuildContext(req, "user/exists");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.UserId = req.Parameters["id"];
+            ServiceResult result = await _Services.Users.ExistsAsync(ctx).ConfigureAwait(false);
+            return MapExists(req, result);
         }
 
         private static async Task<object> UserEnumerateRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            EnumerationQuery query = req.Data as EnumerationQuery;
-            if (query == null) query = new EnumerationQuery();
-
-            Stopwatch sw = Stopwatch.StartNew();
-            EnumerationResult<UserMaster> result = await _Database.Users.EnumerateAsync(tid, query).ConfigureAwait(false);
-            result.TotalMs = sw.Elapsed.TotalMilliseconds;
-            return result;
+            RequestContext ctx = BuildContext(req, "user/enumerate");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.Query = req.Data as EnumerationQuery;
+            ServiceResult result = await _Services.Users.EnumerateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> UserCreateRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-
-            if (!auth.IsAdmin && !auth.IsTenantAdmin)
-                return MakeError(req, 403, "Forbidden", "Admin or tenant admin required.");
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            UserMaster user = req.Data as UserMaster;
-            if (user == null)
-                return MakeError(req, 400, "Bad request", "Request body is required.");
-
-            user.TenantId = tid;
-            user = await _Database.Users.CreateAsync(user).ConfigureAwait(false);
-            req.Http.Response.StatusCode = 201;
-            return UserMaster.Redact(user);
+            RequestContext ctx = BuildContext(req, "user/create");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.Payload = req.Data as UserMaster;
+            ServiceResult result = await _Services.Users.CreateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> UserUpdateRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string id = req.Parameters["id"];
-
-            if (!auth.IsAdmin && !auth.IsTenantAdmin)
-                return MakeError(req, 403, "Forbidden", "Admin or tenant admin required.");
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            UserMaster user = req.Data as UserMaster;
-            if (user == null)
-                return MakeError(req, 400, "Bad request", "Request body is required.");
-
-            user.Id = id;
-            user.TenantId = tid;
-            user = await _Database.Users.UpdateAsync(user).ConfigureAwait(false);
-            if (user == null)
-                return MakeError(req, 404, "Not found", "User not found.");
-
-            return UserMaster.Redact(user);
+            RequestContext ctx = BuildContext(req, "user/update");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.UserId = req.Parameters["id"];
+            ctx.Payload = req.Data as UserMaster;
+            ServiceResult result = await _Services.Users.UpdateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> UserDeleteRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string id = req.Parameters["id"];
-
-            if (!auth.IsAdmin && !auth.IsTenantAdmin)
-                return MakeError(req, 403, "Forbidden", "Admin or tenant admin required.");
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            await _Database.Credentials.DeleteByUserIdAsync(tid, id).ConfigureAwait(false);
-            await _Database.Users.DeleteAsync(tid, id).ConfigureAwait(false);
-            req.Http.Response.StatusCode = 204;
-            return null;
+            RequestContext ctx = BuildContext(req, "user/delete");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.UserId = req.Parameters["id"];
+            ServiceResult result = await _Services.Users.DeleteAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         #endregion
@@ -1479,130 +1418,65 @@ namespace RecallDb.Server
 
         private static async Task<object> CredentialListRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            Stopwatch sw = Stopwatch.StartNew();
-            EnumerationQuery query = new EnumerationQuery();
-            EnumerationResult<Credential> result = await _Database.Credentials.EnumerateAsync(tid, query).ConfigureAwait(false);
-            result.TotalMs = sw.Elapsed.TotalMilliseconds;
-            return result;
+            RequestContext ctx = BuildContext(req, "credential/enumerate");
+            ctx.TenantId = req.Parameters["tid"];
+            ServiceResult result = await _Services.Credentials.ListAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> CredentialReadRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string id = req.Parameters["id"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            Credential cred = await _Database.Credentials.ReadAsync(tid, id).ConfigureAwait(false);
-            if (cred == null)
-                return MakeError(req, 404, "Not found", "Credential not found.");
-
-            return cred;
+            RequestContext ctx = BuildContext(req, "credential/read");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.ResourceId = req.Parameters["id"];
+            ServiceResult result = await _Services.Credentials.ReadAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> CredentialExistsRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string id = req.Parameters["id"];
-
-            if (!ValidateTenantAccess(auth, tid))
-            {
-                req.Http.Response.StatusCode = 403;
-                return null;
-            }
-
-            bool exists = await _Database.Credentials.ExistsAsync(tid, id).ConfigureAwait(false);
-            req.Http.Response.StatusCode = exists ? 200 : 404;
-            return null;
+            RequestContext ctx = BuildContext(req, "credential/exists");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.ResourceId = req.Parameters["id"];
+            ServiceResult result = await _Services.Credentials.ExistsAsync(ctx).ConfigureAwait(false);
+            return MapExists(req, result);
         }
 
         private static async Task<object> CredentialEnumerateRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            EnumerationQuery query = req.Data as EnumerationQuery;
-            if (query == null) query = new EnumerationQuery();
-
-            Stopwatch sw = Stopwatch.StartNew();
-            EnumerationResult<Credential> result = await _Database.Credentials.EnumerateAsync(tid, query).ConfigureAwait(false);
-            result.TotalMs = sw.Elapsed.TotalMilliseconds;
-            return result;
+            RequestContext ctx = BuildContext(req, "credential/enumerate");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.Query = req.Data as EnumerationQuery;
+            ServiceResult result = await _Services.Credentials.EnumerateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> CredentialCreateRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-
-            if (!auth.IsAdmin && !auth.IsTenantAdmin)
-                return MakeError(req, 403, "Forbidden", "Admin or tenant admin required.");
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            Credential cred = req.Data as Credential;
-            if (cred == null)
-                return MakeError(req, 400, "Bad request", "Request body is required.");
-
-            cred.TenantId = tid;
-            cred = await _Database.Credentials.CreateAsync(cred).ConfigureAwait(false);
-            req.Http.Response.StatusCode = 201;
-            return cred;
+            RequestContext ctx = BuildContext(req, "credential/create");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.Payload = req.Data as Credential;
+            ServiceResult result = await _Services.Credentials.CreateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> CredentialUpdateRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string id = req.Parameters["id"];
-
-            if (!auth.IsAdmin && !auth.IsTenantAdmin)
-                return MakeError(req, 403, "Forbidden", "Admin or tenant admin required.");
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            Credential cred = req.Data as Credential;
-            if (cred == null)
-                return MakeError(req, 400, "Bad request", "Request body is required.");
-
-            cred.Id = id;
-            cred.TenantId = tid;
-            cred = await _Database.Credentials.UpdateAsync(cred).ConfigureAwait(false);
-            if (cred == null)
-                return MakeError(req, 404, "Not found", "Credential not found.");
-
-            return cred;
+            RequestContext ctx = BuildContext(req, "credential/update");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.ResourceId = req.Parameters["id"];
+            ctx.Payload = req.Data as Credential;
+            ServiceResult result = await _Services.Credentials.UpdateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> CredentialDeleteRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string id = req.Parameters["id"];
-
-            if (!auth.IsAdmin && !auth.IsTenantAdmin)
-                return MakeError(req, 403, "Forbidden", "Admin or tenant admin required.");
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            await _Database.Credentials.DeleteAsync(tid, id).ConfigureAwait(false);
-            req.Http.Response.StatusCode = 204;
-            return null;
+            RequestContext ctx = BuildContext(req, "credential/delete");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.ResourceId = req.Parameters["id"];
+            ServiceResult result = await _Services.Credentials.DeleteAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         #endregion
@@ -1611,238 +1485,74 @@ namespace RecallDb.Server
 
         private static async Task<object> CollectionListRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            Stopwatch sw = Stopwatch.StartNew();
-            EnumerationQuery query = new EnumerationQuery();
-            EnumerationResult<CollectionMetadata> result = await _Database.Collections.EnumerateAsync(tid, query).ConfigureAwait(false);
-            result.TotalMs = sw.Elapsed.TotalMilliseconds;
-            return result;
+            RequestContext ctx = BuildContext(req, "collection/enumerate");
+            ctx.TenantId = req.Parameters["tid"];
+            ServiceResult result = await _Services.Collections.ListAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> CollectionReadRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            CollectionMetadata col = await _Database.Collections.ReadAsync(tid, cid).ConfigureAwait(false);
-            if (col == null)
-                return MakeError(req, 404, "Not found", "Collection not found.");
-
-            return col;
+            RequestContext ctx = BuildContext(req, "collection/read");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ServiceResult result = await _Services.Collections.ReadAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> CollectionExistsRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-            {
-                req.Http.Response.StatusCode = 403;
-                return null;
-            }
-
-            bool exists = await _Database.Collections.ExistsAsync(tid, cid).ConfigureAwait(false);
-            req.Http.Response.StatusCode = exists ? 200 : 404;
-            return null;
+            RequestContext ctx = BuildContext(req, "collection/exists");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ServiceResult result = await _Services.Collections.ExistsAsync(ctx).ConfigureAwait(false);
+            return MapExists(req, result);
         }
 
         private static async Task<object> CollectionEnumerateRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            EnumerationQuery query = req.Data as EnumerationQuery;
-            if (query == null) query = new EnumerationQuery();
-
-            Stopwatch sw = Stopwatch.StartNew();
-            EnumerationResult<CollectionMetadata> result = await _Database.Collections.EnumerateAsync(tid, query).ConfigureAwait(false);
-            result.TotalMs = sw.Elapsed.TotalMilliseconds;
-            return result;
+            RequestContext ctx = BuildContext(req, "collection/enumerate");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.Query = req.Data as EnumerationQuery;
+            ServiceResult result = await _Services.Collections.EnumerateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> CollectionCreateRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-
-            if (!auth.IsAdmin && !auth.IsTenantAdmin)
-                return MakeError(req, 403, "Forbidden", "Admin or tenant admin required.");
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            CollectionMetadata col = req.Data as CollectionMetadata;
-            if (col == null)
-                return MakeError(req, 400, "Bad request", "Request body is required.");
-
-            col.TenantId = tid;
-            col = await _Database.Collections.CreateAsync(col).ConfigureAwait(false);
-            req.Http.Response.StatusCode = 201;
-            return col;
+            RequestContext ctx = BuildContext(req, "collection/create");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.Payload = req.Data as CollectionMetadata;
+            ServiceResult result = await _Services.Collections.CreateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> CollectionUpdateRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            CollectionMetadata col = req.Data as CollectionMetadata;
-            if (col == null)
-                return MakeError(req, 400, "Bad request", "Request body is required.");
-
-            col.Id = cid;
-            col.TenantId = tid;
-            col = await _Database.Collections.UpdateAsync(col).ConfigureAwait(false);
-            if (col == null)
-                return MakeError(req, 404, "Not found", "Collection not found.");
-
-            return col;
+            RequestContext ctx = BuildContext(req, "collection/update");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.Payload = req.Data as CollectionMetadata;
+            ServiceResult result = await _Services.Collections.UpdateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> CollectionDeleteRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!auth.IsAdmin && !auth.IsTenantAdmin)
-                return MakeError(req, 403, "Forbidden", "Admin or tenant admin required.");
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            await _Database.Collections.DeleteAsync(tid, cid).ConfigureAwait(false);
-            req.Http.Response.StatusCode = 204;
-            return null;
+            RequestContext ctx = BuildContext(req, "collection/delete");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ServiceResult result = await _Services.Collections.DeleteAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> CollectionStatsRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            CollectionMetadata col = await _Database.Collections.ReadAsync(tid, cid).ConfigureAwait(false);
-            if (col == null)
-                return MakeError(req, 404, "Not found", "Collection not found.");
-
-            string tableName = cid.Replace("-", "_").Replace(".", "_");
-            string docsTable = "collection_" + tableName;
-            string labelsTable = "collection_" + tableName + "_labels";
-            string tagsTable = "collection_" + tableName + "_tags";
-
-            string query =
-                "SELECT " +
-                "(SELECT COUNT(*) FROM " + docsTable + ") AS document_count, " +
-                "(SELECT COUNT(DISTINCT document_id) FROM " + docsTable + " WHERE document_id IS NOT NULL) AS unique_document_count, " +
-                "(SELECT COALESCE(SUM(content_length), 0) FROM " + docsTable + ") AS total_content_length, " +
-                "(SELECT COUNT(*) FROM " + labelsTable + ") AS label_count, " +
-                "(SELECT COUNT(*) FROM " + tagsTable + ") AS tag_count;";
-
-            System.Data.DataTable dt = await _Database.ExecuteQueryAsync(query).ConfigureAwait(false);
-
-            long documentCount = 0;
-            long uniqueDocumentCount = 0;
-            long totalContentLength = 0;
-            long labelCount = 0;
-            long tagCount = 0;
-
-            if (dt != null && dt.Rows.Count > 0)
-            {
-                System.Data.DataRow row = dt.Rows[0];
-                documentCount = Convert.ToInt64(row["document_count"]);
-                uniqueDocumentCount = Convert.ToInt64(row["unique_document_count"]);
-                totalContentLength = Convert.ToInt64(row["total_content_length"]);
-                labelCount = Convert.ToInt64(row["label_count"]);
-                tagCount = Convert.ToInt64(row["tag_count"]);
-            }
-
-            return new
-            {
-                CollectionId = cid,
-                DocumentCount = documentCount,
-                UniqueDocumentCount = uniqueDocumentCount,
-                TotalContentLength = totalContentLength,
-                LabelCount = labelCount,
-                TagCount = tagCount
-            };
-        }
-
-        #endregion
-
-        #region Labels-Tags-Helpers
-
-        private static async Task AttachLabelsAndTagsAsync(string collectionId, List<DocumentRecord> docs)
-        {
-            if (docs == null || docs.Count == 0) return;
-
-            List<string> documentKeys = docs.Select(d => d.DocumentKey).ToList();
-
-            Dictionary<string, List<string>> labelsMap = await _Database.Labels.GetByDocumentKeysAsync(collectionId, documentKeys).ConfigureAwait(false);
-            Dictionary<string, Dictionary<string, string>> tagsMap = await _Database.Tags.GetByDocumentKeysAsync(collectionId, documentKeys).ConfigureAwait(false);
-
-            foreach (DocumentRecord doc in docs)
-            {
-                doc.Labels = labelsMap.ContainsKey(doc.DocumentKey) ? labelsMap[doc.DocumentKey] : new List<string>();
-                doc.Tags = tagsMap.ContainsKey(doc.DocumentKey) ? tagsMap[doc.DocumentKey] : new Dictionary<string, string>();
-            }
-        }
-
-        private static async Task AttachLabelsAndTagsAsync(string collectionId, DocumentRecord doc)
-        {
-            if (doc == null) return;
-            await AttachLabelsAndTagsAsync(collectionId, new List<DocumentRecord> { doc }).ConfigureAwait(false);
-        }
-
-        private static async Task PersistLabelsAndTagsAsync(string collectionId, DocumentRecord doc)
-        {
-            if (doc.Labels != null && doc.Labels.Count > 0)
-            {
-                foreach (string label in doc.Labels)
-                {
-                    LabelRecord lr = new LabelRecord();
-                    lr.DocumentKey = doc.DocumentKey;
-                    lr.DocumentId = doc.DocumentId;
-                    lr.Position = doc.Position;
-                    lr.Label = label;
-                    await _Database.Labels.CreateAsync(collectionId, lr).ConfigureAwait(false);
-                }
-            }
-
-            if (doc.Tags != null && doc.Tags.Count > 0)
-            {
-                foreach (KeyValuePair<string, string> tag in doc.Tags)
-                {
-                    TagRecord tr = new TagRecord();
-                    tr.DocumentKey = doc.DocumentKey;
-                    tr.DocumentId = doc.DocumentId;
-                    tr.Position = doc.Position;
-                    tr.Key = tag.Key;
-                    tr.Value = tag.Value;
-                    await _Database.Tags.CreateAsync(collectionId, tr).ConfigureAwait(false);
-                }
-            }
+            RequestContext ctx = BuildContext(req, "collection/stats");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ServiceResult result = await _Services.Collections.StatsAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         #endregion
@@ -1851,373 +1561,123 @@ namespace RecallDb.Server
 
         private static async Task<object> DocumentListRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            Stopwatch sw = Stopwatch.StartNew();
-            EnumerationQuery query = new EnumerationQuery();
-            EnumerationResult<DocumentRecord> result = await _Database.Documents.EnumerateAsync(cid, query).ConfigureAwait(false);
-            await AttachLabelsAndTagsAsync(cid, result.Objects).ConfigureAwait(false);
-            result.TotalMs = sw.Elapsed.TotalMilliseconds;
-            return result;
+            RequestContext ctx = BuildContext(req, "document/enumerate");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ServiceResult result = await _Services.Documents.ListAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> DocumentReadRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-            string docKey = req.Parameters["docKey"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            DocumentRecord doc = await _Database.Documents.ReadAsync(cid, docKey).ConfigureAwait(false);
-            if (doc == null)
-                return MakeError(req, 404, "Not found", "Document not found.");
-
-            await AttachLabelsAndTagsAsync(cid, doc).ConfigureAwait(false);
-            return doc;
+            RequestContext ctx = BuildContext(req, "document/read");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.DocumentKey = req.Parameters["docKey"];
+            ServiceResult result = await _Services.Documents.ReadAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> DocumentReadByPositionRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-            string docId = req.Parameters["docId"];
-            string posStr = req.Parameters["position"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            if (!int.TryParse(posStr, out int position))
-                return MakeError(req, 400, "Bad request", "Position must be an integer.");
-
-            DocumentRecord doc = await _Database.Documents.ReadByDocumentIdAndPositionAsync(cid, docId, position).ConfigureAwait(false);
-            if (doc == null)
-                return MakeError(req, 404, "Not found", "Document chunk not found.");
-
-            await AttachLabelsAndTagsAsync(cid, doc).ConfigureAwait(false);
-            return doc;
+            RequestContext ctx = BuildContext(req, "document/readByPosition");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.DocumentId = req.Parameters["docId"];
+            if (int.TryParse(req.Parameters["position"], out int position)) ctx.Position = position;
+            ServiceResult result = await _Services.Documents.ReadByPositionAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> DocumentExistsRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-            string docKey = req.Parameters["docKey"];
-
-            if (!ValidateTenantAccess(auth, tid))
-            {
-                req.Http.Response.StatusCode = 403;
-                return null;
-            }
-
-            bool exists = await _Database.Documents.ExistsAsync(cid, docKey).ConfigureAwait(false);
-            req.Http.Response.StatusCode = exists ? 200 : 404;
-            return null;
+            RequestContext ctx = BuildContext(req, "document/exists");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.DocumentKey = req.Parameters["docKey"];
+            ServiceResult result = await _Services.Documents.ExistsAsync(ctx).ConfigureAwait(false);
+            return MapExists(req, result);
         }
 
         private static async Task<object> DocumentEnumerateRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            EnumerationQuery query = req.Data as EnumerationQuery;
-            if (query == null) query = new EnumerationQuery();
-
-            Stopwatch sw = Stopwatch.StartNew();
-            EnumerationResult<DocumentRecord> result = await _Database.Documents.EnumerateAsync(cid, query).ConfigureAwait(false);
-            await AttachLabelsAndTagsAsync(cid, result.Objects).ConfigureAwait(false);
-            result.TotalMs = sw.Elapsed.TotalMilliseconds;
-            return result;
+            RequestContext ctx = BuildContext(req, "document/enumerate");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.Query = req.Data as EnumerationQuery;
+            ServiceResult result = await _Services.Documents.EnumerateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> DocumentCreateRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            DocumentRecord doc = req.Data as DocumentRecord;
-            if (doc == null)
-                return MakeError(req, 400, "Bad request", "Request body is required.");
-
-            CollectionMetadata col = await _Database.Collections.ReadAsync(tid, cid).ConfigureAwait(false);
-            if (col == null)
-                return MakeError(req, 404, "Not found", "Collection not found.");
-
-            if (doc.Embeddings != null && doc.Embeddings.Count != col.Dimensionality)
-                return MakeError(req, 400, "Bad request", "Embeddings dimensionality mismatch. Expected " + col.Dimensionality + " dimensions, but received " + doc.Embeddings.Count + ".");
-
-            List<string> reqLabels = doc.Labels;
-            Dictionary<string, string> reqTags = doc.Tags;
-
-            doc = await _Database.Documents.CreateAsync(cid, doc).ConfigureAwait(false);
-
-            doc.Labels = reqLabels;
-            doc.Tags = reqTags;
-            await PersistLabelsAndTagsAsync(cid, doc).ConfigureAwait(false);
-            await AttachLabelsAndTagsAsync(cid, doc).ConfigureAwait(false);
-
-            req.Http.Response.StatusCode = 201;
-            return doc;
+            RequestContext ctx = BuildContext(req, "document/create");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.Payload = req.Data as DocumentRecord;
+            ServiceResult result = await _Services.Documents.CreateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> DocumentUpdateRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-            string docKey = req.Parameters["docKey"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            DocumentRecord doc = req.Data as DocumentRecord;
-            if (doc == null)
-                return MakeError(req, 400, "Bad request", "Request body is required.");
-
-            List<string> reqLabels = doc.Labels;
-            Dictionary<string, string> reqTags = doc.Tags;
-
-            doc.DocumentKey = docKey;
-            doc = await _Database.Documents.UpdateAsync(cid, doc).ConfigureAwait(false);
-            if (doc == null)
-                return MakeError(req, 404, "Not found", "Document not found.");
-
-            if (reqLabels != null)
-            {
-                await _Database.Labels.DeleteByDocumentKeyAsync(cid, docKey).ConfigureAwait(false);
-                doc.Labels = reqLabels;
-            }
-
-            if (reqTags != null)
-            {
-                await _Database.Tags.DeleteByDocumentKeyAsync(cid, docKey).ConfigureAwait(false);
-                doc.Tags = reqTags;
-            }
-
-            await PersistLabelsAndTagsAsync(cid, doc).ConfigureAwait(false);
-            await AttachLabelsAndTagsAsync(cid, doc).ConfigureAwait(false);
-
-            return doc;
+            RequestContext ctx = BuildContext(req, "document/update");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.DocumentKey = req.Parameters["docKey"];
+            ctx.Payload = req.Data as DocumentRecord;
+            ServiceResult result = await _Services.Documents.UpdateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> DocumentDeleteRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-            string docKey = req.Parameters["docKey"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            await _Database.Labels.DeleteByDocumentKeyAsync(cid, docKey).ConfigureAwait(false);
-            await _Database.Tags.DeleteByDocumentKeyAsync(cid, docKey).ConfigureAwait(false);
-            await _Database.Documents.DeleteAsync(cid, docKey).ConfigureAwait(false);
-            req.Http.Response.StatusCode = 204;
-            return null;
+            RequestContext ctx = BuildContext(req, "document/delete");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.DocumentKey = req.Parameters["docKey"];
+            ServiceResult result = await _Services.Documents.DeleteAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> DocumentBatchDeleteRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            BatchDeleteRequest batchReq = req.Data as BatchDeleteRequest;
-            if (batchReq == null || batchReq.DocumentKeys == null || batchReq.DocumentKeys.Count == 0)
-                return MakeError(req, 400, "Bad request", "Request body must contain a non-empty list of document keys.");
-
-            await _Database.Labels.DeleteByDocumentKeysAsync(cid, batchReq.DocumentKeys).ConfigureAwait(false);
-            await _Database.Tags.DeleteByDocumentKeysAsync(cid, batchReq.DocumentKeys).ConfigureAwait(false);
-            await _Database.Documents.DeleteBatchAsync(cid, batchReq.DocumentKeys).ConfigureAwait(false);
-            req.Http.Response.StatusCode = 204;
-            return null;
+            RequestContext ctx = BuildContext(req, "document/batchDelete");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.Payload = req.Data as BatchDeleteRequest;
+            ServiceResult result = await _Services.Documents.BatchDeleteAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> DocumentDeleteByFilterRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            EnumerationQuery query = req.Data as EnumerationQuery;
-            if (query == null) query = new EnumerationQuery();
-
-            // Collect all matching document keys by paginating through results
-            List<string> allKeys = new List<string>();
-            query.MaxResults = 1000;
-            query.ContinuationToken = null;
-
-            while (true)
-            {
-                EnumerationResult<DocumentRecord> result = await _Database.Documents.EnumerateAsync(cid, query).ConfigureAwait(false);
-
-                if (result.Objects != null)
-                {
-                    foreach (DocumentRecord doc in result.Objects)
-                    {
-                        allKeys.Add(doc.DocumentKey);
-                    }
-                }
-
-                if (result.EndOfResults || result.ContinuationToken == null)
-                    break;
-
-                query.ContinuationToken = result.ContinuationToken;
-            }
-
-            if (allKeys.Count > 0)
-            {
-                await _Database.Labels.DeleteByDocumentKeysAsync(cid, allKeys).ConfigureAwait(false);
-                await _Database.Tags.DeleteByDocumentKeysAsync(cid, allKeys).ConfigureAwait(false);
-                await _Database.Documents.DeleteBatchAsync(cid, allKeys).ConfigureAwait(false);
-            }
-
-            DeleteResult deleteResult = new DeleteResult();
-            deleteResult.DocumentsDeleted = allKeys.Count;
-            return deleteResult;
+            RequestContext ctx = BuildContext(req, "document/deleteByFilter");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.Query = req.Data as EnumerationQuery;
+            ServiceResult result = await _Services.Documents.DeleteByFilterAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> DocumentBatchRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            List<DocumentRecord> docs = req.Data as List<DocumentRecord>;
-            if (docs == null || docs.Count == 0)
-                return MakeError(req, 400, "Bad request", "Request body must contain a list of documents.");
-
-            CollectionMetadata col = await _Database.Collections.ReadAsync(tid, cid).ConfigureAwait(false);
-            if (col == null)
-                return MakeError(req, 404, "Not found", "Collection not found.");
-
-            foreach (DocumentRecord d in docs)
-            {
-                if (d.Embeddings != null && d.Embeddings.Count != col.Dimensionality)
-                    return MakeError(req, 400, "Bad request", "Embeddings dimensionality mismatch for document '" + d.DocumentKey + "'. Expected " + col.Dimensionality + " dimensions, but received " + d.Embeddings.Count + ".");
-            }
-
-            Dictionary<string, List<string>> reqLabelsMap = new Dictionary<string, List<string>>();
-            Dictionary<string, Dictionary<string, string>> reqTagsMap = new Dictionary<string, Dictionary<string, string>>();
-            foreach (DocumentRecord d in docs)
-            {
-                if (d.Labels != null) reqLabelsMap[d.DocumentKey] = d.Labels;
-                if (d.Tags != null) reqTagsMap[d.DocumentKey] = d.Tags;
-            }
-
-            List<DocumentRecord> created = await _Database.Documents.CreateBatchAsync(cid, docs).ConfigureAwait(false);
-
-            foreach (DocumentRecord d in created)
-            {
-                if (reqLabelsMap.ContainsKey(d.DocumentKey)) d.Labels = reqLabelsMap[d.DocumentKey];
-                if (reqTagsMap.ContainsKey(d.DocumentKey)) d.Tags = reqTagsMap[d.DocumentKey];
-                await PersistLabelsAndTagsAsync(cid, d).ConfigureAwait(false);
-            }
-
-            await AttachLabelsAndTagsAsync(cid, created).ConfigureAwait(false);
-
-            req.Http.Response.StatusCode = 201;
-            return created;
+            RequestContext ctx = BuildContext(req, "document/batchCreate");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.Payload = req.Data as List<DocumentRecord>;
+            ServiceResult result = await _Services.Documents.BatchCreateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> DocumentStatsRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-            string docKey = req.Parameters["docKey"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            CollectionMetadata col = await _Database.Collections.ReadAsync(tid, cid).ConfigureAwait(false);
-            if (col == null)
-                return MakeError(req, 404, "Not found", "Collection not found.");
-
-            DocumentRecord doc = await _Database.Documents.ReadAsync(cid, docKey).ConfigureAwait(false);
-            if (doc == null)
-                return MakeError(req, 404, "Not found", "Document not found.");
-
-            string tableName = cid.Replace("-", "_").Replace(".", "_");
-            string docsTable = "collection_" + tableName;
-            string labelsTable = "collection_" + tableName + "_labels";
-            string tagsTable = "collection_" + tableName + "_tags";
-
-            string docFilter;
-            string documentId;
-
-            if (!string.IsNullOrEmpty(doc.DocumentId))
-            {
-                documentId = doc.DocumentId;
-                string safeDocId = _Database.Sanitize(doc.DocumentId);
-                docFilter = "document_id = '" + safeDocId + "'";
-            }
-            else
-            {
-                documentId = null;
-                string safeDocKey = _Database.Sanitize(docKey);
-                docFilter = "document_key = '" + safeDocKey + "'";
-            }
-
-            string query =
-                "SELECT " +
-                "(SELECT COUNT(*) FROM " + docsTable + " WHERE " + docFilter + ") AS chunk_count, " +
-                "(SELECT COALESCE(SUM(content_length), 0) FROM " + docsTable + " WHERE " + docFilter + ") AS total_content_length, " +
-                "(SELECT COUNT(*) FROM " + labelsTable + " WHERE " + docFilter + ") AS label_count, " +
-                "(SELECT COUNT(*) FROM " + tagsTable + " WHERE " + docFilter + ") AS tag_count;";
-
-            System.Data.DataTable dt = await _Database.ExecuteQueryAsync(query).ConfigureAwait(false);
-
-            long chunkCount = 0;
-            long totalContentLength = 0;
-            long labelCount = 0;
-            long tagCount = 0;
-
-            if (dt != null && dt.Rows.Count > 0)
-            {
-                System.Data.DataRow row = dt.Rows[0];
-                chunkCount = Convert.ToInt64(row["chunk_count"]);
-                totalContentLength = Convert.ToInt64(row["total_content_length"]);
-                labelCount = Convert.ToInt64(row["label_count"]);
-                tagCount = Convert.ToInt64(row["tag_count"]);
-            }
-
-            return new
-            {
-                DocumentKey = docKey,
-                DocumentId = documentId,
-                ChunkCount = chunkCount,
-                TotalContentLength = totalContentLength,
-                LabelCount = labelCount,
-                TagCount = tagCount
-            };
+            RequestContext ctx = BuildContext(req, "document/stats");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.DocumentKey = req.Parameters["docKey"];
+            ServiceResult result = await _Services.Documents.StatsAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         #endregion
@@ -2226,81 +1686,50 @@ namespace RecallDb.Server
 
         private static async Task<object> LabelListRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            Stopwatch sw = Stopwatch.StartNew();
-            EnumerationQuery query = new EnumerationQuery();
-            EnumerationResult<LabelRecord> result = await _Database.Labels.EnumerateAsync(cid, query).ConfigureAwait(false);
-            result.TotalMs = sw.Elapsed.TotalMilliseconds;
-            return result;
+            RequestContext ctx = BuildContext(req, "label/enumerate");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ServiceResult result = await _Services.Labels.ListAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> LabelReadRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-            string id = req.Parameters["id"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            LabelRecord label = await _Database.Labels.ReadAsync(cid, id).ConfigureAwait(false);
-            if (label == null)
-                return MakeError(req, 404, "Not found", "Label not found.");
-
-            return label;
+            RequestContext ctx = BuildContext(req, "label/read");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.ResourceId = req.Parameters["id"];
+            ServiceResult result = await _Services.Labels.ReadAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> LabelCreateRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            LabelRecord label = req.Data as LabelRecord;
-            if (label == null)
-                return MakeError(req, 400, "Bad request", "Request body is required.");
-
-            label = await _Database.Labels.CreateAsync(cid, label).ConfigureAwait(false);
-            req.Http.Response.StatusCode = 201;
-            return label;
+            RequestContext ctx = BuildContext(req, "label/create");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.Payload = req.Data as LabelRecord;
+            ServiceResult result = await _Services.Labels.CreateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> LabelDeleteRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-            string id = req.Parameters["id"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            await _Database.Labels.DeleteAsync(cid, id).ConfigureAwait(false);
-            req.Http.Response.StatusCode = 204;
-            return null;
+            RequestContext ctx = BuildContext(req, "label/delete");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.ResourceId = req.Parameters["id"];
+            ServiceResult result = await _Services.Labels.DeleteAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> LabelDistinctRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            List<string> labels = await _Database.Labels.DistinctAsync(cid).ConfigureAwait(false);
-            return labels;
+            RequestContext ctx = BuildContext(req, "label/read");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ServiceResult result = await _Services.Labels.DistinctAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         #endregion
@@ -2309,81 +1738,50 @@ namespace RecallDb.Server
 
         private static async Task<object> TagListRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            Stopwatch sw = Stopwatch.StartNew();
-            EnumerationQuery query = new EnumerationQuery();
-            EnumerationResult<TagRecord> result = await _Database.Tags.EnumerateAsync(cid, query).ConfigureAwait(false);
-            result.TotalMs = sw.Elapsed.TotalMilliseconds;
-            return result;
+            RequestContext ctx = BuildContext(req, "tag/enumerate");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ServiceResult result = await _Services.Tags.ListAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> TagReadRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-            string id = req.Parameters["id"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            TagRecord tag = await _Database.Tags.ReadAsync(cid, id).ConfigureAwait(false);
-            if (tag == null)
-                return MakeError(req, 404, "Not found", "Tag not found.");
-
-            return tag;
+            RequestContext ctx = BuildContext(req, "tag/read");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.ResourceId = req.Parameters["id"];
+            ServiceResult result = await _Services.Tags.ReadAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> TagCreateRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            TagRecord tag = req.Data as TagRecord;
-            if (tag == null)
-                return MakeError(req, 400, "Bad request", "Request body is required.");
-
-            tag = await _Database.Tags.CreateAsync(cid, tag).ConfigureAwait(false);
-            req.Http.Response.StatusCode = 201;
-            return tag;
+            RequestContext ctx = BuildContext(req, "tag/create");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.Payload = req.Data as TagRecord;
+            ServiceResult result = await _Services.Tags.CreateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> TagDeleteRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-            string id = req.Parameters["id"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            await _Database.Tags.DeleteAsync(cid, id).ConfigureAwait(false);
-            req.Http.Response.StatusCode = 204;
-            return null;
+            RequestContext ctx = BuildContext(req, "tag/delete");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.ResourceId = req.Parameters["id"];
+            ServiceResult result = await _Services.Tags.DeleteAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> TagDistinctRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            List<string> keys = await _Database.Tags.DistinctKeysAsync(cid).ConfigureAwait(false);
-            return keys;
+            RequestContext ctx = BuildContext(req, "tag/read");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ServiceResult result = await _Services.Tags.DistinctAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         #endregion
@@ -2392,110 +1790,12 @@ namespace RecallDb.Server
 
         private static async Task<object> SearchRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            string tid = req.Parameters["tid"];
-            string cid = req.Parameters["cid"];
-
-            if (!ValidateTenantAccess(auth, tid))
-                return MakeError(req, 403, "Forbidden", "Access denied.");
-
-            SearchQuery query = req.Data as SearchQuery;
-            if (query == null)
-                return MakeError(req, 400, "Bad request", "Request body is required.");
-
-            CollectionMetadata col = await _Database.Collections.ReadAsync(tid, cid).ConfigureAwait(false);
-            if (col == null)
-                return MakeError(req, 404, "Not found", "Collection not found.");
-
-            Stopwatch sw = Stopwatch.StartNew();
-            SearchResult result = await _Database.Search.SearchAsync(cid, col.Dimensionality, query).ConfigureAwait(false);
-            await AttachLabelsAndTagsAsync(cid, result.Documents).ConfigureAwait(false);
-
-            // Neighbor enrichment
-            if (query.IncludeNeighbors.HasValue && query.IncludeNeighbors.Value > 0 && result.Documents != null && result.Documents.Count > 0)
-            {
-                int n = query.IncludeNeighbors.Value;
-
-                // Group matched documents by DocumentId, skipping those without a DocumentId
-                var groupedByDocId = new Dictionary<string, List<DocumentRecord>>();
-                foreach (DocumentRecord doc in result.Documents)
-                {
-                    if (string.IsNullOrEmpty(doc.DocumentId)) continue;
-                    if (!groupedByDocId.ContainsKey(doc.DocumentId))
-                        groupedByDocId[doc.DocumentId] = new List<DocumentRecord>();
-                    groupedByDocId[doc.DocumentId].Add(doc);
-                }
-
-                // For each unique DocumentId, merge overlapping position ranges and fetch neighbors
-                List<DocumentRecord> allNeighborDocs = new List<DocumentRecord>();
-
-                foreach (var kvp in groupedByDocId)
-                {
-                    string documentId = kvp.Key;
-                    List<DocumentRecord> matchedDocs = kvp.Value;
-
-                    // Compute merged position ranges
-                    var ranges = new List<(int Min, int Max)>();
-                    foreach (DocumentRecord doc in matchedDocs)
-                    {
-                        int minPos = Math.Max(0, doc.Position - n);
-                        int maxPos = doc.Position + n;
-                        ranges.Add((minPos, maxPos));
-                    }
-
-                    // Sort and merge overlapping ranges
-                    ranges.Sort((a, b) => a.Min.CompareTo(b.Min));
-                    var merged = new List<(int Min, int Max)>();
-                    merged.Add(ranges[0]);
-                    for (int i = 1; i < ranges.Count; i++)
-                    {
-                        var last = merged[merged.Count - 1];
-                        if (ranges[i].Min <= last.Max + 1)
-                        {
-                            merged[merged.Count - 1] = (last.Min, Math.Max(last.Max, ranges[i].Max));
-                        }
-                        else
-                        {
-                            merged.Add(ranges[i]);
-                        }
-                    }
-
-                    // Fetch chunks for each merged range
-                    List<DocumentRecord> fetchedChunks = new List<DocumentRecord>();
-                    foreach (var range in merged)
-                    {
-                        List<DocumentRecord> chunks = await _Database.Documents.ReadByDocumentIdAndPositionRangeAsync(
-                            cid, documentId, range.Min, range.Max).ConfigureAwait(false);
-                        fetchedChunks.AddRange(chunks);
-                    }
-
-                    // Assign neighbors to each matched document
-                    foreach (DocumentRecord doc in matchedDocs)
-                    {
-                        int minPos = Math.Max(0, doc.Position - n);
-                        int maxPos = doc.Position + n;
-                        doc.Neighbors = new List<DocumentRecord>();
-                        foreach (DocumentRecord chunk in fetchedChunks)
-                        {
-                            if (chunk.Position >= minPos && chunk.Position <= maxPos && chunk.Position != doc.Position)
-                            {
-                                doc.Neighbors.Add(chunk);
-                            }
-                        }
-                    }
-
-                    allNeighborDocs.AddRange(fetchedChunks);
-                }
-
-                // Attach labels and tags to neighbor documents
-                if (allNeighborDocs.Count > 0)
-                {
-                    await AttachLabelsAndTagsAsync(cid, allNeighborDocs).ConfigureAwait(false);
-                }
-            }
-
-            result.TotalMs = sw.Elapsed.TotalMilliseconds;
-            return result;
+            RequestContext ctx = BuildContext(req, "search/query");
+            ctx.TenantId = req.Parameters["tid"];
+            ctx.CollectionId = req.Parameters["cid"];
+            ctx.Search = req.Data as SearchQuery;
+            ServiceResult result = await _Services.Search.SearchAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         #endregion
@@ -2504,101 +1804,51 @@ namespace RecallDb.Server
 
         private static async Task<object> RequestHistoryListRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            if (!auth.IsAdmin)
-                return MakeError(req, 403, "Forbidden", "Admin access required.");
+            RequestContext ctx = BuildContext(req, "requestHistory/enumerate");
 
-            string method = req.Query["method"];
-            string statusCodeStr = req.Query["statusCode"];
-            string sourceIp = req.Query["sourceIp"];
-            string startUtcStr = req.Query["startUtc"];
-            string endUtcStr = req.Query["endUtc"];
-            string maxResultsStr = req.Query["maxResults"];
-            string offsetStr = req.Query["offset"];
+            RequestHistoryFilter filter = new RequestHistoryFilter();
+            filter.Method = req.Query["method"];
+            filter.SourceIp = req.Query["sourceIp"];
 
-            int? statusCode = null;
-            if (!string.IsNullOrEmpty(statusCodeStr) && int.TryParse(statusCodeStr, out int sc)) statusCode = sc;
+            if (!string.IsNullOrEmpty(req.Query["statusCode"]) && int.TryParse(req.Query["statusCode"], out int sc)) filter.StatusCode = sc;
+            if (!string.IsNullOrEmpty(req.Query["startUtc"]) && DateTime.TryParse(req.Query["startUtc"], null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime su)) filter.StartUtc = su;
+            if (!string.IsNullOrEmpty(req.Query["endUtc"]) && DateTime.TryParse(req.Query["endUtc"], null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime eu)) filter.EndUtc = eu;
+            if (!string.IsNullOrEmpty(req.Query["maxResults"]) && int.TryParse(req.Query["maxResults"], out int mr)) filter.MaxResults = mr;
+            if (!string.IsNullOrEmpty(req.Query["offset"]) && int.TryParse(req.Query["offset"], out int o)) filter.Offset = o;
 
-            DateTime? startUtc = null;
-            if (!string.IsNullOrEmpty(startUtcStr) && DateTime.TryParse(startUtcStr, null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime su)) startUtc = su;
-
-            DateTime? endUtc = null;
-            if (!string.IsNullOrEmpty(endUtcStr) && DateTime.TryParse(endUtcStr, null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime eu)) endUtc = eu;
-
-            int maxResults = 100;
-            if (!string.IsNullOrEmpty(maxResultsStr) && int.TryParse(maxResultsStr, out int mr)) maxResults = Math.Min(mr, 250);
-
-            int offset = 0;
-            if (!string.IsNullOrEmpty(offsetStr) && int.TryParse(offsetStr, out int o)) offset = o;
-
-            List<RequestHistoryEntry> entries = await _Database.RequestHistory.SearchAsync(
-                method, statusCode, sourceIp, startUtc, endUtc, maxResults, offset).ConfigureAwait(false);
-
-            long totalCount = await _Database.RequestHistory.CountAsync(
-                method, statusCode, sourceIp, startUtc, endUtc).ConfigureAwait(false);
-
-            return new
-            {
-                Success = true,
-                TotalRecords = totalCount,
-                MaxResults = maxResults,
-                Offset = offset,
-                Objects = entries
-            };
+            ctx.Payload = filter;
+            ServiceResult result = await _Services.RequestHistory.EnumerateAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> RequestHistorySummaryRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            if (!auth.IsAdmin)
-                return MakeError(req, 403, "Forbidden", "Admin access required.");
+            RequestContext ctx = BuildContext(req, "requestHistory/summary");
 
-            string startUtcStr = req.Query["startUtc"];
-            string endUtcStr = req.Query["endUtc"];
-            string interval = req.Query["interval"];
+            RequestHistoryFilter filter = new RequestHistoryFilter();
+            if (!string.IsNullOrEmpty(req.Query["startUtc"]) && DateTime.TryParse(req.Query["startUtc"], null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime su)) filter.StartUtc = su;
+            if (!string.IsNullOrEmpty(req.Query["endUtc"]) && DateTime.TryParse(req.Query["endUtc"], null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime eu)) filter.EndUtc = eu;
+            filter.Interval = req.Query["interval"];
 
-            DateTime startUtc = DateTime.UtcNow.AddHours(-24);
-            if (!string.IsNullOrEmpty(startUtcStr) && DateTime.TryParse(startUtcStr, null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime su)) startUtc = su;
-
-            DateTime endUtc = DateTime.UtcNow;
-            if (!string.IsNullOrEmpty(endUtcStr) && DateTime.TryParse(endUtcStr, null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime eu)) endUtc = eu;
-
-            if (string.IsNullOrEmpty(interval)) interval = "hour";
-
-            RequestHistorySummaryResult summary = await _Database.RequestHistory.SummaryAsync(
-                startUtc, endUtc, interval).ConfigureAwait(false);
-
-            return summary;
+            ctx.Payload = filter;
+            ServiceResult result = await _Services.RequestHistory.SummaryAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> RequestHistoryReadRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            if (!auth.IsAdmin)
-                return MakeError(req, 403, "Forbidden", "Admin access required.");
-
-            string guid = req.Parameters["guid"];
-            RequestHistoryEntry entry = await _Database.RequestHistory.ReadAsync(guid).ConfigureAwait(false);
-            if (entry == null)
-                return MakeError(req, 404, "Not found", "Request history entry not found.");
-
-            return entry;
+            RequestContext ctx = BuildContext(req, "requestHistory/read");
+            ctx.ResourceId = req.Parameters["guid"];
+            ServiceResult result = await _Services.RequestHistory.ReadAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         private static async Task<object> RequestHistoryDeleteRoute(ApiRequest req)
         {
-            AuthenticationResult auth = GetAuthResult(req);
-            if (!auth.IsAdmin)
-                return MakeError(req, 403, "Forbidden", "Admin access required.");
-
-            string guid = req.Parameters["guid"];
-            RequestHistoryEntry entry = await _Database.RequestHistory.ReadAsync(guid).ConfigureAwait(false);
-            if (entry == null)
-                return MakeError(req, 404, "Not found", "Request history entry not found.");
-
-            await _Database.RequestHistory.DeleteAsync(guid).ConfigureAwait(false);
-            req.Http.Response.StatusCode = 204;
-            return null;
+            RequestContext ctx = BuildContext(req, "requestHistory/delete");
+            ctx.ResourceId = req.Parameters["guid"];
+            ServiceResult result = await _Services.RequestHistory.DeleteAsync(ctx).ConfigureAwait(false);
+            return MapResult(req, result);
         }
 
         #endregion

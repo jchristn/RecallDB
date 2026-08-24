@@ -30,6 +30,14 @@
     "Requests": false,
     "DatabaseQueries": false
   },
+  "Mcp": {
+    "Enabled": true,
+    "Hostname": "*",
+    "Port": 8620,
+    "ServerName": "RecallDB.McpServer",
+    "ServerVersion": "0.2.0",
+    "LogOperations": false
+  },
   "AdminApiKeys": [
     "recalldbadmin"
   ]

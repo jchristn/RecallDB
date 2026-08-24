@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="Touchstone.Core" Version="0.1.12" />
+    <PackageReference Include="Voltaic" Version="0.6.1" />
   </ItemGroup>
 
 </Project>

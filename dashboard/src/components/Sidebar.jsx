@@ -21,6 +21,7 @@ export default function Sidebar({ onStartTour, onStartWizard }) {
         <div className="sidebar-separator" aria-hidden="true" />
         <NavLink to="/request-history" data-tour="request-history">Request History</NavLink>
         <NavLink to="/api-explorer" data-tour="api-explorer">API Explorer</NavLink>
+        <NavLink to="/mcp" data-tour="mcp">MCP</NavLink>
         <div className="sidebar-separator" aria-hidden="true" />
         <NavLink to="/tenants" end data-tour="tenants">Tenants</NavLink>
         <NavLink to={`/tenants/${tenantId}/users`} data-tour="users">Users</NavLink>

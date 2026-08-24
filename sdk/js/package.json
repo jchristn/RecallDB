@@ -1,6 +1,6 @@
 {
   "name": "recalldb-sdk",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "RecallDB JavaScript SDK",
   "main": "recalldb-sdk.js",
   "scripts": {

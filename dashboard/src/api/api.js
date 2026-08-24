@@ -82,6 +82,9 @@ class RecallDbApi {
   // Health
   async health() { return this.request('GET', '/'); }
 
+  // MCP
+  async getMcpInfo() { return this.request('GET', '/v1.0/mcp'); }
+
   // Auth
   async authenticateBearer(token) {
     return this.request('POST', '/v1.0/authenticate', { BearerToken: token });

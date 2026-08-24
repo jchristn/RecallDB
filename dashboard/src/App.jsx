@@ -14,6 +14,7 @@ import QueryBuilder from './views/QueryBuilder.jsx'
 import SearchQuery from './views/SearchQuery.jsx'
 import RequestHistory from './views/RequestHistory.jsx'
 import ApiExplorer from './views/ApiExplorer.jsx'
+import Mcp from './views/Mcp.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import Topbar from './components/Topbar.jsx'
 import Tour from './components/Tour.jsx'
@@ -78,6 +79,7 @@ function AppLayout() {
             <Route path="/tenants/:tenantId/collections/:collectionId/query" element={<QueryBuilder />} />
             <Route path="/request-history" element={<RequestHistory />} />
             <Route path="/api-explorer" element={<ApiExplorer />} />
+            <Route path="/mcp" element={<Mcp />} />
           </Routes>
         </main>
       </div>

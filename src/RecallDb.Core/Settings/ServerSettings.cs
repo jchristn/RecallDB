@@ -74,6 +74,22 @@ namespace RecallDb.Core.Settings
         }
 
         /// <summary>
+        /// MCP (Model Context Protocol) server settings.
+        /// </summary>
+        public McpSettings Mcp
+        {
+            get
+            {
+                return _Mcp;
+            }
+            set
+            {
+                if (value == null) throw new System.ArgumentNullException(nameof(Mcp));
+                _Mcp = value;
+            }
+        }
+
+        /// <summary>
         /// Admin API keys.
         /// Default: ["recalldbadmin"].
         /// </summary>
@@ -98,6 +114,7 @@ namespace RecallDb.Core.Settings
         private DatabaseSettings _Database = new DatabaseSettings();
         private LoggingSettings _Logging = new LoggingSettings();
         private DebugSettings _Debug = new DebugSettings();
+        private McpSettings _Mcp = new McpSettings();
         private List<string> _AdminApiKeys = new List<string> { "recalldbadmin" };
 
         #endregion

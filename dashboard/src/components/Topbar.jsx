@@ -65,7 +65,11 @@ export default function Topbar({ theme, toggleTheme }) {
             </svg>
           )}
         </button>
-        <button className="topbar-logout" data-tour="logout" onClick={logout}>Logout</button>
+        <button className="topbar-logout" data-tour="logout" onClick={logout} title="Logout" aria-label="Logout">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 001 1h5a1 1 0 100-2H4V5h4a1 1 0 000-2H3zm10.293 3.293a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 01-1.414-1.414L14.586 11H8a1 1 0 110-2h6.586l-1.293-1.293a1 1 0 010-1.414z" clipRule="evenodd" />
+          </svg>
+        </button>
       </div>
     </header>
   )

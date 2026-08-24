@@ -98,10 +98,11 @@
 }
 
 .topbar-logout {
-  padding: 6px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
   border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
   cursor: pointer;
   border: 1px solid var(--border);
   background: transparent;

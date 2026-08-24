@@ -14,7 +14,14 @@ namespace Test.Shared
 
     public static class RecallDbSuites
     {
-        public static IReadOnlyList<TestSuiteDescriptor> All { get; } = BuildSuites();
+        public static IReadOnlyList<TestSuiteDescriptor> All { get; } = BuildAll();
+
+        private static IReadOnlyList<TestSuiteDescriptor> BuildAll()
+        {
+            List<TestSuiteDescriptor> suites = new List<TestSuiteDescriptor>(BuildSuites());
+            suites.Add(RecallDbMcpSuites.Suite);
+            return suites;
+        }
 
         private static IReadOnlyList<TestSuiteDescriptor> BuildSuites()
         {

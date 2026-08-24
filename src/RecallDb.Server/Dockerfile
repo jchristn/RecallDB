@@ -19,4 +19,5 @@ RUN rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/publish .
 ENV DOTNET_RUNNING_IN_CONTAINER=true
 EXPOSE 8600
+EXPOSE 8620
 ENTRYPOINT ["dotnet", "RecallDb.Server.dll"]
