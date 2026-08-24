@@ -3,6 +3,7 @@ namespace RecallDb.Core.Database.Postgresql
     using System;
     using System.Collections.Generic;
     using System.Data;
+    using System.Diagnostics;
     using System.Threading;
     using System.Threading.Tasks;
     using Npgsql;
@@ -10,6 +11,7 @@ namespace RecallDb.Core.Database.Postgresql
     using RecallDb.Core.Database.Interfaces;
     using RecallDb.Core.Database.Postgresql.Implementations;
     using RecallDb.Core.Database.Postgresql.Queries;
+    using RecallDb.Core.Observability;
     using RecallDb.Core.Settings;
 
     /// <summary>
@@ -150,6 +152,22 @@ namespace RecallDb.Core.Database.Postgresql
             if (_Settings.LogQueries && _Logging != null)
                 _Logging.Debug(_Header + "query: " + query);
 
+            string dbOperation = RecallDbTelemetry.DeriveSqlOperation(query);
+            long telemetryStart = Stopwatch.GetTimestamp();
+            string telemetryOutcome = "success";
+            int telemetryRows = -1;
+            RecallDbTelemetry.DbActiveQueries.Add(1, new TagList { { RecallDbTelemetry.TagDbOperation, dbOperation } });
+
+            using Activity dbActivity = RecallDbTelemetry.ActivitySource.StartActivity("db " + dbOperation, ActivityKind.Client);
+            if (dbActivity != null)
+            {
+                dbActivity.SetTag("db.system", "postgresql");
+                dbActivity.SetTag(RecallDbTelemetry.TagDbOperation, dbOperation);
+                dbActivity.SetTag(RecallDbTelemetry.TagTransaction, isTransaction);
+            }
+
+            try
+            {
             using (NpgsqlConnection connection = new NpgsqlConnection(_ConnectionString))
             {
                 await connection.OpenAsync(token).ConfigureAwait(false);
@@ -213,6 +231,7 @@ namespace RecallDb.Core.Database.Postgresql
                         if (transaction != null)
                             await transaction.CommitAsync(token).ConfigureAwait(false);
 
+                        telemetryRows = result.Rows.Count;
                         return result;
                     }
                 }
@@ -228,6 +247,23 @@ namespace RecallDb.Core.Database.Postgresql
                         transaction.Dispose();
                 }
             }
+            }
+            catch (Exception telemetryException)
+            {
+                telemetryOutcome = "error";
+                RecallDbTelemetry.RecordException(dbActivity, telemetryException);
+                throw;
+            }
+            finally
+            {
+                double seconds = Stopwatch.GetElapsedTime(telemetryStart).TotalSeconds;
+                TagList tags = new TagList { { RecallDbTelemetry.TagDbOperation, dbOperation }, { RecallDbTelemetry.TagOutcome, telemetryOutcome } };
+                RecallDbTelemetry.DbQueryDuration.Record(seconds, tags);
+                RecallDbTelemetry.DbQueries.Add(1, tags);
+                RecallDbTelemetry.DbActiveQueries.Add(-1, new TagList { { RecallDbTelemetry.TagDbOperation, dbOperation } });
+                if (telemetryRows >= 0)
+                    RecallDbTelemetry.DbRowsReturned.Record(telemetryRows, new TagList { { RecallDbTelemetry.TagDbOperation, dbOperation } });
+            }
         }
 
         /// <summary>
@@ -241,6 +277,21 @@ namespace RecallDb.Core.Database.Postgresql
         {
             if (queries == null) throw new ArgumentNullException(nameof(queries));
 
+            long telemetryStart = Stopwatch.GetTimestamp();
+            string telemetryOutcome = "success";
+            int telemetryCount = 0;
+            RecallDbTelemetry.DbActiveQueries.Add(1, new TagList { { RecallDbTelemetry.TagDbOperation, "batch" } });
+
+            using Activity dbActivity = RecallDbTelemetry.ActivitySource.StartActivity("db batch", ActivityKind.Client);
+            if (dbActivity != null)
+            {
+                dbActivity.SetTag("db.system", "postgresql");
+                dbActivity.SetTag(RecallDbTelemetry.TagDbOperation, "batch");
+                dbActivity.SetTag(RecallDbTelemetry.TagTransaction, isTransaction);
+            }
+
+            try
+            {
             using (NpgsqlConnection connection = new NpgsqlConnection(_ConnectionString))
             {
                 await connection.OpenAsync(token).ConfigureAwait(false);
@@ -264,6 +315,7 @@ namespace RecallDb.Core.Database.Postgresql
                                 command.Transaction = transaction;
 
                             await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                            telemetryCount++;
                         }
                     }
 
@@ -281,6 +333,22 @@ namespace RecallDb.Core.Database.Postgresql
                     if (transaction != null)
                         transaction.Dispose();
                 }
+            }
+            }
+            catch (Exception telemetryException)
+            {
+                telemetryOutcome = "error";
+                RecallDbTelemetry.RecordException(dbActivity, telemetryException);
+                throw;
+            }
+            finally
+            {
+                double seconds = Stopwatch.GetElapsedTime(telemetryStart).TotalSeconds;
+                if (dbActivity != null) dbActivity.SetTag("db.batch.size", telemetryCount);
+                TagList tags = new TagList { { RecallDbTelemetry.TagDbOperation, "batch" }, { RecallDbTelemetry.TagOutcome, telemetryOutcome } };
+                RecallDbTelemetry.DbQueryDuration.Record(seconds, tags);
+                RecallDbTelemetry.DbQueries.Add(telemetryCount > 0 ? telemetryCount : 1, tags);
+                RecallDbTelemetry.DbActiveQueries.Add(-1, new TagList { { RecallDbTelemetry.TagDbOperation, "batch" } });
             }
         }
 

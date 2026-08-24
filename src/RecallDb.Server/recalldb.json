@@ -35,8 +35,23 @@
     "Hostname": "127.0.0.1",
     "Port": 8620,
     "ServerName": "RecallDB.McpServer",
-    "ServerVersion": "0.2.0",
+    "ServerVersion": "0.2.1",
     "LogOperations": false
+  },
+  "Observability": {
+    "Enabled": true,
+    "ServiceName": "recalldb-server",
+    "ServiceInstanceId": null,
+    "PrometheusEnabled": true,
+    "PrometheusHostname": "localhost",
+    "PrometheusPort": 9464,
+    "PrometheusPath": "/metrics",
+    "TracingEnabled": true,
+    "OtlpEndpoint": "http://localhost:4317",
+    "OtlpProtocol": "grpc",
+    "SamplingRatio": 1.0,
+    "IncludeRuntimeMetrics": true,
+    "IncludeProcessMetrics": true
   },
   "AdminApiKeys": [
     "recalldbadmin"

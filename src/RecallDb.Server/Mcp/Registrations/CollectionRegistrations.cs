@@ -27,7 +27,7 @@ namespace RecallDb.Server.Mcp.Registrations
             if (server == null) throw new ArgumentNullException(nameof(server));
             if (ctx == null) throw new ArgumentNullException(nameof(ctx));
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "collection/read",
                 "Read a collection by ID.",
                 new
@@ -50,7 +50,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "collection/exists",
                 "Test whether a collection exists. Returns a boolean.",
                 new
@@ -73,7 +73,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapExists(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "collection/enumerate",
                 "Enumerate collections with pagination. Supply an optional EnumerationQuery as a JSON string.",
                 new
@@ -96,7 +96,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "collection/create",
                 "Create a collection. Supply the collection as a JSON string.",
                 new
@@ -119,7 +119,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "collection/update",
                 "Update a collection. Supply the collection ID and the collection as a JSON string.",
                 new
@@ -144,7 +144,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "collection/delete",
                 "Delete a collection and cascade-delete its documents.",
                 new
@@ -167,7 +167,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "collection/stats",
                 "Retrieve statistics for a collection.",
                 new

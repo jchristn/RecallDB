@@ -27,7 +27,7 @@ namespace RecallDb.Server.Mcp.Registrations
             if (server == null) throw new ArgumentNullException(nameof(server));
             if (ctx == null) throw new ArgumentNullException(nameof(ctx));
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "tenant/read",
                 "Read a tenant by ID.",
                 new
@@ -48,7 +48,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "tenant/exists",
                 "Test whether a tenant exists. Returns a boolean.",
                 new
@@ -69,7 +69,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapExists(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "tenant/enumerate",
                 "Enumerate tenants with pagination (admin only). Supply an optional EnumerationQuery as a JSON string.",
                 new
@@ -90,7 +90,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "tenant/create",
                 "Create a tenant (admin only). Supply the tenant as a JSON string.",
                 new
@@ -111,7 +111,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "tenant/update",
                 "Update a tenant. Supply the tenant ID and the tenant as a JSON string.",
                 new
@@ -134,7 +134,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "tenant/delete",
                 "Delete a tenant and cascade-delete its collections, credentials, and users (admin only).",
                 new

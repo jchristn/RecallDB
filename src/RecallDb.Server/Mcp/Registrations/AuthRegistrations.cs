@@ -26,7 +26,7 @@ namespace RecallDb.Server.Mcp.Registrations
             if (server == null) throw new ArgumentNullException(nameof(server));
             if (ctx == null) throw new ArgumentNullException(nameof(ctx));
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "auth/authenticate",
                 "Validate a credential and return the resolved tenant, redacted user, and credential. Supply either a bearer token, or tenant ID plus email and password. No prior authentication required.",
                 new

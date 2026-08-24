@@ -63,10 +63,27 @@ namespace RecallDb.Server.Services
                 return ServiceResult.Fail(404, "Not found", "Collection not found.");
 
             string cid = ctx.CollectionId;
+            string origin = ctx.Origin == RecallDb.Core.Enums.RequestOriginEnum.Mcp ? "mcp" : "rest";
+            string mode = DeriveSearchMode(query);
 
             Stopwatch sw = Stopwatch.StartNew();
-            SearchResult result = await _Database.Search.SearchAsync(cid, col.Dimensionality, query).ConfigureAwait(false);
-            await _Documents.AttachLabelsAndTagsAsync(cid, result.Documents).ConfigureAwait(false);
+            SearchResult result;
+            using (Activity searchActivity = RecallDb.Server.Observability.ServerTelemetry.ActivitySource.StartActivity("search " + mode, ActivityKind.Internal))
+            {
+                searchActivity?.SetTag(RecallDb.Server.Observability.ServerTelemetry.TagOrigin, origin);
+                searchActivity?.SetTag(RecallDb.Server.Observability.ServerTelemetry.TagSearchMode, mode);
+                try
+                {
+                    result = await _Database.Search.SearchAsync(cid, col.Dimensionality, query).ConfigureAwait(false);
+                    await _Documents.AttachLabelsAndTagsAsync(cid, result.Documents).ConfigureAwait(false);
+                }
+                catch (Exception e)
+                {
+                    RecallDb.Core.Observability.RecallDbTelemetry.RecordException(searchActivity, e);
+                    RecallDb.Server.Observability.ServerTelemetry.RecordSearch(origin, mode, false, 500, sw.Elapsed.TotalSeconds, -1);
+                    throw;
+                }
+            }
 
             if (query.IncludeNeighbors.HasValue && query.IncludeNeighbors.Value > 0 && result.Documents != null && result.Documents.Count > 0)
             {
@@ -144,7 +161,26 @@ namespace RecallDb.Server.Services
             }
 
             result.TotalMs = sw.Elapsed.TotalMilliseconds;
+
+            int resultCount = result.Documents != null ? result.Documents.Count : 0;
+            RecallDb.Server.Observability.ServerTelemetry.RecordSearch(origin, mode, true, 200, sw.Elapsed.TotalSeconds, resultCount);
+
             return ServiceResult.Ok(result);
+        }
+
+        #endregion
+
+        #region Private-Methods
+
+        private static string DeriveSearchMode(SearchQuery query)
+        {
+            if (query == null) return "unknown";
+            bool hasVector = query.Vector != null;
+            bool hasFullText = query.FullText != null;
+            if (hasVector && hasFullText) return "hybrid";
+            if (hasVector) return "vector";
+            if (hasFullText) return "fulltext";
+            return "filter";
         }
 
         #endregion

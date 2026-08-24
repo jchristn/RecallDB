@@ -37,6 +37,42 @@ const ACTIVITY_SHORTCUTS = [
   },
 ]
 
+// External observability services provisioned by docker/compose.yaml. Each card links out (in a new tab) to the
+// service and surfaces its default credentials and URL. Hostnames assume the stack is reached from the same host
+// the browser runs on; adjust if the observability stack is deployed elsewhere.
+const OBSERVABILITY_SERVICES = [
+  {
+    name: 'Grafana',
+    description: 'Dashboards for metrics, traces, and logs, organized into HTTP, MCP, Application, Search, Database, and Runtime sections.',
+    url: 'http://localhost:3000',
+    credentials: 'admin / admin',
+  },
+  {
+    name: 'Prometheus',
+    description: 'Metrics store and query UI. Scrapes the RecallDB server /metrics endpoint.',
+    url: 'http://localhost:9090',
+    credentials: 'No authentication',
+  },
+  {
+    name: 'Tempo',
+    description: 'Distributed tracing backend. Receives OTLP spans from the server; explore traces in Grafana.',
+    url: 'http://localhost:3200',
+    credentials: 'No authentication',
+  },
+  {
+    name: 'Loki',
+    description: 'Log aggregation backend. Container logs are shipped by Grafana Alloy; explore logs in Grafana.',
+    url: 'http://localhost:3100',
+    credentials: 'No authentication',
+  },
+  {
+    name: 'Alloy',
+    description: 'Log shipping agent. Tails container stdout/stderr and forwards to Loki.',
+    url: 'http://localhost:12345',
+    credentials: 'No authentication',
+  },
+]
+
 function formatUptime(ms) {
   const totalSeconds = Math.floor(ms / 1000)
   const days = Math.floor(totalSeconds / 86400)
@@ -258,6 +294,32 @@ export default function Dashboard() {
               <strong>{shortcut.title}</strong>
               <span>{shortcut.description}</span>
             </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Observability service links */}
+      <div style={{ marginBottom: 12 }}>
+        <p className="dashboard-section-label">Observability</p>
+        <div className="dashboard-shortcuts">
+          {OBSERVABILITY_SERVICES.map(service => (
+            <a
+              key={service.name}
+              className="dashboard-shortcut-card"
+              href={service.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ textDecoration: 'none' }}
+            >
+              <span className="dashboard-shortcut-eyebrow">Open in new tab</span>
+              <strong>{service.name}</strong>
+              <span>{service.description}</span>
+              <span style={{ marginTop: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
+                <span style={{ fontFamily: 'monospace' }}>{service.url}</span>
+                <br />
+                Credentials: <strong style={{ color: 'var(--text)' }}>{service.credentials}</strong>
+              </span>
+            </a>
           ))}
         </div>
       </div>

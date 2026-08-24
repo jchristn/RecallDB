@@ -73,7 +73,7 @@ namespace RecallDb.Core.Settings
         }
 
         /// <summary>
-        /// Server version advertised to MCP clients during initialization. Default: 0.2.0.
+        /// Server version advertised to MCP clients during initialization. Default: 0.2.1.
         /// </summary>
         public string ServerVersion
         {
@@ -83,7 +83,7 @@ namespace RecallDb.Core.Settings
             }
             set
             {
-                if (string.IsNullOrEmpty(value)) value = "0.2.0";
+                if (string.IsNullOrEmpty(value)) value = "0.2.1";
                 _ServerVersion = value;
             }
         }
@@ -111,7 +111,7 @@ namespace RecallDb.Core.Settings
         private string _Hostname = "127.0.0.1";
         private int _Port = 8620;
         private string _ServerName = "RecallDB.McpServer";
-        private string _ServerVersion = "0.2.0";
+        private string _ServerVersion = "0.2.1";
         private bool _LogOperations = false;
 
         #endregion

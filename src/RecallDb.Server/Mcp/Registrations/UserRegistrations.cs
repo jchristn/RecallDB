@@ -27,7 +27,7 @@ namespace RecallDb.Server.Mcp.Registrations
             if (server == null) throw new ArgumentNullException(nameof(server));
             if (ctx == null) throw new ArgumentNullException(nameof(ctx));
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "user/read",
                 "Read a user by ID (password redacted).",
                 new
@@ -50,7 +50,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "user/exists",
                 "Test whether a user exists. Returns a boolean.",
                 new
@@ -73,7 +73,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapExists(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "user/enumerate",
                 "Enumerate users in a tenant with pagination. Supply an optional EnumerationQuery as a JSON string.",
                 new
@@ -96,7 +96,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "user/create",
                 "Create a user (admin or tenant admin). Supply the user as a JSON string.",
                 new
@@ -119,7 +119,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "user/update",
                 "Update a user (admin or tenant admin).",
                 new
@@ -144,7 +144,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "user/delete",
                 "Delete a user and its credentials (admin or tenant admin).",
                 new

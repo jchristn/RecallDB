@@ -1,0 +1,14 @@
+apiVersion: 1
+
+providers:
+  - name: RecallDB
+    orgId: 1
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      # Turn each subdirectory under the dashboards path into its own Grafana folder (section), so metrics and
+      # traces are organized by area (HTTP, MCP, Application, Search, Database, Runtime) rather than dumped together.
+      foldersFromFilesStructure: true

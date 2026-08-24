@@ -27,7 +27,7 @@ namespace RecallDb.Server.Mcp.Registrations
             if (server == null) throw new ArgumentNullException(nameof(server));
             if (ctx == null) throw new ArgumentNullException(nameof(ctx));
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "credential/read",
                 "Read a credential by ID.",
                 new
@@ -50,7 +50,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "credential/exists",
                 "Test whether a credential exists. Returns a boolean.",
                 new
@@ -73,7 +73,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapExists(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "credential/enumerate",
                 "Enumerate credentials in a tenant with pagination. Supply an optional EnumerationQuery as a JSON string.",
                 new
@@ -96,7 +96,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "credential/create",
                 "Create a credential (admin or tenant admin). Supply the credential as a JSON string.",
                 new
@@ -119,7 +119,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "credential/update",
                 "Update a credential (admin or tenant admin).",
                 new
@@ -144,7 +144,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "credential/delete",
                 "Delete a credential (admin or tenant admin).",
                 new

@@ -19,11 +19,12 @@ services:
       start_period: 10s
 
   recalldb-server:
-    image: jchristn77/recalldb-server:v0.2.0
+    image: jchristn77/recalldb-server:v0.2.1
     container_name: recalldb-server
     ports:
       - "8600:8600"
       - "8620:8620"
+      - "9464:9464"
     environment:
       RECALLDB_DB_HOST: recalldb-pgvector
       RECALLDB_DB_PORT: "5432"
@@ -33,6 +34,13 @@ services:
       RECALLDB_MCP_ENABLED: "true"
       RECALLDB_MCP_HOSTNAME: "*"
       RECALLDB_MCP_PORT: "8620"
+      # Observability: expose the Prometheus scrape endpoint on all interfaces and export traces to Tempo over OTLP.
+      RECALLDB_OBS_ENABLED: "true"
+      RECALLDB_OBS_PROM_HOSTNAME: "*"
+      RECALLDB_OBS_PROM_PORT: "9464"
+      RECALLDB_OTLP_ENDPOINT: "http://tempo:4317"
+      RECALLDB_OTLP_PROTOCOL: "grpc"
+      RECALLDB_OBS_SERVICE_NAME: "recalldb-server"
     volumes:
       - ./recalldb.json:/app/recalldb.json:ro
     depends_on:
@@ -47,7 +55,7 @@ services:
       start_period: 10s
 
   recalldb-dashboard:
-    image: jchristn77/recalldb-dashboard:v0.2.0
+    image: jchristn77/recalldb-dashboard:v0.2.1
     container_name: recalldb-dashboard
     ports:
       - "8601:8601"
@@ -58,5 +66,88 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ----- Observability stack -----
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: recalldb-prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:latest
+    container_name: recalldb-tempo
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    ports:
+      - "3200:3200"   # Tempo query API (Grafana data source)
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+    volumes:
+      - ./observability/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:latest
+    container_name: recalldb-loki
+    command: ["-config.file=/etc/loki/loki-config.yaml"]
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki-data:/loki
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:latest
+    container_name: recalldb-alloy
+    command:
+      - "run"
+      - "--server.http.listen-addr=0.0.0.0:12345"
+      - "--storage.path=/var/lib/alloy/data"
+      - "/etc/alloy/config.alloy"
+    ports:
+      - "12345:12345"
+    volumes:
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy-data:/var/lib/alloy/data
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: recalldb-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_DEFAULT_THEME: dark
+      GF_FEATURE_TOGGLES_ENABLE: traceToMetrics
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - tempo
+      - loki
+    restart: unless-stopped
+
 volumes:
   pgvector-data:
+  prometheus-data:
+  tempo-data:
+  loki-data:
+  grafana-data:
+  alloy-data:

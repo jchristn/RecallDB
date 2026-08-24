@@ -27,7 +27,7 @@ namespace RecallDb.Server.Mcp.Registrations
             if (server == null) throw new ArgumentNullException(nameof(server));
             if (ctx == null) throw new ArgumentNullException(nameof(ctx));
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "requestHistory/enumerate",
                 "Enumerate request-history entries matching a filter (admin only). Supply an optional RequestHistoryFilter as a JSON string.",
                 new
@@ -48,7 +48,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "requestHistory/read",
                 "Read a request-history entry by GUID (admin only).",
                 new
@@ -69,7 +69,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "requestHistory/summary",
                 "Time-bucketed request-history summary (admin only).",
                 new
@@ -90,7 +90,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "requestHistory/delete",
                 "Delete a request-history entry by GUID (admin only).",
                 new

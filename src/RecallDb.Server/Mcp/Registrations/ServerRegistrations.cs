@@ -24,7 +24,7 @@ namespace RecallDb.Server.Mcp.Registrations
             if (server == null) throw new ArgumentNullException(nameof(server));
             if (ctx == null) throw new ArgumentNullException(nameof(ctx));
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "server/info",
                 "Returns the RecallDB server name, version, uptime, and the MCP Streamable HTTP endpoint. No authentication required.",
                 new

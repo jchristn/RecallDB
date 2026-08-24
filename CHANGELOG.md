@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.1
+
+Added end-to-end observability (metrics and distributed tracing) across the entire server.
+
+- Instrumentation uses only the .NET base class library (`Meter`, `ActivitySource`); a single in-process OpenTelemetry host owns all wiring and subscribes to the `RecallDb.Server` and `RecallDb.Core` meters/sources by name, so instrumented code takes no dependency on OpenTelemetry
+- 100% path coverage: HTTP (REST) transport, MCP tool transport, a unified application-operation family across both transports (origin=rest|mcp), vector/full-text/hybrid search, and the PostgreSQL storage layer, plus .NET runtime and process metrics
+- Distributed traces nest naturally (MCP tool / REST operation → database query spans) and are exported over OTLP to Tempo; metrics are exposed on an in-process Prometheus scrape endpoint (`:9464/metrics`) with second-scale latency histogram buckets
+- New `Observability` settings section (with `RECALLDB_OBS_*` / `RECALLDB_OTLP_*` environment overrides); disabled-safe and failure-safe so telemetry never blocks startup
+- Docker Compose now provisions a full stack: Prometheus, Tempo, Loki, Grafana, and Grafana Alloy (container-log shipping to Loki), with no port conflicts
+- Grafana ships pre-provisioned datasources (with trace↔log correlation) and dashboards organized into sections: HTTP, MCP, Application, Search, Database, and Runtime
+- The product dashboard landing page now links out (in a new tab) to Grafana, Prometheus, Tempo, Loki, and Alloy, each card showing the service name, default credentials, and URL
+- SDK NuGet package metadata fully populated and now produces a symbol package (snupkg) with SourceLink
+
 ## v0.2.0
 
 Added an in-process MCP (Model Context Protocol) server.

@@ -27,7 +27,7 @@ namespace RecallDb.Server.Mcp.Registrations
             if (server == null) throw new ArgumentNullException(nameof(server));
             if (ctx == null) throw new ArgumentNullException(nameof(ctx));
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "label/read",
                 "Read a label by ID.",
                 new
@@ -52,7 +52,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "label/enumerate",
                 "Enumerate labels in a collection with pagination. Supply an optional EnumerationQuery as a JSON string.",
                 new
@@ -77,7 +77,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "label/create",
                 "Create a label in a collection. Supply the label as a JSON string.",
                 new
@@ -102,7 +102,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "label/delete",
                 "Delete a label by ID.",
                 new

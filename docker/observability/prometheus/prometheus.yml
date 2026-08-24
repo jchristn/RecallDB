@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # RecallDB server exposes an in-process OpenTelemetry Prometheus scrape endpoint.
+  - job_name: recalldb-server
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["recalldb-server:9464"]
+        labels:
+          service: recalldb-server
+
+  # Prometheus self-monitoring.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

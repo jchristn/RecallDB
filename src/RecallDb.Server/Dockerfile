@@ -20,4 +20,5 @@ COPY --from=build /app/publish .
 ENV DOTNET_RUNNING_IN_CONTAINER=true
 EXPOSE 8600
 EXPOSE 8620
+EXPOSE 9464
 ENTRYPOINT ["dotnet", "RecallDb.Server.dll"]

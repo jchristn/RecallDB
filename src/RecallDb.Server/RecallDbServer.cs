@@ -20,6 +20,7 @@ namespace RecallDb.Server
     using RecallDb.Core.Settings;
     using RecallDb.Server.Classes;
     using RecallDb.Server.Mcp;
+    using RecallDb.Server.Observability;
     using RecallDb.Server.Services;
 
     /// <summary>
@@ -30,7 +31,7 @@ namespace RecallDb.Server
         #region Private-Members
 
         private static string _Header = "[RecallDb] ";
-        private static string _Version = "0.2.0";
+        private static string _Version = "0.2.1";
         private static string _SettingsFile = "recalldb.json";
         private static ServerSettings _Settings = new ServerSettings();
         private static LoggingModule _Logging = null;
@@ -38,6 +39,7 @@ namespace RecallDb.Server
         private static AuthenticationService _AuthService = null;
         private static RecallDbServices _Services = null;
         private static McpServerService _McpServer = null;
+        private static ObservabilityHost _Observability = null;
         private static Webserver _App = null;
         private static DateTime _StartTimeUtc = DateTime.UtcNow;
         private static CancellationTokenSource _TokenSource = new CancellationTokenSource();
@@ -93,6 +95,7 @@ namespace RecallDb.Server
             }
 
             ApplyMcpEnvironmentOverrides();
+            ApplyObservabilityEnvironmentOverrides();
 
             #endregion
 
@@ -132,6 +135,12 @@ namespace RecallDb.Server
             }
 
             _Logging.Info(_Header + "RecallDB v" + _Version + " starting");
+
+            #endregion
+
+            #region Initialize-Observability
+
+            _Observability = ObservabilityHost.Start(_Settings.Observability, _Logging);
 
             #endregion
 
@@ -185,11 +194,19 @@ namespace RecallDb.Server
                 ctx.Response.Headers["Access-Control-Allow-Origin"] = "*";
                 ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, HEAD, OPTIONS";
                 ctx.Response.Headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type";
+                ServerTelemetry.HttpActiveAdd(1, ctx.Request.Method.ToString());
             };
 
             _App.Routes.PostRouting = async (ctx) =>
             {
                 ctx.Timestamp.End = DateTime.UtcNow;
+
+                ServerTelemetry.HttpActiveAdd(-1, ctx.Request.Method.ToString());
+                ServerTelemetry.RecordHttp(
+                    ctx.Request.Method.ToString(),
+                    ctx.Response.StatusCode,
+                    (ctx.Timestamp.TotalMs ?? 0) / 1000.0);
+
                 _Logging.Debug(
                     _Header +
                     ctx.Request.Method + " " +
@@ -310,6 +327,7 @@ namespace RecallDb.Server
             _Logging.Info(_Header + "shutting down");
 
             if (_McpServer != null) _McpServer.Dispose();
+            if (_Observability != null) _Observability.Dispose();
             if (_Database != null) _Database.Dispose();
             if (_Logging != null) _Logging.Dispose();
             if (_TokenSource != null) _TokenSource.Dispose();
@@ -351,6 +369,33 @@ namespace RecallDb.Server
             string port = Environment.GetEnvironmentVariable("RECALLDB_MCP_PORT");
             if (!string.IsNullOrEmpty(port) && int.TryParse(port, out int portValue))
                 _Settings.Mcp.Port = portValue;
+        }
+
+        private static void ApplyObservabilityEnvironmentOverrides()
+        {
+            string enabled = Environment.GetEnvironmentVariable("RECALLDB_OBS_ENABLED");
+            if (!string.IsNullOrEmpty(enabled) && bool.TryParse(enabled, out bool enabledValue))
+                _Settings.Observability.Enabled = enabledValue;
+
+            string otlpEndpoint = Environment.GetEnvironmentVariable("RECALLDB_OTLP_ENDPOINT");
+            if (!string.IsNullOrEmpty(otlpEndpoint))
+                _Settings.Observability.OtlpEndpoint = otlpEndpoint;
+
+            string otlpProtocol = Environment.GetEnvironmentVariable("RECALLDB_OTLP_PROTOCOL");
+            if (!string.IsNullOrEmpty(otlpProtocol))
+                _Settings.Observability.OtlpProtocol = otlpProtocol;
+
+            string promHostname = Environment.GetEnvironmentVariable("RECALLDB_OBS_PROM_HOSTNAME");
+            if (!string.IsNullOrEmpty(promHostname))
+                _Settings.Observability.PrometheusHostname = promHostname;
+
+            string promPort = Environment.GetEnvironmentVariable("RECALLDB_OBS_PROM_PORT");
+            if (!string.IsNullOrEmpty(promPort) && int.TryParse(promPort, out int promPortValue))
+                _Settings.Observability.PrometheusPort = promPortValue;
+
+            string serviceName = Environment.GetEnvironmentVariable("RECALLDB_OBS_SERVICE_NAME");
+            if (!string.IsNullOrEmpty(serviceName))
+                _Settings.Observability.ServiceName = serviceName;
         }
 
         private static async Task InitializeFirstRunAsync()
@@ -1223,12 +1268,19 @@ namespace RecallDb.Server
             OperationScope scope = OperationScopeMap.Resolve(requestType);
             ctx.ResourceType = scope.ResourceType;
             ctx.Operation = scope.Operation;
+
+            // Open the application-operation telemetry scope for this REST request. It flows through the handler's
+            // async context and is completed by MapResult/MapExists. Metrics are recorded regardless of trace
+            // sampling; a server span is opened when the trace is sampled and parents any downstream database spans.
+            ServerTelemetry.BeginRest(ctx, requestType);
+
             return ctx;
         }
 
         private static object MapResult(ApiRequest req, ServiceResult result)
         {
             req.Http.Response.StatusCode = result.StatusCode;
+            ServerTelemetry.CompleteRest(result.StatusCode, result.Success);
             if (!result.Success)
                 return new { Error = result.Error, StatusCode = result.StatusCode, Context = result.Context };
             if (result.StatusCode == 204) return null;
@@ -1238,6 +1290,7 @@ namespace RecallDb.Server
         private static object MapExists(ApiRequest req, ServiceResult result)
         {
             req.Http.Response.StatusCode = result.StatusCode;
+            ServerTelemetry.CompleteRest(result.StatusCode, result.Success);
             return null;
         }
 

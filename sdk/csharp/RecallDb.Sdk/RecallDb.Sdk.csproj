@@ -6,7 +6,39 @@
     <Nullable>disable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>1591</NoWarn>
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
+
+    <!-- NuGet package metadata -->
+    <PackageId>RecallDb.Sdk</PackageId>
+    <Title>RecallDB C# SDK</Title>
+    <Authors>Joel Christner</Authors>
+    <Company>Joel Christner</Company>
+    <Product>RecallDB</Product>
+    <Description>C# client SDK for RecallDB, a multi-tenant RESTful vector database service built on PostgreSQL with pgvector. Provides typed access to tenants, users, credentials, collections, documents, labels, tags, and vector, full-text, and hybrid search.</Description>
+    <Copyright>(c) 2026 Joel Christner</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/jchristn/RecallDB</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/jchristn/RecallDB.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>recalldb;vector-database;pgvector;postgresql;embeddings;vector-search;semantic-search;rag;sdk;client</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReleaseNotes>Aligns the SDK to server v0.2.1, which adds end-to-end OpenTelemetry metrics and distributed tracing across the HTTP, MCP, application, search, and storage layers. See CHANGELOG.md for details.</PackageReleaseNotes>
+
+    <!-- Symbol package + source link for a first-class debugging experience -->
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <DebugType>portable</DebugType>
+    <IncludeSource>false</IncludeSource>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
+  </ItemGroup>
 
 </Project>

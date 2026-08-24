@@ -27,7 +27,7 @@ namespace RecallDb.Server.Mcp.Registrations
             if (server == null) throw new ArgumentNullException(nameof(server));
             if (ctx == null) throw new ArgumentNullException(nameof(ctx));
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "search/query",
                 "Execute a vector, full-text, or hybrid search within a collection, with optional neighbor enrichment. Supply the SearchQuery as a JSON string.",
                 new

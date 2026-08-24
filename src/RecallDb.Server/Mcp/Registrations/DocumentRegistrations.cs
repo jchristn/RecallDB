@@ -28,7 +28,7 @@ namespace RecallDb.Server.Mcp.Registrations
             if (server == null) throw new ArgumentNullException(nameof(server));
             if (ctx == null) throw new ArgumentNullException(nameof(ctx));
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "document/read",
                 "Read a document by key.",
                 new
@@ -53,7 +53,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "document/readByPosition",
                 "Read a document chunk by document ID and position.",
                 new
@@ -80,7 +80,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "document/exists",
                 "Test whether a document exists. Returns a boolean.",
                 new
@@ -105,7 +105,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapExists(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "document/enumerate",
                 "Enumerate documents with pagination. Supply an optional EnumerationQuery as a JSON string.",
                 new
@@ -130,7 +130,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "document/create",
                 "Create a document. Supply the document as a JSON string.",
                 new
@@ -155,7 +155,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "document/update",
                 "Update a document. Supply the document key and the document as a JSON string.",
                 new
@@ -182,7 +182,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "document/delete",
                 "Delete a document by key.",
                 new
@@ -207,7 +207,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "document/batchCreate",
                 "Create multiple documents. Supply the documents as a JSON string.",
                 new
@@ -232,7 +232,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "document/batchDelete",
                 "Delete multiple documents. Supply the batch delete request as a JSON string.",
                 new
@@ -257,7 +257,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "document/deleteByFilter",
                 "Delete documents matching a filter. Supply an optional EnumerationQuery as a JSON string.",
                 new
@@ -282,7 +282,7 @@ namespace RecallDb.Server.Mcp.Registrations
                     return McpHelpers.MapResult(r);
                 });
 
-            server.RegisterTool(
+            server.RegisterInstrumentedTool(
                 "document/stats",
                 "Retrieve statistics for a document.",
                 new

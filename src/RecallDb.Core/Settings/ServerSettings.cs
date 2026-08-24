@@ -90,6 +90,22 @@ namespace RecallDb.Core.Settings
         }
 
         /// <summary>
+        /// Observability (metrics and tracing) settings.
+        /// </summary>
+        public ObservabilitySettings Observability
+        {
+            get
+            {
+                return _Observability;
+            }
+            set
+            {
+                if (value == null) throw new System.ArgumentNullException(nameof(Observability));
+                _Observability = value;
+            }
+        }
+
+        /// <summary>
         /// Admin API keys.
         /// Default: ["recalldbadmin"].
         /// </summary>
@@ -115,6 +131,7 @@ namespace RecallDb.Core.Settings
         private LoggingSettings _Logging = new LoggingSettings();
         private DebugSettings _Debug = new DebugSettings();
         private McpSettings _Mcp = new McpSettings();
+        private ObservabilitySettings _Observability = new ObservabilitySettings();
         private List<string> _AdminApiKeys = new List<string> { "recalldbadmin" };
 
         #endregion
