@@ -119,7 +119,7 @@ export default function Users() {
       </div>
       <ErrorModal error={error} onClose={() => setError(null)} />
       <div className="card">
-        <DataTable data={users} columns={columns} onRefresh={loadUsers} refreshing={loading} />
+        <DataTable data={users} columns={columns} onRowClick={openEdit} onRefresh={loadUsers} refreshing={loading} />
       </div>
 
       {showCreate && (

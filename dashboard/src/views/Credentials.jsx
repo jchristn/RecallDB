@@ -116,7 +116,7 @@ export default function Credentials() {
       </div>
       <ErrorModal error={error} onClose={() => setError(null)} />
       <div className="card">
-        <DataTable data={credentials} columns={columns} onRefresh={loadCredentials} refreshing={loading} />
+        <DataTable data={credentials} columns={columns} onRowClick={openEdit} onRefresh={loadCredentials} refreshing={loading} />
       </div>
 
       {showCreate && (

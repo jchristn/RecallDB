@@ -19,7 +19,7 @@ export default function Search() {
     try {
       let embeddingsList = null
       if (embeddings.trim()) {
-        embeddingsList = embeddings.split(',').map(v => parseFloat(v.trim()))
+        embeddingsList = embeddings.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v) && isFinite(v))
       }
 
       const query = {
@@ -27,7 +27,7 @@ export default function Search() {
         SortOrder: 'ScoreDescending'
       }
 
-      if (embeddingsList) {
+      if (embeddingsList && embeddingsList.length > 0) {
         query.Vector = {
           SearchType: searchType,
           Embeddings: embeddingsList

@@ -5,6 +5,7 @@ import DataTable from '../components/DataTable.jsx'
 import CopyId from '../components/CopyId.jsx'
 import ActionMenu from '../components/ActionMenu.jsx'
 import JsonModal from '../components/JsonModal.jsx'
+import ViewDocumentModal from '../components/ViewDocumentModal.jsx'
 import ErrorModal from '../components/ErrorModal.jsx'
 
 function CollapsibleSection({ title, children, defaultOpen = false }) {
@@ -265,6 +266,7 @@ function SearchTab({ tenantId, collectionId }) {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
   const [jsonModal, setJsonModal] = useState(null)
+  const [viewModal, setViewModal] = useState(null)
   const [dimensionality, setDimensionality] = useState(null)
 
   useEffect(() => {
@@ -556,6 +558,7 @@ function SearchTab({ tenantId, collectionId }) {
             <DataTable
               data={results.Documents || []}
               columns={resultColumns}
+              onRowClick={(d) => setViewModal(d)}
               expandable={results.Documents?.some(d => d.Neighbors && d.Neighbors.length > 0)}
               renderExpanded={(doc) => doc.Neighbors && doc.Neighbors.length > 0 ? (
                 <div style={{ padding: '8px 16px', background: 'var(--bg-tertiary, #f5f5f5)', borderTop: '1px solid var(--border-color, #eee)' }}>
@@ -592,6 +595,7 @@ function SearchTab({ tenantId, collectionId }) {
       )}
 
       {jsonModal && <JsonModal title="Document JSON" data={jsonModal} onClose={() => setJsonModal(null)} />}
+      {viewModal && <ViewDocumentModal document={viewModal} tenantId={tenantId} collectionId={collectionId} onClose={() => setViewModal(null)} />}
     </div>
   )
 }
@@ -617,6 +621,7 @@ function QueryTab({ tenantId, collectionId }) {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
   const [jsonModal, setJsonModal] = useState(null)
+  const [viewModal, setViewModal] = useState(null)
 
   const addLabel = (setter) => setter(prev => [...prev, ''])
   const updateLabel = (setter, index, value) => setter(prev => prev.map((v, i) => i === index ? value : v))
@@ -860,12 +865,13 @@ function QueryTab({ tenantId, collectionId }) {
             )}
           </div>
           <div className="card">
-            <DataTable data={results.Objects || []} columns={resultColumns} />
+            <DataTable data={results.Objects || []} columns={resultColumns} onRowClick={(d) => setViewModal(d)} />
           </div>
         </div>
       )}
 
       {jsonModal && <JsonModal title="Document JSON" data={jsonModal} onClose={() => setJsonModal(null)} />}
+      {viewModal && <ViewDocumentModal document={viewModal} tenantId={tenantId} collectionId={collectionId} onClose={() => setViewModal(null)} />}
     </div>
   )
 }

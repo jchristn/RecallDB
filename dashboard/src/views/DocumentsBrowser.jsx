@@ -7,6 +7,8 @@ import CopyId from '../components/CopyId.jsx'
 import ActionMenu from '../components/ActionMenu.jsx'
 import ConfirmModal from '../components/ConfirmModal.jsx'
 import JsonModal from '../components/JsonModal.jsx'
+import ViewDocumentModal from '../components/ViewDocumentModal.jsx'
+import EditDocumentModal from '../components/EditDocumentModal.jsx'
 import ErrorModal from '../components/ErrorModal.jsx'
 
 export default function DocumentsBrowser() {
@@ -24,8 +26,8 @@ export default function DocumentsBrowser() {
   const [error, setError] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [jsonModal, setJsonModal] = useState(null)
+  const [viewTarget, setViewTarget] = useState(null)
   const [editTarget, setEditTarget] = useState(null)
-  const [editForm, setEditForm] = useState({ Content: '', ContentType: 'Text', DocumentId: '', Position: 0, Labels: [], Tags: [{ key: '', value: '' }] })
   const [statsModal, setStatsModal] = useState(null)
   const [statsLoading, setStatsLoading] = useState(false)
   const [loadingTenants, setLoadingTenants] = useState(true)
@@ -174,41 +176,6 @@ export default function DocumentsBrowser() {
   const selectedTenantName = tenants.find(t => t.Id === selectedTenant)?.Name || selectedTenant
   const selectedCollectionName = collections.find(c => c.Id === selectedCollection)?.Name || selectedCollection
 
-  const openEdit = (d) => {
-    const labels = Array.isArray(d.Labels) ? [...d.Labels] : []
-    const tags = d.Tags && typeof d.Tags === 'object' && Object.keys(d.Tags).length > 0
-      ? Object.entries(d.Tags).map(([key, value]) => ({ key, value: value || '' }))
-      : [{ key: '', value: '' }]
-    setEditForm({
-      Content: d.Content || '',
-      ContentType: d.ContentType || 'Text',
-      DocumentId: d.DocumentId || '',
-      Position: d.Position || 0,
-      Labels: labels,
-      Tags: tags
-    })
-    setEditTarget(d)
-  }
-
-  const handleEdit = async (e) => {
-    e.preventDefault()
-    try {
-      const labels = editForm.Labels.filter(l => l.trim())
-      const tags = {}
-      editForm.Tags.forEach(t => { if (t.key.trim()) tags[t.key.trim()] = t.value })
-      await api.updateDocument(selectedTenant, selectedCollection, editTarget.DocumentKey, {
-        Content: editForm.Content,
-        ContentType: editForm.ContentType,
-        DocumentId: editForm.DocumentId || null,
-        Position: editForm.Position || 0,
-        Labels: labels.length > 0 ? labels : null,
-        Tags: Object.keys(tags).length > 0 ? tags : null
-      })
-      setEditTarget(null)
-      loadDocuments(pageIndex, pageSize)
-    } catch (err) { setError(err) }
-  }
-
   const openStats = async (d) => {
     setStatsLoading(true)
     setStatsModal({ document: d, stats: null })
@@ -262,7 +229,8 @@ export default function DocumentsBrowser() {
       width: '50px',
       render: (d) => (
         <ActionMenu actions={[
-          { label: 'Edit', onClick: () => openEdit(d) },
+          { label: 'View', onClick: () => setViewTarget(d) },
+          { label: 'Edit', onClick: () => setEditTarget(d) },
           { label: 'Stats', onClick: () => openStats(d) },
           { label: 'View JSON', onClick: () => setJsonModal(d) },
           { divider: true },
@@ -347,7 +315,7 @@ export default function DocumentsBrowser() {
           {loadingDocuments ? (
             <div className="data-table-loading"><div className="spinner" />Loading documents...</div>
           ) : (
-            <DataTable data={documents} columns={columns} onRefresh={() => loadDocuments(pageIndex, pageSize)} refreshing={loadingDocuments} totalRecords={totalRecords} onPageChange={handlePageChange} />
+            <DataTable data={documents} columns={columns} onRowClick={(d) => setViewTarget(d)} onRefresh={() => loadDocuments(pageIndex, pageSize)} refreshing={loadingDocuments} totalRecords={totalRecords} onPageChange={handlePageChange} />
           )}
         </div>
       )}
@@ -433,49 +401,19 @@ export default function DocumentsBrowser() {
         <JsonModal title="Document JSON" data={jsonModal} onClose={() => setJsonModal(null)} />
       )}
 
+      {viewTarget && (
+        <ViewDocumentModal document={viewTarget} tenantId={selectedTenant} collectionId={selectedCollection} onClose={() => setViewTarget(null)} />
+      )}
+
       {editTarget && (
-        <div className="modal-overlay" onClick={() => setEditTarget(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Edit Document</h2>
-            <form onSubmit={handleEdit}>
-              <div className="form-group"><label>Document Key</label><input type="text" value={editTarget.DocumentKey} readOnly /></div>
-              <div className="form-group"><label>Content</label><textarea value={editForm.Content} onChange={(e) => setEditForm({ ...editForm, Content: e.target.value })} rows={4} /></div>
-              <div className="form-group">
-                <label>Content Type</label>
-                <select value={editForm.ContentType} onChange={(e) => setEditForm({ ...editForm, ContentType: e.target.value })}>
-                  <option>Text</option><option>Code</option><option>List</option><option>Table</option><option>Binary</option><option>Image</option><option>Hyperlink</option><option>Meta</option>
-                </select>
-              </div>
-              <div className="form-group"><label>Document ID</label><input type="text" value={editForm.DocumentId} onChange={(e) => setEditForm({ ...editForm, DocumentId: e.target.value })} placeholder="Optional — groups related chunks" /></div>
-              <div className="form-group"><label>Position</label><input type="number" value={editForm.Position} onChange={(e) => setEditForm({ ...editForm, Position: parseInt(e.target.value) || 0 })} /></div>
-              <div className="form-group">
-                <label>Labels</label>
-                {editForm.Labels.map((label, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4, alignItems: 'center' }}>
-                    <input type="text" value={label} onChange={(e) => { const labels = [...editForm.Labels]; labels[i] = e.target.value; setEditForm({ ...editForm, Labels: labels }) }} placeholder="Label" style={{ flex: 1 }} />
-                    <button type="button" className="btn btn-secondary" style={{ padding: '4px 8px' }} onClick={() => { const labels = editForm.Labels.filter((_, j) => j !== i); setEditForm({ ...editForm, Labels: labels }) }}>×</button>
-                  </div>
-                ))}
-                <button type="button" className="btn btn-secondary" style={{ marginTop: 4, fontSize: 12 }} onClick={() => setEditForm({ ...editForm, Labels: [...editForm.Labels, ''] })}>+ Add Label</button>
-              </div>
-              <div className="form-group">
-                <label>Tags</label>
-                {editForm.Tags.map((tag, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
-                    <input type="text" placeholder="Key" value={tag.key} onChange={(e) => { const tags = [...editForm.Tags]; tags[i] = { ...tags[i], key: e.target.value }; setEditForm({ ...editForm, Tags: tags }) }} style={{ flex: 1 }} />
-                    <input type="text" placeholder="Value" value={tag.value} onChange={(e) => { const tags = [...editForm.Tags]; tags[i] = { ...tags[i], value: e.target.value }; setEditForm({ ...editForm, Tags: tags }) }} style={{ flex: 1 }} />
-                    <button type="button" className="btn btn-secondary" style={{ padding: '4px 8px' }} onClick={() => { const tags = editForm.Tags.filter((_, j) => j !== i); setEditForm({ ...editForm, Tags: tags.length ? tags : [{ key: '', value: '' }] }) }}>×</button>
-                  </div>
-                ))}
-                <button type="button" className="btn btn-secondary" style={{ marginTop: 4, fontSize: 12 }} onClick={() => setEditForm({ ...editForm, Tags: [...editForm.Tags, { key: '', value: '' }] })}>+ Add Tag</button>
-              </div>
-              <div className="modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setEditTarget(null)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Save</button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <EditDocumentModal
+          document={editTarget}
+          tenantId={selectedTenant}
+          collectionId={selectedCollection}
+          onClose={() => setEditTarget(null)}
+          onSaved={() => { setEditTarget(null); loadDocuments(pageIndex, pageSize) }}
+          onError={(err) => setError(err)}
+        />
       )}
 
       {statsModal && (

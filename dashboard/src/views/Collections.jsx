@@ -159,7 +159,7 @@ export default function Collections() {
       </div>
       <ErrorModal error={error} onClose={() => setError(null)} />
       <div className="card">
-        <DataTable data={collections} columns={columns} onRefresh={loadCollections} refreshing={loading} />
+        <DataTable data={collections} columns={columns} onRowClick={openEdit} onRefresh={loadCollections} refreshing={loading} />
       </div>
 
       {showCreate && (

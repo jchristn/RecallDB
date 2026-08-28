@@ -58,6 +58,15 @@ namespace RecallDb.Server.Services
             if (query == null)
                 return ServiceResult.Fail(400, "Bad request", "Request body is required.");
 
+            if (query.Vector != null && query.Vector.Embeddings != null)
+            {
+                foreach (float value in query.Vector.Embeddings)
+                {
+                    if (float.IsNaN(value) || float.IsInfinity(value))
+                        return ServiceResult.Fail(400, "Bad request", "Search embeddings must contain only finite numeric values.");
+                }
+            }
+
             CollectionMetadata col = await _Database.Collections.ReadAsync(ctx.TenantId, ctx.CollectionId).ConfigureAwait(false);
             if (col == null)
                 return ServiceResult.Fail(404, "Not found", "Collection not found.");
@@ -162,6 +171,11 @@ namespace RecallDb.Server.Services
 
             result.TotalMs = sw.Elapsed.TotalMilliseconds;
 
+            // Defensive: a degenerate query vector can yield non-finite distances/scores that
+            // System.Text.Json cannot serialize (NaN/Infinity). Coerce them to 0 so a bad
+            // query never produces a 500.
+            SanitizeScores(result.Documents);
+
             int resultCount = result.Documents != null ? result.Documents.Count : 0;
             RecallDb.Server.Observability.ServerTelemetry.RecordSearch(origin, mode, true, 200, sw.Elapsed.TotalSeconds, resultCount);
 
@@ -171,6 +185,20 @@ namespace RecallDb.Server.Services
         #endregion
 
         #region Private-Methods
+
+        private static void SanitizeScores(List<DocumentRecord> docs)
+        {
+            if (docs == null) return;
+            foreach (DocumentRecord doc in docs)
+            {
+                if (doc == null) continue;
+                if (double.IsNaN(doc.Distance) || double.IsInfinity(doc.Distance)) doc.Distance = 0;
+                if (double.IsNaN(doc.Score) || double.IsInfinity(doc.Score)) doc.Score = 0;
+                if (doc.TextScore.HasValue && (double.IsNaN(doc.TextScore.Value) || double.IsInfinity(doc.TextScore.Value)))
+                    doc.TextScore = 0;
+                if (doc.Neighbors != null) SanitizeScores(doc.Neighbors);
+            }
+        }
 
         private static string DeriveSearchMode(SearchQuery query)
         {

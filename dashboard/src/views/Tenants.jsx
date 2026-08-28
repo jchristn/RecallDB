@@ -139,7 +139,7 @@ export default function Tenants() {
       <ErrorModal error={error} onClose={() => setError(null)} />
 
       <div className="card">
-        <DataTable data={tenants} columns={columns} onRefresh={loadTenants} refreshing={loading} />
+        <DataTable data={tenants} columns={columns} onRowClick={openEdit} onRefresh={loadTenants} refreshing={loading} />
       </div>
 
       {showCreate && (

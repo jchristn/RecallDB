@@ -5,6 +5,7 @@ import DataTable from '../components/DataTable.jsx'
 import CopyId from '../components/CopyId.jsx'
 import ActionMenu from '../components/ActionMenu.jsx'
 import JsonModal from '../components/JsonModal.jsx'
+import ViewDocumentModal from '../components/ViewDocumentModal.jsx'
 import ErrorModal from '../components/ErrorModal.jsx'
 
 function CollapsibleSection({ title, children, defaultOpen = false }) {
@@ -49,6 +50,7 @@ export default function QueryBuilder() {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
   const [jsonModal, setJsonModal] = useState(null)
+  const [viewModal, setViewModal] = useState(null)
 
   const tagConditions = [
     'Equals', 'NotEquals', 'GreaterThan', 'LessThan',
@@ -334,13 +336,17 @@ export default function QueryBuilder() {
             {results.TotalRecords || 0} total results {results.EndOfResults ? '' : `(showing first ${results.Documents?.length || 0})`}
           </p>
           <div className="card">
-            <DataTable data={results.Documents || []} columns={resultColumns} />
+            <DataTable data={results.Documents || []} columns={resultColumns} onRowClick={(d) => setViewModal(d)} />
           </div>
         </div>
       )}
 
       {jsonModal && (
         <JsonModal title="Document JSON" data={jsonModal} onClose={() => setJsonModal(null)} />
+      )}
+
+      {viewModal && (
+        <ViewDocumentModal document={viewModal} tenantId={tenantId} collectionId={collectionId} onClose={() => setViewModal(null)} />
       )}
     </div>
   )

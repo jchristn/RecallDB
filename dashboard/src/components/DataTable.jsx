@@ -272,7 +272,13 @@ export default function DataTable({
               return (
                 <React.Fragment key={rowKey}>
                   <tr
-                    onClick={() => onRowClick && onRowClick(item)}
+                    onClick={(e) => {
+                      if (!onRowClick) return
+                      // Ignore clicks that land on interactive cell content
+                      // (checkboxes, copy buttons, action menus, links, inputs).
+                      if (e.target.closest('button, a, input, select, textarea, label, .action-menu')) return
+                      onRowClick(item)
+                    }}
                     className={onRowClick ? 'clickable' : ''}
                   >
                     {expandable && (
