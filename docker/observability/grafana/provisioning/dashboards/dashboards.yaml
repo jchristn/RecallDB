@@ -7,8 +7,10 @@ providers:
     disableDeletion: false
     updateIntervalSeconds: 30
     allowUiUpdates: true
+    # Place every RecallDB dashboard under a single top-level "RecallDB" folder in Grafana rather than
+    # spreading them across one folder per subdirectory. The on-disk subdirectories (HTTP, MCP, Application,
+    # Search, Database, Runtime) are retained for source organization but are collapsed into this one folder.
+    folder: RecallDB
     options:
       path: /var/lib/grafana/dashboards
-      # Turn each subdirectory under the dashboards path into its own Grafana folder (section), so metrics and
-      # traces are organized by area (HTTP, MCP, Application, Search, Database, Runtime) rather than dumped together.
-      foldersFromFilesStructure: true
+      foldersFromFilesStructure: false
