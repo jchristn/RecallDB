@@ -45,10 +45,16 @@ namespace RecallDb.Server
         private static DateTime _StartTimeUtc = DateTime.UtcNow;
         private static CancellationTokenSource _TokenSource = new CancellationTokenSource();
 
-        // Serializer used to render representative request-body examples for the OpenAPI
-        // document. Intentionally the same helper the API uses at runtime so the examples
-        // match server expectations exactly (PascalCase names, string enums, nulls omitted).
-        private static readonly RecallDbSerializationHelper _ExampleSerializer = new RecallDbSerializationHelper();
+        // Serializer options used to render representative request-body examples for the OpenAPI
+        // document. Mirrors the runtime serializer's shape (PascalCase names, string enums) but
+        // intentionally KEEPS null-valued properties so that a client-settable field with no
+        // default (e.g. AuthenticateRequest.Email) still appears in the example rather than the
+        // whole body collapsing to "{}".
+        private static readonly JsonSerializerOptions _ExampleOptions = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+        };
 
         #endregion
 
@@ -502,7 +508,7 @@ namespace RecallDb.Server
             // preserved verbatim in the emitted spec.
             try
             {
-                string json = _ExampleSerializer.SerializeJson(sample, true);
+                string json = JsonSerializer.Serialize(sample, _ExampleOptions);
                 if (!string.IsNullOrEmpty(json))
                 {
                     System.Text.Json.Nodes.JsonNode node = System.Text.Json.Nodes.JsonNode.Parse(json);
