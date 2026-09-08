@@ -5,6 +5,7 @@ namespace RecallDb.Server
     using System.Diagnostics;
     using System.IO;
     using System.Text;
+    using System.Text.Json;
     using System.Threading;
     using System.Threading.Tasks;
     using SyslogLogging;
@@ -43,6 +44,11 @@ namespace RecallDb.Server
         private static Webserver _App = null;
         private static DateTime _StartTimeUtc = DateTime.UtcNow;
         private static CancellationTokenSource _TokenSource = new CancellationTokenSource();
+
+        // Serializer used to render representative request-body examples for the OpenAPI
+        // document. Intentionally the same helper the API uses at runtime so the examples
+        // match server expectations exactly (PascalCase names, string enums, nulls omitted).
+        private static readonly RecallDbSerializationHelper _ExampleSerializer = new RecallDbSerializationHelper();
 
         #endregion
 
@@ -172,6 +178,17 @@ namespace RecallDb.Server
             webserverSettings.Port = _Settings.Webserver.Port;
             webserverSettings.Ssl.Enable = _Settings.Webserver.Ssl;
 
+            // CORS is applied via WatsonWebserver's DefaultHeaders, which are written with
+            // set-if-absent semantics at send time. This makes them safe against routes that
+            // set their own CORS headers (e.g. the built-in "/openapi.json" handler, which
+            // adds its own Access-Control-Allow-Origin). Setting these headers in PreRouting
+            // instead would append a second value to the response NameValueCollection for
+            // such routes, producing an invalid "Access-Control-Allow-Origin: *, *" that
+            // browsers reject on cross-origin requests.
+            webserverSettings.Headers.DefaultHeaders["Access-Control-Allow-Origin"] = "*";
+            webserverSettings.Headers.DefaultHeaders["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, HEAD, OPTIONS";
+            webserverSettings.Headers.DefaultHeaders["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type";
+
             _App = new Webserver(webserverSettings, DefaultRoute);
             _App.Serializer = new RecallDbSerializationHelper();
 
@@ -191,9 +208,7 @@ namespace RecallDb.Server
             {
                 ctx.Timestamp.Start = DateTime.UtcNow;
                 ctx.Response.ContentType = "application/json";
-                ctx.Response.Headers["Access-Control-Allow-Origin"] = "*";
-                ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, HEAD, OPTIONS";
-                ctx.Response.Headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type";
+                // CORS headers are applied via DefaultHeaders (configured above).
                 ServerTelemetry.HttpActiveAdd(1, ctx.Request.Method.ToString());
             };
 
@@ -446,6 +461,90 @@ namespace RecallDb.Server
             Console.WriteLine("");
         }
 
+        /// <summary>
+        /// Build request-body OpenAPI metadata with a representative JSON example generated
+        /// from a default instance of <typeparamref name="T"/>. This gives the dashboard's
+        /// API Explorer (and Swagger UI) a realistic starting body instead of an empty object.
+        /// </summary>
+        private static OpenApiRequestBodyMetadata JsonBody<T>(string description, bool required = true)
+            where T : new()
+            => BuildJsonBody(new T(), OpenApiSchemaMetadata.Create("object"), description, required);
+
+        /// <summary>
+        /// Members that a client should never supply in a request body: auto-generated
+        /// identifiers, audit timestamps, path-derived tenant IDs, issued credential tokens,
+        /// and computed/transient fields. These are stripped from generated request examples
+        /// so the API Explorer shows only client-supplied values. This is an API-presentation
+        /// policy, so it lives here rather than being baked into the shared Core models.
+        /// </summary>
+        private static readonly Dictionary<Type, HashSet<string>> _ServerManagedMembers = new Dictionary<Type, HashSet<string>>
+        {
+            [typeof(CollectionMetadata)] = new HashSet<string> { "Id", "TenantId", "CreatedUtc", "LastUpdateUtc" },
+            [typeof(TenantMetadata)]     = new HashSet<string> { "Id", "CreatedUtc", "LastUpdateUtc" },
+            [typeof(Credential)]         = new HashSet<string> { "Id", "TenantId", "BearerToken", "CreatedUtc", "LastUpdateUtc" },
+            [typeof(UserMaster)]         = new HashSet<string> { "Id", "TenantId", "CreatedUtc", "LastUpdateUtc" },
+            [typeof(DocumentRecord)]     = new HashSet<string> { "Id", "ContentLength", "Etag", "Sha256", "CreatedUtc", "Distance", "Score", "TextScore", "Neighbors" },
+            [typeof(LabelRecord)]        = new HashSet<string> { "Id", "CreatedUtc" },
+            [typeof(TagRecord)]          = new HashSet<string> { "Id", "CreatedUtc" },
+        };
+
+        /// <summary>
+        /// Build request-body OpenAPI metadata for an explicit sample instance (used for
+        /// collection bodies such as a list of documents) and schema.
+        /// </summary>
+        private static OpenApiRequestBodyMetadata BuildJsonBody(object sample, OpenApiSchemaMetadata schema, string description, bool required)
+        {
+            OpenApiRequestBodyMetadata body = OpenApiRequestBodyMetadata.Json(schema, description, required);
+
+            // Serialize the sample with the runtime serializer, then embed it as a JsonElement.
+            // The OpenAPI document generator serializes with a camelCase naming policy, but that
+            // policy does not rewrite JsonElement content, so the PascalCase/string-enum shape is
+            // preserved verbatim in the emitted spec.
+            try
+            {
+                string json = _ExampleSerializer.SerializeJson(sample, true);
+                if (!string.IsNullOrEmpty(json))
+                {
+                    System.Text.Json.Nodes.JsonNode node = System.Text.Json.Nodes.JsonNode.Parse(json);
+                    StripServerManagedMembers(node, sample);
+                    body.Content["application/json"].Example = JsonSerializer.Deserialize<JsonElement>(node.ToJsonString());
+                }
+            }
+            catch (Exception e)
+            {
+                _Logging?.Warn(_Header + "unable to build OpenAPI example for " + (sample?.GetType().Name ?? "null") + ": " + e.Message);
+            }
+
+            return body;
+        }
+
+        /// <summary>
+        /// Remove server-managed members (see <see cref="_ServerManagedMembers"/>) from an example
+        /// body. Handles both a single object and an array of objects (e.g. a batch of documents).
+        /// </summary>
+        private static void StripServerManagedMembers(System.Text.Json.Nodes.JsonNode node, object sample)
+        {
+            if (node == null || sample == null) return;
+
+            if (node is System.Text.Json.Nodes.JsonArray array)
+            {
+                Type sampleType = sample.GetType();
+                Type elementType = sampleType.IsGenericType ? sampleType.GetGenericArguments()[0] : null;
+                foreach (System.Text.Json.Nodes.JsonNode item in array)
+                    RemoveMembers(item as System.Text.Json.Nodes.JsonObject, elementType);
+                return;
+            }
+
+            RemoveMembers(node as System.Text.Json.Nodes.JsonObject, sample.GetType());
+        }
+
+        private static void RemoveMembers(System.Text.Json.Nodes.JsonObject obj, Type type)
+        {
+            if (obj == null || type == null) return;
+            if (!_ServerManagedMembers.TryGetValue(type, out HashSet<string> names)) return;
+            foreach (string name in names) obj.Remove(name);
+        }
+
         private static void RegisterRoutes()
         {
             // Health routes
@@ -480,7 +579,7 @@ namespace RecallDb.Server
                     .WithSummary("Authenticate")
                     .WithDescription("Authenticate using a bearer token, or using tenant ID, email, and password.")
                     .WithOperationId("authenticate")
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Supply BearerToken or TenantId+Email+Password.", true))
+                    .WithRequestBody(JsonBody<AuthenticateRequest>("Supply BearerToken or TenantId+Email+Password.", true))
                     .WithResponse(200, OpenApiResponseMetadata.Json("Authentication successful", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(401, OpenApiResponseMetadata.Unauthorized()));
@@ -526,7 +625,7 @@ namespace RecallDb.Server
                     .WithSummary("Enumerate tenants")
                     .WithDescription("Enumerate tenants with pagination. Admin access required.")
                     .WithOperationId("tenantEnumerate")
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Pagination parameters"))
+                    .WithRequestBody(JsonBody<EnumerationQuery>("Pagination parameters"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("Paginated list of tenants"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
                 auth: true);
@@ -537,7 +636,7 @@ namespace RecallDb.Server
                     .WithSummary("Create tenant")
                     .WithDescription("Create a new tenant. Admin access required.")
                     .WithOperationId("tenantCreate")
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Tenant to create", true))
+                    .WithRequestBody(JsonBody<TenantMetadata>("Tenant to create", true))
                     .WithResponse(201, OpenApiResponseMetadata.Json("Tenant created", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
@@ -550,7 +649,7 @@ namespace RecallDb.Server
                     .WithDescription("Update an existing tenant by ID.")
                     .WithOperationId("tenantUpdate")
                     .WithParameter(OpenApiParameterMetadata.Path("id", "Tenant ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Updated tenant data", true))
+                    .WithRequestBody(JsonBody<TenantMetadata>("Updated tenant data", true))
                     .WithResponse(200, OpenApiResponseMetadata.Json("Tenant updated", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
@@ -614,7 +713,7 @@ namespace RecallDb.Server
                     .WithDescription("Enumerate users for a tenant with pagination.")
                     .WithOperationId("userEnumerate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Pagination parameters"))
+                    .WithRequestBody(JsonBody<EnumerationQuery>("Pagination parameters"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("Paginated list of users"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
                 auth: true);
@@ -626,7 +725,7 @@ namespace RecallDb.Server
                     .WithDescription("Create a new user for a tenant. Admin or tenant admin access required.")
                     .WithOperationId("userCreate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "User to create", true))
+                    .WithRequestBody(JsonBody<UserMaster>("User to create", true))
                     .WithResponse(201, OpenApiResponseMetadata.Json("User created (password redacted)", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
@@ -640,7 +739,7 @@ namespace RecallDb.Server
                     .WithOperationId("userUpdate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("id", "User ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Updated user data", true))
+                    .WithRequestBody(JsonBody<UserMaster>("Updated user data", true))
                     .WithResponse(200, OpenApiResponseMetadata.Json("User updated (password redacted)", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
@@ -704,7 +803,7 @@ namespace RecallDb.Server
                     .WithDescription("Enumerate credentials for a tenant with pagination.")
                     .WithOperationId("credentialEnumerate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Pagination parameters"))
+                    .WithRequestBody(JsonBody<EnumerationQuery>("Pagination parameters"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("Paginated list of credentials"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
                 auth: true);
@@ -716,7 +815,7 @@ namespace RecallDb.Server
                     .WithDescription("Create a new credential for a tenant. Admin or tenant admin access required.")
                     .WithOperationId("credentialCreate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Credential to create", true))
+                    .WithRequestBody(JsonBody<Credential>("Credential to create", true))
                     .WithResponse(201, OpenApiResponseMetadata.Json("Credential created", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
@@ -730,7 +829,7 @@ namespace RecallDb.Server
                     .WithOperationId("credentialUpdate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("id", "Credential ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Updated credential data", true))
+                    .WithRequestBody(JsonBody<Credential>("Updated credential data", true))
                     .WithResponse(200, OpenApiResponseMetadata.Json("Credential updated", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
@@ -794,7 +893,7 @@ namespace RecallDb.Server
                     .WithDescription("Enumerate collections for a tenant with pagination.")
                     .WithOperationId("collectionEnumerate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Pagination parameters"))
+                    .WithRequestBody(JsonBody<EnumerationQuery>("Pagination parameters"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("Paginated list of collections"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
                 auth: true);
@@ -806,7 +905,7 @@ namespace RecallDb.Server
                     .WithDescription("Create a new vector collection. This creates the backing document, label, and tag tables with the specified vector dimensionality. Admin or tenant admin access required.")
                     .WithOperationId("collectionCreate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Collection to create including Dimensionality", true))
+                    .WithRequestBody(JsonBody<CollectionMetadata>("Collection to create including Dimensionality", true))
                     .WithResponse(201, OpenApiResponseMetadata.Json("Collection created", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
@@ -820,7 +919,7 @@ namespace RecallDb.Server
                     .WithOperationId("collectionUpdate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Updated collection data", true))
+                    .WithRequestBody(JsonBody<CollectionMetadata>("Updated collection data", true))
                     .WithResponse(200, OpenApiResponseMetadata.Json("Collection updated", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
@@ -917,7 +1016,7 @@ namespace RecallDb.Server
                     .WithOperationId("documentEnumerate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Pagination parameters"))
+                    .WithRequestBody(JsonBody<EnumerationQuery>("Pagination parameters"))
                     .WithResponse(200, OpenApiResponseMetadata.Create("Paginated list of documents"))
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
                 auth: true);
@@ -930,7 +1029,8 @@ namespace RecallDb.Server
                     .WithOperationId("documentBatchCreate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "List of documents to create", true))
+                    .WithRequestBody(BuildJsonBody(new List<DocumentRecord> { new DocumentRecord() },
+                        OpenApiSchemaMetadata.CreateArray(OpenApiSchemaMetadata.Create("object")), "List of documents to create", true))
                     .WithResponse(201, OpenApiResponseMetadata.Create("Documents created"))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
@@ -944,7 +1044,7 @@ namespace RecallDb.Server
                     .WithOperationId("documentCreate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Document to create", true))
+                    .WithRequestBody(JsonBody<DocumentRecord>("Document to create", true))
                     .WithResponse(201, OpenApiResponseMetadata.Json("Document created", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
@@ -959,7 +1059,7 @@ namespace RecallDb.Server
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("docKey", "Document key"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Updated document data", true))
+                    .WithRequestBody(JsonBody<DocumentRecord>("Updated document data", true))
                     .WithResponse(200, OpenApiResponseMetadata.Json("Document updated", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())
@@ -987,7 +1087,7 @@ namespace RecallDb.Server
                     .WithOperationId("documentBatchDelete")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Batch delete request containing document keys", true))
+                    .WithRequestBody(JsonBody<BatchDeleteRequest>("Batch delete request containing document keys", true))
                     .WithResponse(204, OpenApiResponseMetadata.NoContent())
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
@@ -1001,7 +1101,7 @@ namespace RecallDb.Server
                     .WithOperationId("documentDeleteByFilter")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Filter criteria for documents to delete", true))
+                    .WithRequestBody(JsonBody<EnumerationQuery>("Filter criteria for documents to delete", true))
                     .WithResponse(200, OpenApiResponseMetadata.Json("Delete result with count of deleted documents", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
@@ -1068,7 +1168,7 @@ namespace RecallDb.Server
                     .WithOperationId("labelCreate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Label to create", true))
+                    .WithRequestBody(JsonBody<LabelRecord>("Label to create", true))
                     .WithResponse(201, OpenApiResponseMetadata.Json("Label created", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
@@ -1134,7 +1234,7 @@ namespace RecallDb.Server
                     .WithOperationId("tagCreate")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Tag to create", true))
+                    .WithRequestBody(JsonBody<TagRecord>("Tag to create", true))
                     .WithResponse(201, OpenApiResponseMetadata.Json("Tag created", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden()),
@@ -1162,7 +1262,7 @@ namespace RecallDb.Server
                     .WithOperationId("search")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(OpenApiRequestBodyMetadata.Json(null, "Search parameters including vector, filters, and pagination", true))
+                    .WithRequestBody(JsonBody<SearchQuery>("Search parameters including vector, filters, and pagination", true))
                     .WithResponse(200, OpenApiResponseMetadata.Json("Search results with scored documents", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())

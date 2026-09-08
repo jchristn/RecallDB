@@ -40,6 +40,7 @@ function parseOperations(spec) {
   for (const [path, methods] of Object.entries(spec.paths)) {
     for (const [method, op] of Object.entries(methods)) {
       if (['get', 'post', 'put', 'delete', 'head'].includes(method)) {
+        const jsonContent = op.requestBody?.content?.['application/json']
         operations.push({
           id: op.operationId || `${method}_${path}`,
           method: method.toUpperCase(),
@@ -47,7 +48,8 @@ function parseOperations(spec) {
           summary: op.summary || '',
           tag: op.tags?.[0] || 'Other',
           parameters: [...(methods.parameters || []), ...(op.parameters || [])],
-          hasBody: ['post', 'put', 'patch'].includes(method),
+          hasBody: !!op.requestBody,
+          bodyExample: jsonContent?.example,
         })
       }
     }
@@ -159,7 +161,13 @@ export default function ApiExplorer() {
     for (const p of qParams) qInitial[p.name] = ''
     setQueryParams(qInitial)
 
-    setBodyText(selectedOp.hasBody ? '{\n  \n}' : '')
+    if (!selectedOp.hasBody) {
+      setBodyText('')
+    } else if (selectedOp.bodyExample !== undefined) {
+      setBodyText(JSON.stringify(selectedOp.bodyExample, null, 2))
+    } else {
+      setBodyText('{\n  \n}')
+    }
   }, [selectedOpId])
 
   const handleSelectOperation = useCallback((e) => {
