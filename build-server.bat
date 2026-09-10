@@ -9,3 +9,7 @@ if "%TAG%"=="latest" (
 ) else (
     docker buildx build --builder cloud-jchristn77-jchristn77 --platform linux/amd64 -t jchristn77/recalldb-server:%TAG% -t jchristn77/recalldb-server:latest -f src/RecallDb.Server/Dockerfile --push .
 )
+if errorlevel 1 exit /b %errorlevel%
+echo Updating local Docker image...
+docker pull jchristn77/recalldb-server:%TAG%
+if not "%TAG%"=="latest" docker pull jchristn77/recalldb-server:latest

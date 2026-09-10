@@ -61,7 +61,8 @@
   color: var(--warning);
 }
 
-.topbar-github {
+.topbar-github,
+.topbar-discord {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -76,6 +77,12 @@
   background: var(--bg);
   color: var(--text);
   border-color: var(--text-secondary);
+}
+
+.topbar-discord:hover {
+  background: var(--bg);
+  color: #5865f2;
+  border-color: #5865f2;
 }
 
 .theme-toggle {
