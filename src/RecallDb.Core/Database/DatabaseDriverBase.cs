@@ -100,6 +100,19 @@ namespace RecallDb.Core.Database
         public abstract Task DropCollectionTablesAsync(string collectionId, CancellationToken token = default);
 
         /// <summary>
+        /// Ensure the tables and indexes for every existing collection are present. This is an
+        /// idempotent, best-effort maintenance pass intended to run at startup so that collections
+        /// created before newer indexes were introduced pick them up without a manual migration.
+        /// The default implementation is a no-op.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Task.</returns>
+        public virtual Task EnsureAllCollectionSchemasAsync(CancellationToken token = default)
+        {
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
         /// Execute a SQL query.
         /// </summary>
         /// <param name="query">SQL query.</param>

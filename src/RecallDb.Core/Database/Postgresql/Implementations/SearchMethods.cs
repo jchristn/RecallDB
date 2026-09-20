@@ -243,8 +243,25 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                 sb.Append(" WHERE " + string.Join(" AND ", conditions));
             }
 
-            // Build ORDER BY clause
-            string orderBy = GetOrderByClause(query.SortOrder);
+            // Build ORDER BY clause.
+            //
+            // For a pure vector search sorted best-first, order by the raw pgvector distance
+            // operator ascending (e.g. "embeddings <=> '[...]'::vector ASC"). This is the ONLY
+            // form the HNSW index can satisfy: wrapping the operator in score arithmetic such as
+            // "(1.0 - (embeddings <=> q)) DESC" is opaque to the planner and forces a sequential
+            // scan that computes the distance for every row (seconds on a large collection).
+            // Smallest distance == best match for every supported operator (<=> cosine, <-> L2,
+            // <#> negative inner product), so ascending distance is best-first in all cases.
+            string orderBy;
+            if (hasVector && !hasFullText
+                && (query.SortOrder == SortOrderEnum.ScoreDescending || query.SortOrder == SortOrderEnum.DistanceAscending))
+            {
+                orderBy = distanceExpression + " ASC";
+            }
+            else
+            {
+                orderBy = GetOrderByClause(query.SortOrder);
+            }
             sb.Append(" ORDER BY " + orderBy);
 
             // Build LIMIT/OFFSET

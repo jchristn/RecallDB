@@ -162,6 +162,10 @@ namespace RecallDb.Server
             await _Database.InitializeAsync().ConfigureAwait(false);
             _Logging.Info(_Header + "database initialized");
 
+            // Idempotently ensure per-collection indexes (HNSW vector, GIN full-text, etc.) exist for
+            // collections created before those indexes were introduced. Best-effort; never blocks boot.
+            await _Database.EnsureAllCollectionSchemasAsync().ConfigureAwait(false);
+
             #endregion
 
             #region First-Run

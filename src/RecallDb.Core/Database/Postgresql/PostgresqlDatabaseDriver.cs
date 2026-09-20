@@ -125,6 +125,43 @@ namespace RecallDb.Core.Database.Postgresql
         }
 
         /// <summary>
+        /// Ensure the tables and indexes for every existing collection are present. Re-runs the
+        /// idempotent CREATE TABLE / CREATE INDEX IF NOT EXISTS statements for each collection so
+        /// that collections created before an index was introduced (e.g. the HNSW vector index and
+        /// GIN full-text index) acquire it without a manual migration. Best-effort: a failure on one
+        /// collection is logged and does not abort the others or server startup.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Task.</returns>
+        public override async Task EnsureAllCollectionSchemasAsync(CancellationToken token = default)
+        {
+            DataTable result = await ExecuteQueryAsync("SELECT id, dimensionality FROM collections", false, token).ConfigureAwait(false);
+            if (result == null || result.Rows.Count == 0) return;
+
+            int ensured = 0;
+
+            foreach (DataRow row in result.Rows)
+            {
+                if (row["id"] == null || row["id"] == DBNull.Value) continue;
+                string collectionId = row["id"].ToString();
+                int dimensionality = row["dimensionality"] == DBNull.Value ? 0 : Convert.ToInt32(row["dimensionality"]);
+                if (string.IsNullOrEmpty(collectionId) || dimensionality <= 0) continue;
+
+                try
+                {
+                    await CreateCollectionTablesAsync(collectionId, dimensionality, token).ConfigureAwait(false);
+                    ensured++;
+                }
+                catch (Exception e)
+                {
+                    if (_Logging != null) _Logging.Warn(_Header + "unable to ensure schema for collection " + collectionId + ": " + e.Message);
+                }
+            }
+
+            if (_Logging != null) _Logging.Info(_Header + "ensured schema for " + ensured + " collection(s)");
+        }
+
+        /// <summary>
         /// Drop dynamic tables for a collection.
         /// </summary>
         /// <param name="collectionId">Collection ID.</param>
