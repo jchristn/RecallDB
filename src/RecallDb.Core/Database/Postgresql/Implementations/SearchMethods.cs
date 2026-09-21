@@ -28,8 +28,15 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
         private readonly LoggingModule _Logging;
         private readonly string _Header = "[SearchMethods] ";
 
+        // Columns always projected by a search. The stored embedding vector is intentionally NOT
+        // here — it is large and rarely needed on a search hit (the caller supplies the query
+        // vector), so it is appended only when SearchQuery.IncludeEmbeddings is set. When omitted,
+        // DocumentRecord.FromDataTable leaves Embeddings null (GetFloatArrayValue tolerates the
+        // absent column).
         private const string _SelectColumns =
-            "id, document_key, document_id, content_length, etag, sha256, position, content_type, content, binary_data, embeddings::text as embeddings, created_utc";
+            "id, document_key, document_id, content_length, etag, sha256, position, content_type, content, binary_data, created_utc";
+
+        private const string _EmbeddingsColumn = "embeddings::text as embeddings";
 
         #endregion
 
@@ -95,7 +102,9 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                 ftsMatchCondition = tsvector + " @@ " + tsquery;
             }
 
-            // Build SELECT clause based on search mode
+            // Build SELECT clause based on search mode. The embedding vector is appended only when
+            // the caller explicitly opts in (SearchQuery.IncludeEmbeddings) — see _SelectColumns.
+            string selectColumns = query.IncludeEmbeddings ? _SelectColumns + ", " + _EmbeddingsColumn : _SelectColumns;
             StringBuilder sb = new StringBuilder();
 
             if (hasVector && hasFullText)
@@ -105,7 +114,7 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                 double vectorWeight = 1.0 - textWeight;
                 string vectorScoreExpr = GetScoreExpression(query.Vector, vectorOperator, vectorLiteral);
 
-                sb.Append("SELECT " + _SelectColumns + ", ");
+                sb.Append("SELECT " + selectColumns + ", ");
                 sb.Append(distanceExpression + " AS distance, ");
                 sb.Append(ftsScoreExpression + " AS text_score, ");
                 sb.Append("(" + vectorWeight.ToString(CultureInfo.InvariantCulture) + " * " + vectorScoreExpr
@@ -115,7 +124,7 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
             else if (hasFullText)
             {
                 // Full-text-only mode
-                sb.Append("SELECT " + _SelectColumns + ", ");
+                sb.Append("SELECT " + selectColumns + ", ");
                 sb.Append("0.0 AS distance, ");
                 sb.Append(ftsScoreExpression + " AS text_score, ");
                 sb.Append(ftsScoreExpression + " AS score ");
@@ -123,7 +132,7 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
             else
             {
                 // Vector-only mode (existing behavior, unchanged)
-                sb.Append("SELECT " + _SelectColumns + ", ");
+                sb.Append("SELECT " + selectColumns + ", ");
                 sb.Append(distanceExpression + " AS distance, ");
                 sb.Append(scoreExpression + " AS score ");
             }

@@ -76,6 +76,13 @@ namespace RecallDb.Sdk.Models
         public string ContinuationToken { get; set; }
 
         /// <summary>
+        /// Whether to include each matched document's stored embedding vector in the results.
+        /// Callers usually already hold the query vector and only need the score/distance back, so
+        /// returning the full per-document embedding is normally wasted payload. Default: false.
+        /// </summary>
+        public bool IncludeEmbeddings { get; set; } = false;
+
+        /// <summary>
         /// Instantiate.
         /// </summary>
         public SearchQuery()

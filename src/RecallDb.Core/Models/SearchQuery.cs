@@ -274,6 +274,15 @@ namespace RecallDb.Core.Models
             }
         }
 
+        /// <summary>
+        /// Whether to include each matched document's stored embedding vector in the results.
+        /// Search callers typically already hold the query vector and only need the score/distance
+        /// back, so echoing the full per-document embedding is usually wasted payload that can
+        /// dominate response size and deserialization cost on large result sets. Default: false;
+        /// set to true only when the caller genuinely needs the stored vectors returned.
+        /// </summary>
+        public bool IncludeEmbeddings { get; set; } = false;
+
         #endregion
 
         #region Private-Members
