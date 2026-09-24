@@ -683,7 +683,14 @@ class RecallDbClient:
         Supports three search modes:
         - Vector-only: provide Vector without FullText.
         - Full-text-only: provide FullText without Vector.
-        - Hybrid: provide both Vector and FullText for blended scoring.
+        - Hybrid: provide both Vector and FullText for blended scoring. By default the
+          two legs are combined with reciprocal rank fusion (Hybrid.Strategy "Rrf"), so a
+          text match is not required.
+
+        Full-text queries match documents containing any of the query's terms by default
+        (FullText.MatchMode "Any"). Use MatchMode "All" to require every term (the previous
+        behavior), and Hybrid.Strategy "Filter" to restore the previous hybrid behavior
+        (text match required, raw scores blended).
 
         Args:
             tenant_id: Tenant ID.
@@ -694,10 +701,24 @@ class RecallDbClient:
                 FullText (dict): Full-text search query parameters:
                     Query (str): Search text (required). Processed with stemming and stop word removal.
                     SearchType (str): Ranking function - "TsRank" (default) or "TsRankCd" (cover density).
-                    Language (str): Text search configuration, default "english".
-                    Normalization (int): ts_rank normalization bitmask, default 32 (0-1 range).
+                    MatchMode (str): How the query text is matched: "Any" (default, any term
+                        matches), "All" (every term required), "Phrase" (terms adjacent and in
+                        order), or "WebSearch" (web-search syntax: "quoted phrase", or, -exclude).
+                    Language (str): Text search configuration installed on the server, default
+                        "english". Unknown configurations are rejected with 400.
+                    Normalization (int): ts_rank normalization bitmask (0-63), default 32 (0-1 range).
                     MinimumScore (float): Minimum text relevance score threshold.
-                    TextWeight (float): Weight for text score in hybrid mode (0.0-1.0, default 0.5).
+                    TextWeight (float): Share of the text leg in hybrid mode (0.0-1.0, default 0.5);
+                        the vector leg gets 1 - TextWeight. Values outside 0.0-1.0 are rejected with 400.
+                Hybrid (dict): Hybrid options, used only when both Vector (with Embeddings) and
+                    FullText (with a non-blank Query) are provided. Default None (reciprocal rank
+                    fusion with default settings):
+                    Strategy (str): "Rrf" (default, reciprocal rank fusion, scores 0-1), "Linear"
+                        (weighted sum of normalized scores, 0-1), or "Filter" (legacy: text match
+                        required, raw scores blended).
+                    RrfK (int): Reciprocal rank fusion constant k (1-100000, default 60).
+                    CandidatePool (int): Candidates each leg retrieves before fusion (1-10000).
+                        Default None (max(MaxResults * 4, 100), capped at 1000).
                 LabelFilter (dict): Label filter with Required and Excluded lists.
                 TagFilter (dict): Tag filter with Required and Excluded condition lists.
                 Terms (dict): Terms filter for content matching,
@@ -710,8 +731,16 @@ class RecallDbClient:
 
         Returns:
             dict: Search result. Documents include Score and, when FullText is used,
-                TextScore (float) with the full-text relevance score. When IncludeNeighbors
-                is set, each document will also include a Neighbors list of adjacent chunks.
+                TextScore (float) with the full-text relevance score. Documents may also
+                include VectorScore (float, raw similarity in the vector metric's units, in
+                vector-only and hybrid searches), and VectorRank and TextRank (int, 1-based
+                ranks in the hybrid vector and text legs, Rrf and Linear only). In hybrid Rrf
+                and Linear searches Score is the fused score (0-1) and TextScore, TextRank, or
+                VectorRank are absent when the document was not in that leg. The result may
+                include a Notice (str) describing how the search was evaluated (for example,
+                when the text query had no searchable terms or hybrid options were ignored).
+                When IncludeNeighbors is set, each document will also include a Neighbors
+                list of adjacent chunks.
         """
         return self._post(
             f"/v1.0/tenants/{tenant_id}/collections/{collection_id}/search",

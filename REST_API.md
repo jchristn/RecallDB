@@ -1356,11 +1356,17 @@ Perform vector similarity, full-text, or hybrid search within a collection. Supp
   },
   "FullText": {
     "Query": "search terms",
+    "MatchMode": "Any",
     "SearchType": "TsRank",
     "Language": "english",
     "Normalization": 32,
     "MinimumScore": 0.01,
     "TextWeight": 0.5
+  },
+  "Hybrid": {
+    "Strategy": "Rrf",
+    "RrfK": 60,
+    "CandidatePool": null
   },
   "LabelFilter": {
     "Required": ["important"],
@@ -1384,9 +1390,12 @@ Perform vector similarity, full-text, or hybrid search within a collection. Supp
   "DocumentIds": [],
   "MaxResults": 10,
   "IncludeNeighbors": null,
+  "IncludeEmbeddings": false,
   "ContinuationToken": null
 }
 ```
+
+The example above is a hybrid search because it supplies both `Vector.Embeddings` and a non-blank `FullText.Query`. Drop `FullText` for a vector-only search, drop `Vector` for a full-text-only search, and leave out `Hybrid` to take the RRF defaults. [Search Modes](#search-modes) explains how each mode scores documents.
 
 **Response `200`**
 
@@ -1410,10 +1419,13 @@ Perform vector similarity, full-text, or hybrid search within a collection. Supp
       "ContentType": "Text",
       "Content": "Machine learning is a subset of artificial intelligence...",
       "BinaryData": null,
-      "Embeddings": [0.123, -0.456, 0.789],
+      "Embeddings": null,
       "CreatedUtc": "2025-01-15T12:00:00Z",
-      "Score": 0.95,
+      "Score": 0.9919,
+      "VectorScore": 0.91,
+      "VectorRank": 1,
       "TextScore": 0.62,
+      "TextRank": 2,
       "Labels": ["important", "ml"],
       "Tags": { "source": "arxiv", "year": "2024" },
       "Neighbors": [
@@ -1446,21 +1458,76 @@ Perform vector similarity, full-text, or hybrid search within a collection. Supp
 
 ## Search Modes
 
-The search endpoint operates in one of three modes depending on which query parameters are provided.
+The server picks a mode from what the request actually contains. A search has a vector leg when `Vector.Embeddings` is non-empty, and a text leg when `FullText.Query` is non-blank. A `FullText` object with a blank `Query` counts as no text query at all: next to a vector it is ignored, and on its own it is rejected with a 400 (`FullText.Query is required for a full-text search.`).
 
-**Vector-only** — provide only the `Vector` field (no `FullText`):
-- `Score` = vector similarity (or distance, depending on `SearchType`)
-- `TextScore` is not populated
+**Vector-only** (a vector, no text query)
+- `Score` is the vector similarity (or distance, depending on `Vector.SearchType`)
+- `VectorScore` carries the same raw similarity
+- `TextScore`, `VectorRank` and `TextRank` are omitted
 
-**Full-text-only** — provide only the `FullText` field (no `Vector`):
-- `Score` = text relevance score from PostgreSQL full-text ranking
-- `TextScore` = text relevance score (same as `Score` in this mode)
+**Full-text-only** (a text query, no vector)
+- `Score` is the PostgreSQL text rank (`ts_rank` or `ts_rank_cd`), and `TextScore` is the same value
+- `FullText.MatchMode` decides which documents match. The default, `Any`, returns documents containing any meaningful term in the query and ranks the ones matching more (and rarer) terms higher. Use `All` when every term must be present; that was the only behavior before this release. See `TextMatchModeEnum` under [Enumerations](#enumerations).
+- A query made only of stop words (for example `"the and of"`) is not an error. It returns zero results and a `Notice`.
 
-**Hybrid** — provide both `Vector` and `FullText`:
-- `Score` = weighted blend of vector and text scores
-- `TextScore` = text relevance score component
-- Formula: `Score = (1 - TextWeight) * vectorScore + TextWeight * textScore`
-- `TextWeight` (set in `FullTextQuery`) controls the balance: `0.0` is pure vector, `1.0` is pure full-text, `0.5` (default) weights them equally
+**Hybrid** (both a vector and a text query)
+
+Hybrid runs two legs, vector and text, under the same filters (labels, tags, dates, document IDs, terms) and combines them according to `Hybrid.Strategy`. In every strategy `FullText.TextWeight` (call it `w`) is the text leg's share and the vector leg gets `1 - w`. A weight of `0.0` means vector only, `1.0` means text only, and the default `0.5` weights them equally.
+
+`Rrf`, the default, is weighted Reciprocal Rank Fusion. Each leg retrieves its own top `CandidatePool` documents independently and the result is the union of the two lists. A document does not have to match the text query to come back, so a strong semantic match that shares no keywords with the query still ranks well. With `k = Hybrid.RrfK`:
+
+```
+Score = ((1 - w) / (k + VectorRank) + w / (k + TextRank)) * (k + 1)
+```
+
+A leg the document is missing from contributes 0. The `k + 1` factor normalizes the score to `[0, 1]`: a document ranked first in both legs scores `1.0`, and one ranked first in a single leg scores `0.5` at the default weight.
+
+`Linear` uses the same union of candidates but blends normalized scores instead of ranks:
+
+```
+Score = (1 - w) * vectorNorm + w * textNorm
+```
+
+For `CosineSimilarity`, `vectorNorm` is the cosine similarity clamped to `[0, 1]`. For the other vector search types it is the min-max normalized distance within the candidate set, with the best candidate at `1`. `textNorm` is the document's `TextScore` divided by the highest `TextScore` among the candidates, or `0` when the document is not a text match. The result is also in `[0, 1]`.
+
+`Filter` is the old behavior, kept for callers that depend on it. The text query is a required filter, so only text matches come back, ranked by `(1 - w) * vectorScore + w * textScore` on the raw scales (a cosine similarity added to a `ts_rank` value that is usually much smaller). Pair it with `FullText.MatchMode = All` to reproduce what RecallDB returned before the change.
+
+In `Rrf` and `Linear` results, `Score` is the fused score, `VectorScore` is the raw similarity, `TextScore` is the raw text rank, and `VectorRank` and `TextRank` are the 1-based positions in each leg. `VectorRank` is omitted when the document fell outside the vector leg's candidates. `TextRank` and `TextScore` are omitted when it did not match the text query.
+
+**Candidate pool and `TotalRecords`.** `Hybrid.CandidatePool` defaults to `max(MaxResults * 4, 100)`, capped at 1000. For `Rrf` and `Linear`, `TotalRecords` is the size of the fused candidate set, not a count of every document in the collection that matches in some way. It never exceeds `2 * CandidatePool`, and continuation tokens page within that set, so raise `CandidatePool` if you need to page deeper.
+
+**Thresholds.** `SearchQuery.MinimumScore` and `MaximumScore` are applied in SQL to the fused `Score` in hybrid searches and to the text score in full-text searches, which keeps `TotalRecords` and pagination consistent with the pages you get back. `FullText.MinimumScore` excludes documents in full-text-only and `Filter` searches. In `Rrf` and `Linear` it only gates the text leg, so a document below it can still be returned on the strength of its vector rank. Thresholds on vector-only searches work as they did before.
+
+A `Hybrid` object on a search that lacks one of the legs is ignored, and the response's `Notice` says so.
+
+**Notices.** `SearchResult.Notice` is omitted unless the server has something to say about how the search ran:
+
+| Notice | When |
+|--------|------|
+| `The text query contained no searchable terms.` | Full-text-only search whose query is all stop words. The search succeeds with zero results. |
+| `The text query contained no searchable terms; results are ranked by the vector leg only.` | The same situation in a hybrid search. |
+| `Full-text language '<name>' is not served by the full-text index; the text match was evaluated without an index.` | `FullText.Language` is something other than `english`. Results are correct, but the text match cannot use the GIN index. |
+| `Hybrid options were ignored because the search does not include both a vector query and a text query.` | `Hybrid` was sent with only one leg. |
+
+Notices are informational and their wording may change, so don't branch on the text.
+
+### Search Validation Errors
+
+The search endpoint answers `400 Bad Request` with a message naming the field when any of these rules is broken. Some range checks run while the request body is deserialized, and those can come back in a different body shape from the service-level errors. Rely on the status code and the message, not on a particular error object.
+
+| Field | Rule |
+|-------|------|
+| request body | Required |
+| `Vector.Embeddings` | Every value must be a finite number |
+| `FullText.Query` | Must be non-blank when there is no vector (`FullText.Query is required for a full-text search.`) |
+| `FullText.MatchMode` | One of `Any`, `All`, `Phrase`, `WebSearch` |
+| `FullText.SearchType` | One of `TsRank`, `TsRankCd` |
+| `FullText.Language` | A text search configuration installed in PostgreSQL (`pg_ts_config`: `english`, `simple`, `spanish`, `german`, `french` and so on). Case-insensitive. |
+| `FullText.Normalization` | 0-63 |
+| `FullText.TextWeight` | 0.0-1.0. Out-of-range values are rejected; earlier builds clamped them silently. |
+| `Hybrid.Strategy` | One of `Rrf`, `Linear`, `Filter` |
+| `Hybrid.RrfK` | 1-100000 |
+| `Hybrid.CandidatePool` | 1-10000, or null for the default |
 
 ---
 
@@ -1529,30 +1596,71 @@ When `IncludeNeighbors` is set to `N` in the search query, each matched document
 | `SortOrder` | string | `ScoreDescending` | Result ordering (see SortOrderEnum) |
 | `Vector` | VectorQuery | null | Vector search parameters |
 | `FullText` | FullTextQuery | null | Full-text search parameters for content relevance scoring |
+| `Hybrid` | HybridQuery | null | How the vector and text legs are combined when both are present. Null means `Rrf` with default settings (see HybridQuery Fields) |
 | `LabelFilter` | LabelFilter | null | Include/exclude by label |
 | `TagFilter` | TagFilterSet | null | Include/exclude by tag conditions |
 | `Terms` | TermsFilter | null | Include/exclude by content substring (case-insensitive) |
 | `CreatedAfter` | datetime | null | Filter to documents created after this time |
 | `CreatedBefore` | datetime | null | Filter to documents created before this time |
 | `DocumentIds` | string[] | [] | Restrict search to these document IDs |
-| `MinimumScore` | double | null | Minimum score threshold |
-| `MaximumScore` | double | null | Maximum score threshold |
+| `MinimumScore` | double | null | Minimum score threshold. Applies to the fused score in hybrid searches and to the text score in full-text searches |
+| `MaximumScore` | double | null | Maximum score threshold. Same scope as `MinimumScore` |
 | `MinimumDistance` | double | null | Minimum distance threshold |
 | `MaximumDistance` | double | null | Maximum distance threshold |
 | `MaxResults` | int | 10 | Results per page (1-1000) |
 | `IncludeNeighbors` | int (nullable) | null | Number of neighboring chunks before and after each matched chunk to include (0-10). When set, each document includes a Neighbors array. |
+| `IncludeEmbeddings` | bool | false | Return each hit's stored embedding vector in `Embeddings`. Off by default to keep responses small |
 | `ContinuationToken` | string | null | Token for next page of results |
 
 ### FullTextQuery Fields
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `Query` | string | required | The search text to match against content |
+| `Query` | string | required | The search text to match against content. Required (non-blank) for a full-text-only search; a blank value next to a vector is ignored |
+| `MatchMode` | string | `Any` | Which documents match the query (see TextMatchModeEnum) |
 | `SearchType` | string | `TsRank` | Ranking function: TsRank or TsRankCd (see TextSearchTypeEnum) |
-| `Language` | string | `english` | Text search configuration (PostgreSQL text search language) |
-| `Normalization` | int | `32` | ts_rank normalization bitmask (0, 1, 2, 32) |
-| `MinimumScore` | double | null | Minimum text relevance score threshold |
-| `TextWeight` | double | `0.5` | Weight for text score in hybrid mode (0.0-1.0) |
+| `Language` | string | `english` | PostgreSQL text search configuration. Must exist in `pg_ts_config` (case-insensitive). Only `english` uses the full-text index |
+| `Normalization` | int | `32` | ts_rank normalization bitmask (0-63; common values 0, 1, 2, 32) |
+| `MinimumScore` | double | null | Minimum text relevance score. Excludes documents in full-text and `Filter` searches; gates only the text leg in `Rrf` and `Linear` |
+| `TextWeight` | double | `0.5` | The text leg's share in hybrid search (0.0-1.0); the vector leg gets `1 - TextWeight`. Out-of-range values are rejected |
+
+### HybridQuery Fields
+
+Used only when the search has both a vector query and a text query. Otherwise it is ignored and the response carries a `Notice`.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `Strategy` | string | `Rrf` | How the legs are combined (see HybridStrategyEnum) |
+| `RrfK` | int | `60` | RRF constant k (1-100000). Larger values flatten the gap between adjacent ranks. Only used by `Rrf` |
+| `CandidatePool` | int (nullable) | null | Candidates each leg retrieves before fusion (1-10000). Null means `max(MaxResults * 4, 100)`, capped at 1000. `TotalRecords` is at most `2 * CandidatePool` for `Rrf` and `Linear` |
+
+### SearchResult Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Success` | bool | Whether the search ran |
+| `MaxResults` | int | Page size that was applied |
+| `ContinuationToken` | string | Token for the next page, or null at the end |
+| `EndOfResults` | bool | True when there are no more pages |
+| `TotalRecords` | long | Total matching records. For hybrid `Rrf` and `Linear`, the size of the fused candidate set (at most `2 * CandidatePool`) |
+| `RecordsRemaining` | long | Records left after this page |
+| `Documents` | DocumentRecord[] | The hits for this page |
+| `Notice` | string | Informational message about how the search ran (see [Search Modes](#search-modes)). Omitted when null |
+| `TotalMs` | double | Server-side processing time in milliseconds |
+
+### Search Hit Fields (DocumentRecord)
+
+Each entry in `SearchResult.Documents` is a `DocumentRecord` with these search-specific fields added. The nullable ones are omitted from the JSON when null.
+
+| Field | Type | Set in | Description |
+|-------|------|--------|-------------|
+| `Score` | double | all modes | Vector similarity (vector-only), text rank (full-text-only), or fused score (hybrid; in [0, 1] for `Rrf` and `Linear`) |
+| `VectorScore` | double (nullable) | vector-only, hybrid | Raw similarity in the units of `Vector.SearchType` |
+| `VectorRank` | int (nullable) | hybrid `Rrf`, `Linear` | 1-based rank in the vector leg; null when outside the leg's candidates |
+| `TextScore` | double (nullable) | full-text, hybrid | Raw `ts_rank` / `ts_rank_cd` value. In hybrid `Rrf` and `Linear` it is null for documents that did not match the text query |
+| `TextRank` | int (nullable) | hybrid `Rrf`, `Linear` | 1-based rank in the text leg; null when the document is not a text match |
+| `Embeddings` | float[] | when `IncludeEmbeddings` is true | The stored vector. Null by default |
+| `Neighbors` | array | when `IncludeNeighbors` is set | Surrounding chunks (see [Neighbor Retrieval](#neighbor-retrieval)) |
 
 ### EnumerationQuery Fields
 
@@ -1619,12 +1727,29 @@ When `IncludeNeighbors` is set to `N` in the search query, each matched document
 | `EuclideanDistance` | Euclidean distance (lower = more similar) |
 | `InnerProduct` | Inner product |
 
-**TextSearchTypeEnum** — used in `FullTextQuery.SearchType`:
+**TextSearchTypeEnum** (used in `FullTextQuery.SearchType`):
 
 | Value | Description |
 |-------|-------------|
 | `TsRank` | Standard scoring: term frequency with length normalization |
 | `TsRankCd` | Cover density ranking: rewards term proximity |
+
+**TextMatchModeEnum** (used in `FullTextQuery.MatchMode`):
+
+| Value | Description |
+|-------|-------------|
+| `Any` | Default. Matches documents containing any meaningful term of the query (stemmed, stop words removed). Operators typed into the query are treated as plain text. Documents matching more and rarer terms rank higher |
+| `All` | Every term is required (`plainto_tsquery`). The behavior before this release |
+| `Phrase` | The terms must appear adjacent and in order (`phraseto_tsquery`) |
+| `WebSearch` | Search-box syntax (`websearch_to_tsquery`): `"quoted phrase"`, `or`, and `-exclude` |
+
+**HybridStrategyEnum** (used in `HybridQuery.Strategy`):
+
+| Value | Description |
+|-------|-------------|
+| `Rrf` | Default. Weighted Reciprocal Rank Fusion over the union of both legs. Scores normalized to [0, 1] |
+| `Linear` | Normalized score blend over the union of both legs. Scores in [0, 1] |
+| `Filter` | Legacy. The text query is a required filter and the score is the raw `(1 - w) * vector + w * text` blend |
 
 **ContentTypeEnum** — used in `DocumentRecord.ContentType`:
 

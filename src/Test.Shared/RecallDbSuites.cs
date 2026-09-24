@@ -19,6 +19,7 @@ namespace Test.Shared
         private static IReadOnlyList<TestSuiteDescriptor> BuildAll()
         {
             List<TestSuiteDescriptor> suites = new List<TestSuiteDescriptor>(BuildSuites());
+            suites.Add(HybridSearchSuites.Suite);
             suites.Add(RecallDbMcpSuites.Suite);
             return suites;
         }
@@ -1209,35 +1210,37 @@ namespace Test.Shared
                         // 69. Search Terms Required
                         Case("SearchTermsRequired", "Search terms: required", async ct =>
                         {
-                            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TermsFilter = new { Required = new List<string> { "machine learning" } }, MaxResults = 20 }).ConfigureAwait(false);
+                            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, Terms = new { Required = new List<string> { "machine learning" } }, MaxResults = 20 }).ConfigureAwait(false);
+                            foreach (JsonElement termDoc in GetDocs(json).EnumerateArray())
+                                AssertTrue(termDoc.GetProperty("Content").GetString().IndexOf("machine learning", StringComparison.OrdinalIgnoreCase) >= 0, "Terms.Required should keep only documents containing the term");
                             AssertTrue(GetDocs(json).GetArrayLength() > 0, "Terms required filter should return results");
                         }),
 
                         // 70. Search Terms Excluded
                         Case("SearchTermsExcluded", "Search terms: excluded", async ct =>
                         {
-                            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TermsFilter = new { Excluded = new List<string> { "quantum" } }, MaxResults = 20 }).ConfigureAwait(false);
+                            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, Terms = new { Excluded = new List<string> { "quantum" } }, MaxResults = 20 }).ConfigureAwait(false);
                             AssertTrue(GetDocs(json).GetArrayLength() > 0, "Terms excluded filter should return results");
                         }),
 
                         // 71. Search Terms Required Multiple
                         Case("SearchTermsRequiredMultiple", "Search terms: required multiple", async ct =>
                         {
-                            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TermsFilter = new { Required = new List<string> { "learning", "neural" } }, MaxResults = 20 }).ConfigureAwait(false);
+                            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, Terms = new { Required = new List<string> { "learning", "neural" } }, MaxResults = 20 }).ConfigureAwait(false);
                             AssertTrue(GetDocs(json).GetArrayLength() > 0, "Terms required multiple filter should return results");
                         }),
 
                         // 72. Search Terms Required And Excluded
                         Case("SearchTermsRequiredAndExcluded", "Search terms: required and excluded", async ct =>
                         {
-                            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TermsFilter = new { Required = new List<string> { "health" }, Excluded = new List<string> { "meditation" } }, MaxResults = 20 }).ConfigureAwait(false);
+                            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, Terms = new { Required = new List<string> { "health" }, Excluded = new List<string> { "meditation" } }, MaxResults = 20 }).ConfigureAwait(false);
                             AssertTrue(GetDocs(json).GetArrayLength() > 0, "Terms required and excluded filter should return results");
                         }),
 
                         // 73. Search Terms Case Insensitive
                         Case("SearchTermsCaseInsensitive", "Search terms: case insensitive", async ct =>
                         {
-                            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, TermsFilter = new { Required = new List<string> { "MACHINE LEARNING" } }, MaxResults = 20 }).ConfigureAwait(false);
+                            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } }, Terms = new { Required = new List<string> { "MACHINE LEARNING" } }, MaxResults = 20 }).ConfigureAwait(false);
                             AssertTrue(GetDocs(json).GetArrayLength() > 0, "Terms case insensitive filter should return results");
                         }),
 
@@ -1330,7 +1333,7 @@ namespace Test.Shared
                             var json = await DoSearch(new
                             {
                                 Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } },
-                                TermsFilter = new { Required = new List<string> { "exercise" } },
+                                Terms = new { Required = new List<string> { "exercise" } },
                                 LabelFilter = new { Required = new List<string> { "lifestyle" } },
                                 MaxResults = 20
                             }).ConfigureAwait(false);
@@ -1345,7 +1348,7 @@ namespace Test.Shared
                                 Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.9f, 0.1f, 0.05f } },
                                 LabelFilter = new { Required = new List<string> { "science" } },
                                 TagFilter = new { Required = new List<object> { new { Key = "year", Condition = "Equals", Value = "2024" } } },
-                                TermsFilter = new { Required = new List<string> { "learning" } },
+                                Terms = new { Required = new List<string> { "learning" } },
                                 CreatedAfter = DateTime.UtcNow.AddHours(-1).ToString("o"),
                                 CreatedBefore = DateTime.UtcNow.AddHours(1).ToString("o"),
                                 MaxResults = 20
@@ -1397,6 +1400,12 @@ namespace Test.Shared
                                 double ts = doc.GetProperty("TextScore").GetDouble();
                                 AssertTrue(ts >= 0.01, "TextScore should be >= minimum threshold");
                             }
+                            AssertEqual((long)GetDocs(json).GetArrayLength(), json.GetProperty("TotalRecords").GetInt64(), "TotalRecords should equal the post-threshold count");
+
+                            // A threshold above every score returns an empty page and TotalRecords 0 (not a short page).
+                            JsonElement jsonHigh = await DoSearch(new { FullText = new { Query = "learning", MinimumScore = 0.99 }, MaxResults = 10 }).ConfigureAwait(false);
+                            AssertEqual(0, GetDocs(jsonHigh).GetArrayLength(), "No document should pass a 0.99 text threshold");
+                            AssertEqual(0L, jsonHigh.GetProperty("TotalRecords").GetInt64(), "TotalRecords should reflect the threshold");
                         }),
 
                         // 90. Search Full Text Sort Descending
@@ -1432,14 +1441,26 @@ namespace Test.Shared
                         // 92. Search Hybrid Basic
                         Case("SearchHybridBasic", "Search hybrid: vector + full-text", async ct =>
                         {
+                            // Rrf (default) fuses the union of both legs, so a text match is optional: text matches
+                            // carry a TextScore, and vector-only hits carry none.
                             var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = SearchEmb }, FullText = new { Query = "machine learning" }, MaxResults = 10 }).ConfigureAwait(false);
                             var docs = GetDocs(json);
                             AssertTrue(docs.GetArrayLength() > 0, "Hybrid search should return results");
+                            int textMatches = 0;
                             foreach (JsonElement doc in docs.EnumerateArray())
                             {
                                 AssertTrue(doc.GetProperty("Score").GetDouble() > 0, "Score should be > 0");
-                                AssertTrue(doc.TryGetProperty("TextScore", out JsonElement ts) && ts.GetDouble() > 0, "TextScore should be populated");
+                                if (doc.TryGetProperty("TextScore", out JsonElement ts) && ts.ValueKind == JsonValueKind.Number)
+                                {
+                                    AssertTrue(ts.GetDouble() > 0, "A populated TextScore should be > 0");
+                                    textMatches++;
+                                }
+                                else
+                                {
+                                    AssertTrue(!doc.TryGetProperty("TextRank", out _), "A hit without a TextScore should have no TextRank");
+                                }
                             }
+                            AssertTrue(textMatches > 0, "At least one hybrid hit should be a text match");
                         }),
 
                         // 93. Search Hybrid Custom Weight
@@ -1467,8 +1488,10 @@ namespace Test.Shared
                         // 96. Search Hybrid With Terms Filter
                         Case("SearchHybridWithTermsFilter", "Search hybrid: with terms filter", async ct =>
                         {
-                            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = SearchEmb }, FullText = new { Query = "learning" }, TermsFilter = new { Required = new List<string> { "Machine" } }, MaxResults = 20 }).ConfigureAwait(false);
+                            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = SearchEmb }, FullText = new { Query = "learning" }, Terms = new { Required = new List<string> { "Machine" } }, MaxResults = 20 }).ConfigureAwait(false);
                             AssertTrue(GetDocs(json).GetArrayLength() > 0, "Hybrid with terms filter should return results");
+                            foreach (JsonElement doc in GetDocs(json).EnumerateArray())
+                                AssertTrue(doc.GetProperty("Content").GetString().IndexOf("machine", StringComparison.OrdinalIgnoreCase) >= 0, "Terms.Required applies to both hybrid legs");
                         }),
 
                         // 97. Search Hybrid With Date Range
@@ -1537,13 +1560,15 @@ namespace Test.Shared
                         // 102. Search Full Text With Terms Filter
                         Case("SearchFullTextWithTermsFilter", "Search full-text: with terms filter", async ct =>
                         {
-                            var json = await DoSearch(new { FullText = new { Query = "learning" }, TermsFilter = new { Required = new List<string> { "Machine" } }, MaxResults = 20 }).ConfigureAwait(false);
+                            var json = await DoSearch(new { FullText = new { Query = "learning" }, Terms = new { Required = new List<string> { "Machine" } }, MaxResults = 20 }).ConfigureAwait(false);
                             var docs = GetDocs(json);
                             AssertTrue(docs.GetArrayLength() > 0, "Full-text with terms filter should return results");
                             foreach (JsonElement doc in docs.EnumerateArray())
                             {
                                 AssertTrue(doc.GetProperty("TextScore").GetDouble() > 0, "TextScore should be > 0");
+                                AssertTrue(doc.GetProperty("Content").GetString().IndexOf("machine", StringComparison.OrdinalIgnoreCase) >= 0, "Terms.Required should keep only documents containing the term");
                             }
+                            AssertEqual(1L, json.GetProperty("TotalRecords").GetInt64(), "Only one seed document contains both 'learning' and 'machine'");
                         }),
 
                         // 103. Search Full Text With Date Range
@@ -1603,7 +1628,7 @@ namespace Test.Shared
                         // 107. Search Hybrid Weight Zero
                         Case("SearchHybridWeightZero", "Search hybrid: TextWeight 0.0 matches vector-only", async ct =>
                         {
-                            // TextWeight = 0.0 means pure vector scoring; hybrid score should equal vector score
+                            // TextWeight = 0.0 means the vector leg alone decides the order (Rrf: text contributes 0)
                             var jsonHybrid = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = SearchEmb }, FullText = new { Query = "learning", TextWeight = 0.0 }, MaxResults = 10 }).ConfigureAwait(false);
                             var jsonVector = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = SearchEmb }, MaxResults = 10 }).ConfigureAwait(false);
 
@@ -1617,15 +1642,25 @@ namespace Test.Shared
                             string vectorTopKey = docsVector[0].GetProperty("DocumentKey").GetString();
                             AssertEqual(vectorTopKey, hybridTopKey, "TextWeight=0.0 should produce same top result as vector-only");
 
-                            double hybridScore = docsHybrid[0].GetProperty("Score").GetDouble();
+                            double hybridVectorScore = docsHybrid[0].GetProperty("VectorScore").GetDouble();
                             double vectorScore = docsVector[0].GetProperty("Score").GetDouble();
-                            AssertTrue(Math.Abs(hybridScore - vectorScore) < 0.001, "TextWeight=0.0 hybrid score (" + hybridScore + ") should match vector score (" + vectorScore + ")");
+                            AssertTrue(Math.Abs(hybridVectorScore - vectorScore) < 0.001, "TextWeight=0.0 hybrid VectorScore (" + hybridVectorScore + ") should match vector score (" + vectorScore + ")");
+                            AssertTrue(Math.Abs(docsHybrid[0].GetProperty("Score").GetDouble() - 1.0) < 0.001, "The vector leg's top document scores 1.0 when TextWeight=0.0");
+
+                            int n = Math.Min(docsHybrid.GetArrayLength(), docsVector.GetArrayLength());
+                            for (int i = 0; i < n; i++)
+                            {
+                                // Compare the score sequence rather than keys, so documents tied on distance cannot flake.
+                                double expected = docsVector[i].GetProperty("Score").GetDouble();
+                                double actual = docsHybrid[i].GetProperty("VectorScore").GetDouble();
+                                AssertTrue(Math.Abs(expected - actual) < 0.0001, "TextWeight=0.0 hybrid order should equal vector order at position " + i + " (" + actual + " vs " + expected + ")");
+                            }
                         }),
 
                         // 108. Search Hybrid Weight One
                         Case("SearchHybridWeightOne", "Search hybrid: TextWeight 1.0 matches full-text-only", async ct =>
                         {
-                            // TextWeight = 1.0 means pure full-text scoring; hybrid score should equal text score
+                            // TextWeight = 1.0 means the text leg alone decides the order (Rrf: vector contributes 0)
                             var jsonHybrid = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = SearchEmb }, FullText = new { Query = "learning", TextWeight = 1.0 }, MaxResults = 10 }).ConfigureAwait(false);
                             var jsonFts = await DoSearch(new { FullText = new { Query = "learning" }, MaxResults = 10 }).ConfigureAwait(false);
 
@@ -1639,17 +1674,18 @@ namespace Test.Shared
                             string ftsTopKey = docsFts[0].GetProperty("DocumentKey").GetString();
                             AssertEqual(ftsTopKey, hybridTopKey, "TextWeight=1.0 should produce same top result as full-text-only");
 
-                            double hybridScore = docsHybrid[0].GetProperty("Score").GetDouble();
+                            double hybridTextScore = docsHybrid[0].GetProperty("TextScore").GetDouble();
                             double ftsTextScore = docsFts[0].GetProperty("TextScore").GetDouble();
-                            AssertTrue(Math.Abs(hybridScore - ftsTextScore) < 0.001, "TextWeight=1.0 hybrid score (" + hybridScore + ") should match FTS text score (" + ftsTextScore + ")");
+                            AssertTrue(Math.Abs(hybridTextScore - ftsTextScore) < 0.001, "TextWeight=1.0 hybrid TextScore (" + hybridTextScore + ") should match FTS text score (" + ftsTextScore + ")");
+                            AssertTrue(Math.Abs(docsHybrid[0].GetProperty("Score").GetDouble() - 1.0) < 0.001, "The text leg's top document scores 1.0 when TextWeight=1.0");
                         }),
 
                         // 109. Search Hybrid Blended Score Formula
-                        Case("SearchHybridBlendedScoreFormula", "Search hybrid: blended score formula", async ct =>
+                        Case("SearchHybridBlendedScoreFormula", "Search hybrid: legacy Filter blended score formula", async ct =>
                         {
-                            // Verify Score = (1 - TextWeight) * vectorScore + TextWeight * textScore
+                            // Legacy Filter strategy: Score = (1 - TextWeight) * vectorScore + TextWeight * textScore
                             double textWeight = 0.4;
-                            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = SearchEmb }, FullText = new { Query = "machine learning", TextWeight = textWeight }, MaxResults = 10 }).ConfigureAwait(false);
+                            var json = await DoSearch(new { Vector = new { SearchType = "CosineSimilarity", Embeddings = SearchEmb }, FullText = new { Query = "machine learning", TextWeight = textWeight, MatchMode = "All" }, Hybrid = new { Strategy = "Filter" }, MaxResults = 10 }).ConfigureAwait(false);
                             var docs = GetDocs(json);
                             AssertTrue(docs.GetArrayLength() > 0, "Hybrid search should return results");
 
@@ -2109,14 +2145,14 @@ namespace Test.Shared
                         // 145. Enum Documents Terms Required
                         Case("EnumDocumentsTermsRequired", "Enum docs: terms required", async ct =>
                         {
-                            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", TermsFilter = new { Required = new List<string> { "machine learning" } } }).ConfigureAwait(false);
+                            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", Terms = new { Required = new List<string> { "machine learning" } } }).ConfigureAwait(false);
                             AssertTrue(GetObjects(json).GetArrayLength() > 0, "Terms required filter should return results");
                         }),
 
                         // 146. Enum Documents Terms Excluded
                         Case("EnumDocumentsTermsExcluded", "Enum docs: terms excluded", async ct =>
                         {
-                            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", TermsFilter = new { Excluded = new List<string> { "quantum" } } }).ConfigureAwait(false);
+                            var json = await DoEnumDocs(new { MaxResults = 100, Ordering = "CreatedDescending", Terms = new { Excluded = new List<string> { "quantum" } } }).ConfigureAwait(false);
                             AssertTrue(GetObjects(json).GetArrayLength() > 0, "Terms excluded filter should return results");
                         }),
 
@@ -2142,7 +2178,7 @@ namespace Test.Shared
                                 Ordering = "CreatedDescending",
                                 LabelFilter = new { Required = new List<string> { "science" } },
                                 TagFilter = new { Required = new List<object> { new { Key = "year", Condition = "Equals", Value = "2024" } } },
-                                TermsFilter = new { Required = new List<string> { "learning" } },
+                                Terms = new { Required = new List<string> { "learning" } },
                                 CreatedAfter = DateTime.UtcNow.AddHours(-1).ToString("o"),
                                 CreatedBefore = DateTime.UtcNow.AddHours(1).ToString("o")
                             }).ConfigureAwait(false);

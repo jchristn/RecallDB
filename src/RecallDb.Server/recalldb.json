@@ -12,7 +12,9 @@
     "Password": "recalldb",
     "Schema": "public",
     "RequireEncryption": false,
-    "LogQueries": false
+    "LogQueries": false,
+    "MigrateFullTextColumn": true,
+    "SchemaCommandTimeoutSeconds": 0
   },
   "Logging": {
     "ConsoleLogging": true,

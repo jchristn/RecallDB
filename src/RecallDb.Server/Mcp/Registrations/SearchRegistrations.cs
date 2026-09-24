@@ -29,7 +29,14 @@ namespace RecallDb.Server.Mcp.Registrations
 
             server.RegisterInstrumentedTool(
                 "search/query",
-                "Execute a vector, full-text, or hybrid search within a collection, with optional neighbor enrichment. Supply the SearchQuery as a JSON string.",
+                "Execute a vector, full-text, or hybrid search within a collection, with optional neighbor enrichment. Supply the SearchQuery as a JSON string. "
+                    + "FullText.MatchMode: Any (default; any meaningful term, ranked by relevance), All (every term), Phrase, or WebSearch. "
+                    + "When both Vector and FullText are supplied, Hybrid.Strategy chooses the fusion: Rrf (default; rank fusion over the union of both legs, "
+                    + "scores in [0, 1]), Linear (normalized score blend), or Filter (legacy; text match required). Hybrid.RrfK (default 60) and "
+                    + "Hybrid.CandidatePool (default max(MaxResults x 4, 100), capped at 1000) tune fusion; FullText.TextWeight is the text leg's share. "
+                    + "Results include VectorScore, VectorRank, TextRank, and an optional Notice. "
+                    + "Hybrid example: {\"Vector\":{\"SearchType\":\"CosineSimilarity\",\"Embeddings\":[0.1,0.2,0.3]},"
+                    + "\"FullText\":{\"Query\":\"run the test suite\",\"TextWeight\":0.5},\"Hybrid\":{\"Strategy\":\"Rrf\"},\"MaxResults\":10}",
                 new
                 {
                     type = "object",
@@ -38,7 +45,7 @@ namespace RecallDb.Server.Mcp.Registrations
                         bearerToken = new { type = "string", description = "Caller bearer token." },
                         tenantId = new { type = "string", description = "Tenant ID." },
                         collectionId = new { type = "string", description = "Collection ID." },
-                        search = new { type = "string", description = "SearchQuery serialized as a JSON string." }
+                        search = new { type = "string", description = "SearchQuery serialized as a JSON string (Vector, FullText with MatchMode, Hybrid with Strategy/RrfK/CandidatePool, filters, MaxResults, ContinuationToken)." }
                     },
                     required = new[] { "bearerToken", "tenantId", "collectionId", "search" }
                 },

@@ -113,6 +113,30 @@ namespace RecallDb.Core.Database
         }
 
         /// <summary>
+        /// List the text search configurations (languages) the database supports, for validating
+        /// FullTextQuery.Language. Implementations may cache the list. The default implementation returns an
+        /// empty list, which callers treat as "no allowlist available".
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Lower-case configuration names; never null.</returns>
+        public virtual Task<List<string>> ListTextSearchConfigurationsAsync(CancellationToken token = default)
+        {
+            return Task.FromResult(new List<string>());
+        }
+
+        /// <summary>
+        /// Determine whether a collection's documents table has the stored, indexed content_tsv column.
+        /// Implementations may cache the answer per collection. The default implementation returns false.
+        /// </summary>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>True when the column exists.</returns>
+        public virtual Task<bool> HasStoredTsVectorAsync(string collectionId, CancellationToken token = default)
+        {
+            return Task.FromResult(false);
+        }
+
+        /// <summary>
         /// Execute a SQL query.
         /// </summary>
         /// <param name="query">SQL query.</param>

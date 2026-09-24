@@ -53,6 +53,14 @@ namespace RecallDb.Sdk.Models
         public FullTextQuery FullText { get; set; }
 
         /// <summary>
+        /// Hybrid search options controlling how the vector and full-text legs are combined.
+        /// Only used when both Vector (with embeddings) and FullText (with a non-blank Query) are provided;
+        /// otherwise ignored and the result Notice says so.
+        /// Default: null (the server uses reciprocal rank fusion with its default settings).
+        /// </summary>
+        public HybridQuery Hybrid { get; set; }
+
+        /// <summary>
         /// Terms filter for including or excluding documents by content terms.
         /// </summary>
         public TermsFilter Terms { get; set; }

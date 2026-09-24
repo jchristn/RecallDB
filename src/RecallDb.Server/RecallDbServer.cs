@@ -108,6 +108,7 @@ namespace RecallDb.Server
 
             ApplyMcpEnvironmentOverrides();
             ApplyObservabilityEnvironmentOverrides();
+            ApplyDatabaseEnvironmentOverrides();
 
             #endregion
 
@@ -396,6 +397,13 @@ namespace RecallDb.Server
                 _Settings.Mcp.Port = portValue;
         }
 
+        private static void ApplyDatabaseEnvironmentOverrides()
+        {
+            string migrateFts = Environment.GetEnvironmentVariable("RECALLDB_DB_MIGRATE_FTS_COLUMN");
+            if (!string.IsNullOrEmpty(migrateFts) && bool.TryParse(migrateFts, out bool migrateFtsValue))
+                _Settings.Database.MigrateFullTextColumn = migrateFtsValue;
+        }
+
         private static void ApplyObservabilityEnvironmentOverrides()
         {
             string enabled = Environment.GetEnvironmentVariable("RECALLDB_OBS_ENABLED");
@@ -493,10 +501,27 @@ namespace RecallDb.Server
             [typeof(TenantMetadata)]     = new HashSet<string> { "Id", "CreatedUtc", "LastUpdateUtc" },
             [typeof(Credential)]         = new HashSet<string> { "Id", "TenantId", "BearerToken", "CreatedUtc", "LastUpdateUtc" },
             [typeof(UserMaster)]         = new HashSet<string> { "Id", "TenantId", "CreatedUtc", "LastUpdateUtc" },
-            [typeof(DocumentRecord)]     = new HashSet<string> { "Id", "ContentLength", "Etag", "Sha256", "CreatedUtc", "Distance", "Score", "TextScore", "Neighbors" },
+            [typeof(DocumentRecord)]     = new HashSet<string> { "Id", "ContentLength", "Etag", "Sha256", "CreatedUtc", "Distance", "Score", "TextScore", "VectorScore", "VectorRank", "TextRank", "Neighbors" },
             [typeof(LabelRecord)]        = new HashSet<string> { "Id", "CreatedUtc" },
             [typeof(TagRecord)]          = new HashSet<string> { "Id", "CreatedUtc" },
         };
+
+        /// <summary>
+        /// Build the representative search request example: a hybrid search (vector plus any-term full-text)
+        /// fused with the default Rrf strategy. Documented in REST_API.md.
+        /// </summary>
+        private static SearchQuery BuildSearchExample()
+        {
+            SearchQuery sample = new SearchQuery();
+            sample.Vector = new VectorQuery();
+            sample.Vector.Embeddings = new List<float> { 0.1f, 0.2f, 0.3f };
+            sample.FullText = new FullTextQuery();
+            sample.FullText.Query = "how do I run the test suite";
+            sample.FullText.MatchMode = RecallDb.Core.Enums.TextMatchModeEnum.Any;
+            sample.Hybrid = new HybridQuery();
+            sample.Hybrid.CandidatePool = 100;
+            return sample;
+        }
 
         /// <summary>
         /// Build request-body OpenAPI metadata for an explicit sample instance (used for
@@ -1268,11 +1293,20 @@ namespace RecallDb.Server
                 openApi => openApi
                     .WithTag("Search")
                     .WithSummary("Search")
-                    .WithDescription("Search within a collection using vector similarity, full-text relevance, or hybrid (combined) search. Vector search supports cosine similarity, cosine distance, euclidean similarity, euclidean distance, and inner product. Full-text search uses PostgreSQL ts_rank scoring with stemming and stop word removal. Hybrid search blends vector and text scores with configurable weighting. Filter results by labels, tags, date ranges, terms, and document IDs.")
+                    .WithDescription("Search within a collection using vector similarity, full-text relevance, or hybrid (combined) search. "
+                        + "Vector search supports cosine similarity, cosine distance, euclidean similarity, euclidean distance, and inner product. "
+                        + "Full-text search ranks with PostgreSQL ts_rank or ts_rank_cd (stemming, stop word removal). FullText.MatchMode chooses which documents match: "
+                        + "Any (default; any meaningful term), All (every term), Phrase (terms adjacent and in order), or WebSearch (quoted phrases, or, -exclude). "
+                        + "Hybrid search (both Vector and FullText) combines a vector leg and a text leg per Hybrid.Strategy: "
+                        + "Rrf (default; weighted Reciprocal Rank Fusion over the union of both legs, scores normalized to [0, 1]), "
+                        + "Linear (normalized score blend over the union), or Filter (legacy; the text query is a required filter and scores are the raw blend). "
+                        + "FullText.TextWeight is the text leg's share in every strategy. Fused results carry VectorScore, VectorRank, and TextRank; "
+                        + "TotalRecords for a fused search is at most 2 x Hybrid.CandidatePool. "
+                        + "Filter results by labels, tags, date ranges, terms, and document IDs.")
                     .WithOperationId("search")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))
-                    .WithRequestBody(JsonBody<SearchQuery>("Search parameters including vector, filters, and pagination", true))
+                    .WithRequestBody(BuildJsonBody(BuildSearchExample(), OpenApiSchemaMetadata.Create("object"), "Search parameters including vector, full-text, hybrid options, filters, and pagination", true))
                     .WithResponse(200, OpenApiResponseMetadata.Json("Search results with scored documents", null))
                     .WithResponse(400, OpenApiResponseMetadata.BadRequest())
                     .WithResponse(403, OpenApiResponseMetadata.Forbidden())

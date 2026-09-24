@@ -49,6 +49,12 @@ namespace RecallDb.Sdk.Models
         public double TotalMs { get; set; }
 
         /// <summary>
+        /// Informational message from the server about how the search was evaluated, for example when the
+        /// text query contained no searchable terms or hybrid options were ignored. Null when there is nothing to report.
+        /// </summary>
+        public string Notice { get; set; }
+
+        /// <summary>
         /// Instantiate.
         /// </summary>
         public SearchResult()

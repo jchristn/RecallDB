@@ -101,6 +101,21 @@ namespace RecallDb.Core.Helpers
         }
 
         /// <summary>
+        /// Get a nullable double value from a DataRow.
+        /// </summary>
+        /// <param name="row">DataRow.</param>
+        /// <param name="columnName">Column name.</param>
+        /// <returns>Nullable double value; null when the column is absent or the value is NULL.</returns>
+        public static double? GetNullableDoubleValue(DataRow row, string columnName)
+        {
+            if (row == null) throw new ArgumentNullException(nameof(row));
+            if (string.IsNullOrEmpty(columnName)) throw new ArgumentNullException(nameof(columnName));
+            if (!row.Table.Columns.Contains(columnName)) return null;
+            if (row[columnName] == null || row[columnName] == DBNull.Value) return null;
+            return Convert.ToDouble(row[columnName]);
+        }
+
+        /// <summary>
         /// Get a byte array value from a DataRow.
         /// </summary>
         /// <param name="row">DataRow.</param>

@@ -15,7 +15,7 @@ The RecallDB C# SDK provides a strongly-typed interface for all RecallDB operati
 - **Documents** - Document CRUD, batch creation, and enumeration
 - **Labels** - Document label management for categorical filtering
 - **Tags** - Key-value tag management for metadata filtering
-- **Search** - Vector similarity/distance search with label, tag, terms, date, and pagination filters
+- **Search** - Vector similarity/distance, full-text, and hybrid search with label, tag, terms, date, and pagination filters
 
 ## Requirements
 
@@ -74,6 +74,56 @@ var results = await client.SearchAsync("tenant-id", collection.Id, new SearchQue
     MaxResults = 10
 });
 ```
+
+### Full-text and hybrid search
+
+```csharp
+// Full-text only: matches documents containing any of the terms (MatchMode "Any" is the default)
+SearchResult textResults = await client.SearchAsync("tenant-id", collection.Id, new SearchQuery
+{
+    FullText = new FullTextQuery { Query = "how do I run the test suite", MatchMode = "Any" },
+    MaxResults = 10
+});
+
+// Hybrid: vector and text legs combined with reciprocal rank fusion
+SearchResult hybridResults = await client.SearchAsync("tenant-id", collection.Id, new SearchQuery
+{
+    Vector = new VectorQuery
+    {
+        SearchType = "CosineSimilarity",
+        Embeddings = new List<float> { 0.1f, 0.2f, 0.3f /* ... */ }
+    },
+    FullText = new FullTextQuery { Query = "run the test suite", TextWeight = 0.5 },
+    Hybrid = new HybridQuery { Strategy = "Rrf", RrfK = 60, CandidatePool = 100 },
+    MaxResults = 10
+});
+
+foreach (DocumentRecord d in hybridResults.Documents)
+{
+    Console.WriteLine(d.DocumentKey + " score=" + d.Score + " vectorRank=" + d.VectorRank + " textRank=" + d.TextRank);
+}
+
+// Legacy hybrid: text match required, raw scores blended
+SearchResult legacyResults = await client.SearchAsync("tenant-id", collection.Id, new SearchQuery
+{
+    Vector = new VectorQuery
+    {
+        SearchType = "CosineSimilarity",
+        Embeddings = new List<float> { 0.1f, 0.2f, 0.3f /* ... */ }
+    },
+    FullText = new FullTextQuery { Query = "machine learning", MatchMode = "All" },
+    Hybrid = new HybridQuery { Strategy = "Filter" },
+    MaxResults = 10
+});
+```
+
+Full-text matching notes:
+
+- `FullText.MatchMode` controls how the query text is matched. The default is `Any`: a document matches if it contains any of the query's terms (after stemming and stop word removal), ranked by relevance. `All` requires every term (the previous default behavior), `Phrase` requires the terms adjacent and in order, and `WebSearch` accepts web-search syntax (`"quoted phrase"`, `or`, `-exclude`).
+- When both a vector and a text query are supplied, the two legs are combined with reciprocal rank fusion by default (`Hybrid.Strategy` `Rrf`). Each leg retrieves its own candidates, so a document does not need to match the text query to be returned; `Score` is the fused score in the range 0 to 1, and `VectorRank`, `TextRank`, and `VectorScore` explain where each result came from. `TextScore` is absent for results that did not match the text query.
+- To restore the previous hybrid behavior (the text query is a required filter and raw scores are blended), set `Hybrid.Strategy` to `Filter` and `FullText.MatchMode` to `All`.
+- `FullText.TextWeight` must be between 0.0 and 1.0, `FullText.Normalization` between 0 and 63, and `FullText.Language` must be a text search configuration installed on the server. Out-of-range values are rejected with HTTP 400.
+- The search result may include a `Notice` explaining how the search was evaluated, for example when the text query contained only stop words or hybrid options were ignored.
 
 ## Project Structure
 

@@ -886,8 +886,12 @@ def test_search_full_text_hybrid():
     })
     docs = resp.get("Documents", [])
     assert_true(len(docs) > 0, "Hybrid search should return results")
+    # The default hybrid strategy is Rrf. A text match is not required, so TextScore is absent for
+    # documents that only matched the vector leg.
+    assert_true(any(d.get("TextScore") is not None and d["TextScore"] > 0 for d in docs),
+                "At least one hybrid result should have a TextScore")
     for doc in docs:
-        assert_true(doc.get("TextScore") is not None and doc["TextScore"] > 0, "TextScore should be populated")
+        assert_true(doc.get("TextScore") is None or doc["TextScore"] > 0, "TextScore should be absent or > 0")
         assert_true(doc["Score"] > 0, "Score should be > 0 (blended)")
 
 
@@ -916,6 +920,79 @@ def test_search_full_text_backward_compat():
     assert_true(len(docs) > 0, "Vector-only search should still work")
     for doc in docs:
         assert_true(doc["Score"] > 0, "Score should be > 0")
+
+
+def test_search_full_text_match_mode_any():
+    resp = do_search({"FullText": {"Query": "learning nonexistentzzzterm", "MatchMode": "Any"}, "MaxResults": 10})
+    docs = resp.get("Documents", [])
+    assert_true(len(docs) > 0, "MatchMode Any should return documents that match any term")
+    for doc in docs:
+        assert_true(doc.get("TextScore") is not None and doc["TextScore"] > 0, "TextScore should be > 0")
+
+
+def test_search_full_text_match_mode_all():
+    resp = do_search({"FullText": {"Query": "learning nonexistentzzzterm", "MatchMode": "All"}, "MaxResults": 10})
+    assert_true(resp.get("TotalRecords", 0) == 0, "MatchMode All should return 0 results when one term is absent")
+    assert_true(len(resp.get("Documents", [])) == 0, "Documents list should be empty")
+
+
+def test_search_full_text_hybrid_rrf():
+    resp = do_search({
+        "Vector": {"SearchType": "CosineSimilarity", "Embeddings": _VECTOR_EMBEDDINGS},
+        "FullText": {"Query": "machine learning", "TextWeight": 0.5},
+        "Hybrid": {"Strategy": "Rrf", "RrfK": 60},
+        "MaxResults": 10
+    })
+    docs = resp.get("Documents", [])
+    assert_true(len(docs) > 0, "Hybrid Rrf search should return results")
+    for doc in docs:
+        assert_gte(doc["Score"], 0.0, "Rrf Score")
+        assert_lte(doc["Score"], 1.0, "Rrf Score")
+        assert_true(doc.get("VectorRank") is not None or doc.get("TextRank") is not None,
+                    "Each Rrf result should have a VectorRank or a TextRank")
+        if doc.get("TextRank") is None:
+            assert_true(doc.get("TextScore") is None, "TextScore should be absent when TextRank is absent")
+    assert_true(any(d.get("VectorRank") is not None for d in docs), "At least one Rrf result should have a VectorRank")
+    assert_true(any(d.get("TextRank") is not None for d in docs), "At least one Rrf result should have a TextRank")
+
+
+def test_search_full_text_hybrid_filter():
+    resp = do_search({
+        "Vector": {"SearchType": "CosineSimilarity", "Embeddings": _VECTOR_EMBEDDINGS},
+        "FullText": {"Query": "machine learning", "MatchMode": "All", "TextWeight": 0.3},
+        "Hybrid": {"Strategy": "Filter"},
+        "MaxResults": 10
+    })
+    docs = resp.get("Documents", [])
+    assert_true(len(docs) > 0, "Hybrid Filter search should return results")
+    for doc in docs:
+        assert_true(doc.get("TextScore") is not None and doc["TextScore"] > 0, "Every Filter result should have a TextScore")
+        assert_true(doc["Score"] > 0, "Score should be > 0 (blended)")
+
+
+def _assert_search_bad_request(query):
+    assert_status(lambda: _admin_client.search(_test_tenant_id, _test_collection_id, query), 400)
+
+
+def test_search_full_text_validation_text_weight():
+    _assert_search_bad_request({"FullText": {"Query": "learning", "TextWeight": 1.5}, "MaxResults": 10})
+
+
+def test_search_full_text_validation_normalization():
+    _assert_search_bad_request({"FullText": {"Query": "learning", "Normalization": 64}, "MaxResults": 10})
+
+
+def test_search_full_text_validation_rrf_k():
+    _assert_search_bad_request({
+        "Vector": {"SearchType": "CosineSimilarity", "Embeddings": _VECTOR_EMBEDDINGS},
+        "FullText": {"Query": "learning"},
+        "Hybrid": {"Strategy": "Rrf", "RrfK": 0},
+        "MaxResults": 10
+    })
+
+
+def test_search_full_text_validation_language():
+    _assert_search_bad_request({"FullText": {"Query": "learning", "Language": "english'); drop table x;--"}, "MaxResults": 10})
 
 
 # ---------------------------------------------------------------------------
@@ -1556,6 +1633,14 @@ def main():
     run_test("Search full-text: with filters", test_search_full_text_with_filters)
     run_test("Search full-text: no match", test_search_full_text_no_match)
     run_test("Search full-text: backward compat", test_search_full_text_backward_compat)
+    run_test("Search full-text: match mode any matches any term", test_search_full_text_match_mode_any)
+    run_test("Search full-text: match mode all requires every term", test_search_full_text_match_mode_all)
+    run_test("Search full-text: hybrid rrf fused scores and ranks", test_search_full_text_hybrid_rrf)
+    run_test("Search full-text: hybrid filter legacy requires text match", test_search_full_text_hybrid_filter)
+    run_test("Search full-text: validation rejects text weight 1.5", test_search_full_text_validation_text_weight)
+    run_test("Search full-text: validation rejects normalization 64", test_search_full_text_validation_normalization)
+    run_test("Search full-text: validation rejects hybrid rrf k 0", test_search_full_text_validation_rrf_k)
+    run_test("Search full-text: validation rejects unknown language", test_search_full_text_validation_language)
 
     # 22. Search Result Validation
     run_test("Search validation: result fields", test_search_result_fields)

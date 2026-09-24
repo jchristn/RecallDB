@@ -225,6 +225,27 @@ namespace Test.Shared
                     AssertTrue(result.ValueKind == JsonValueKind.Object, "search should return an object");
                 }),
 
+                // 12b. search/query hybrid (Rrf): fused results carry ranks and a normalized score
+                Case("McpSearchHybridRrf", "MCP: search/query hybrid Rrf", async ct =>
+                {
+                    if (string.IsNullOrEmpty(_McpCollectionId)) return;
+                    string searchJson = JsonSerializer.Serialize(new
+                    {
+                        Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.1f, 0.2f, 0.3f } },
+                        FullText = new { Query = "hello", MatchMode = "Any" },
+                        Hybrid = new { Strategy = "Rrf", RrfK = 60 },
+                        MaxResults = 5
+                    }, JsonOptions);
+                    JsonElement result = await CallAsync("search/query", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, search = searchJson }).ConfigureAwait(false);
+                    AssertTrue(result.ValueKind == JsonValueKind.Object, "search should return an object");
+                    JsonElement docs = GetProperty(result, "Documents");
+                    AssertTrue(docs.ValueKind == JsonValueKind.Array && docs.GetArrayLength() > 0, "Hybrid search should return the MCP document");
+                    JsonElement top = docs[0];
+                    AssertEqual(1, GetProperty(top, "VectorRank").GetInt32(), "VectorRank");
+                    AssertEqual(1, GetProperty(top, "TextRank").GetInt32(), "TextRank");
+                    AssertTrue(Math.Abs(GetProperty(top, "Score").GetDouble() - 1.0) < 1e-9, "First in both legs scores 1.0");
+                }),
+
                 // 13. requestHistory/enumerate (admin)
                 Case("McpRequestHistoryEnumerate", "MCP: requestHistory/enumerate", async ct =>
                 {
@@ -315,6 +336,17 @@ namespace Test.Shared
                 return;
             }
             throw new InvalidOperationException(message + " should have been denied.");
+        }
+
+        private static JsonElement GetProperty(JsonElement element, string name)
+        {
+            if (element.ValueKind != JsonValueKind.Object) return default;
+            if (element.TryGetProperty(name, out JsonElement value)) return value;
+            foreach (JsonProperty prop in element.EnumerateObject())
+            {
+                if (string.Equals(prop.Name, name, StringComparison.OrdinalIgnoreCase)) return prop.Value;
+            }
+            return default;
         }
 
         private static string GetString(JsonElement element, string name)

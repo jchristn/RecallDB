@@ -51,6 +51,58 @@ const TEXT_SEARCH_TYPES = [
   { value: 'TsRankCd', label: 'TsRankCd (Cover Density)' }
 ]
 
+const MATCH_MODES = [
+  { value: 'Any', label: 'Any', help: 'Matches documents containing any of the query terms (stemmed, stop words removed).' },
+  { value: 'All', label: 'All', help: 'Every query term must appear in the document.' },
+  { value: 'Phrase', label: 'Phrase', help: 'Terms must appear adjacent and in the order given.' },
+  { value: 'WebSearch', label: 'WebSearch', help: 'Web-style syntax: "quoted phrase", or, and -exclude.' }
+]
+
+const HYBRID_STRATEGIES = [
+  { value: 'Rrf', label: 'RRF', help: 'Reciprocal rank fusion of the vector and text result lists. A text match is not required.' },
+  { value: 'Linear', label: 'Linear', help: 'Weighted sum of normalized vector and text scores. A text match is not required.' },
+  { value: 'Filter', label: 'Filter (legacy)', help: 'Text query is a required filter; vector and raw text scores are blended.' }
+]
+
+// Server-side validation ranges, mirrored so errors show before submit.
+const TEXT_WEIGHT_RANGE = { min: 0, max: 1 }
+const NORMALIZATION_RANGE = { min: 0, max: 63 }
+const RRF_K_RANGE = { min: 1, max: 100000 }
+const CANDIDATE_POOL_RANGE = { min: 1, max: 10000 }
+
+const DEFAULT_TEXT_WEIGHT = 0.5
+const DEFAULT_NORMALIZATION = 32
+
+function isBlank(value) {
+  return value === null || value === undefined || String(value).trim() === ''
+}
+
+// Returns the parsed number, or the fallback when the input is blank or not a finite number.
+// Unlike `parseFloat(x) || fallback`, this keeps an explicit 0.
+function numberOrDefault(value, fallback) {
+  if (isBlank(value)) return fallback
+  const n = Number(value)
+  return Number.isFinite(n) ? n : fallback
+}
+
+// Returns an error message when a non-blank input is outside [min, max] (or not an integer when required).
+function rangeError(value, { min, max }, integer) {
+  if (isBlank(value)) return null
+  const n = Number(value)
+  if (!Number.isFinite(n)) return 'Must be a number.'
+  if (integer && !Number.isInteger(n)) return 'Must be a whole number.'
+  if (n < min || n > max) return `Must be between ${min} and ${max}.`
+  return null
+}
+
+const HINT_STYLE = { display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }
+const INVALID_STYLE = { borderColor: 'var(--danger)' }
+
+function FieldError({ message }) {
+  if (!message) return null
+  return <span role="alert" style={{ display: 'block', fontSize: 12, color: 'var(--danger)', marginTop: 4 }}>{message}</span>
+}
+
 function parseCommaSep(str) {
   if (!str.trim()) return []
   return str.split(',').map(s => s.trim()).filter(Boolean)
@@ -59,7 +111,8 @@ function parseCommaSep(str) {
 function buildQuery({ embeddings, searchType, minScore, maxScore, minDistance, maxDistance,
   requiredLabels, excludedLabels, requiredTags, excludedTags, requiredTerms, excludedTerms,
   sortOrder, maxResults, includeNeighbors, createdBefore, createdAfter, documentIds,
-  fullTextQuery, fullTextSearchType, fullTextLanguage, fullTextNormalization, fullTextMinScore, fullTextWeight }) {
+  fullTextQuery, fullTextSearchType, fullTextMatchMode, fullTextLanguage, fullTextNormalization, fullTextMinScore, fullTextWeight,
+  hybridStrategy, hybridRrfK, hybridCandidatePool }) {
   const query = {
     SortOrder: sortOrder,
     MaxResults: parseInt(maxResults) || 10
@@ -113,12 +166,21 @@ function buildQuery({ embeddings, searchType, minScore, maxScore, minDistance, m
     query.FullText = {
       Query: fullTextQuery.trim(),
       SearchType: fullTextSearchType || 'TsRank',
+      MatchMode: fullTextMatchMode || 'Any',
       Language: fullTextLanguage || 'english',
-      Normalization: parseInt(fullTextNormalization) || 32,
-      TextWeight: parseFloat(fullTextWeight) || 0.5
+      Normalization: numberOrDefault(fullTextNormalization, DEFAULT_NORMALIZATION),
+      TextWeight: numberOrDefault(fullTextWeight, DEFAULT_TEXT_WEIGHT)
     }
     const ftMinScore = parseFloat(fullTextMinScore)
     if (!isNaN(ftMinScore)) query.FullText.MinimumScore = ftMinScore
+  }
+
+  // Hybrid options only apply when both a vector and a text query are present.
+  if (query.Vector && query.FullText) {
+    const strategy = hybridStrategy || 'Rrf'
+    query.Hybrid = { Strategy: strategy }
+    if (strategy === 'Rrf' && !isBlank(hybridRrfK)) query.Hybrid.RrfK = Number(hybridRrfK)
+    if (strategy !== 'Filter' && !isBlank(hybridCandidatePool)) query.Hybrid.CandidatePool = Number(hybridCandidatePool)
   }
 
   return query
@@ -252,10 +314,15 @@ function SearchTab({ tenantId, collectionId }) {
   const [excludedTerms, setExcludedTerms] = useState('')
   const [fullTextQuery, setFullTextQuery] = useState('')
   const [fullTextSearchType, setFullTextSearchType] = useState('TsRank')
+  const [fullTextMatchMode, setFullTextMatchMode] = useState('Any')
   const [fullTextLanguage, setFullTextLanguage] = useState('english')
-  const [fullTextNormalization, setFullTextNormalization] = useState(32)
+  const [fullTextNormalization, setFullTextNormalization] = useState(DEFAULT_NORMALIZATION)
   const [fullTextMinScore, setFullTextMinScore] = useState('')
-  const [fullTextWeight, setFullTextWeight] = useState(0.5)
+  const [fullTextWeight, setFullTextWeight] = useState(DEFAULT_TEXT_WEIGHT)
+  const [hybridStrategy, setHybridStrategy] = useState('Rrf')
+  const [hybridRrfK, setHybridRrfK] = useState(60)
+  const [hybridCandidatePool, setHybridCandidatePool] = useState('')
+  const [lastSearchWasHybrid, setLastSearchWasHybrid] = useState(false)
   const [sortOrder, setSortOrder] = useState('ScoreDescending')
   const [maxResults, setMaxResults] = useState(10)
   const [includeNeighbors, setIncludeNeighbors] = useState('')
@@ -288,6 +355,25 @@ function SearchTab({ tenantId, collectionId }) {
   const embeddingsMismatch = dimensionality && parsedEmbeddings.length > 0 && parsedEmbeddings.length !== dimensionality
 
   const hasFullTextQuery = fullTextQuery.trim().length > 0
+  const isHybrid = !embeddingsEmpty && hasFullTextQuery
+  const showRrfK = hybridStrategy === 'Rrf'
+  const showCandidatePool = hybridStrategy !== 'Filter'
+
+  const fieldErrors = {
+    fullTextWeight: rangeError(fullTextWeight, TEXT_WEIGHT_RANGE, false),
+    fullTextNormalization: rangeError(fullTextNormalization, NORMALIZATION_RANGE, true),
+    hybridRrfK: isHybrid && showRrfK ? rangeError(hybridRrfK, RRF_K_RANGE, true) : null,
+    hybridCandidatePool: isHybrid && showCandidatePool ? rangeError(hybridCandidatePool, CANDIDATE_POOL_RANGE, true) : null
+  }
+  const fieldLabels = {
+    fullTextWeight: 'Text Weight',
+    fullTextNormalization: 'Normalization',
+    hybridRrfK: 'RRF k',
+    hybridCandidatePool: 'Candidate Pool'
+  }
+
+  const selectedMatchMode = MATCH_MODES.find(m => m.value === fullTextMatchMode) || MATCH_MODES[0]
+  const selectedStrategy = HYBRID_STRATEGIES.find(s => s.value === hybridStrategy) || HYBRID_STRATEGIES[0]
 
   const handleSearch = async (e) => {
     e.preventDefault()
@@ -300,15 +386,22 @@ function SearchTab({ tenantId, collectionId }) {
       setError(new Error(`Embeddings count (${parsedEmbeddings.length}) does not match the collection dimensionality (${dimensionality}).`))
       return
     }
+    const invalid = Object.keys(fieldErrors).filter(k => fieldErrors[k])
+    if (invalid.length > 0) {
+      setError(new Error('Fix the highlighted fields before searching. ' + invalid.map(k => `${fieldLabels[k]}: ${fieldErrors[k]}`).join(' ')))
+      return
+    }
     setLoading(true)
     try {
       const query = buildQuery({
         embeddings, searchType, minScore, maxScore, minDistance, maxDistance,
         requiredLabels, excludedLabels, requiredTags, excludedTags, requiredTerms, excludedTerms,
         sortOrder, maxResults, includeNeighbors, createdBefore, createdAfter, documentIds,
-        fullTextQuery, fullTextSearchType, fullTextLanguage, fullTextNormalization, fullTextMinScore, fullTextWeight
+        fullTextQuery, fullTextSearchType, fullTextMatchMode, fullTextLanguage, fullTextNormalization, fullTextMinScore, fullTextWeight,
+        hybridStrategy, hybridRrfK, hybridCandidatePool
       })
       const result = await api.search(tenantId, collectionId, query)
+      setLastSearchWasHybrid(!!query.Hybrid)
       setResults(result)
     } catch (err) {
       setError(err)
@@ -316,6 +409,12 @@ function SearchTab({ tenantId, collectionId }) {
       setLoading(false)
     }
   }
+
+  const renderScore = (value) => value != null ? <span className="score-badge">{value.toFixed(4)}</span> : '-'
+  const renderRank = (value) => value != null ? value : '-'
+  const resultDocs = results?.Documents || []
+  const showVectorScore = lastSearchWasHybrid || resultDocs.some(d => d.VectorScore != null)
+  const showRanks = lastSearchWasHybrid || resultDocs.some(d => d.VectorRank != null || d.TextRank != null)
 
   const resultColumns = [
     {
@@ -327,15 +426,32 @@ function SearchTab({ tenantId, collectionId }) {
     { key: 'Position', label: 'Pos', width: '60px' },
     { key: 'ContentType', label: 'Type', width: '70px' },
     {
-      key: 'Score', label: 'Score', width: '90px',
-      render: (d) => d.Score != null ? <span className="score-badge">{d.Score.toFixed(4)}</span> : '-',
+      key: 'Score', label: lastSearchWasHybrid ? 'Fused Score' : 'Score', width: '100px',
+      render: (d) => renderScore(d.Score),
       sortValue: (d) => d.Score
     },
+    ...(showVectorScore ? [{
+      key: 'VectorScore', label: 'Vector Score', width: '110px',
+      render: (d) => renderScore(d.VectorScore),
+      sortValue: (d) => d.VectorScore
+    }] : []),
     {
       key: 'TextScore', label: 'Text Score', width: '100px',
-      render: (d) => d.TextScore != null ? <span className="score-badge">{d.TextScore.toFixed(4)}</span> : '-',
+      render: (d) => renderScore(d.TextScore),
       sortValue: (d) => d.TextScore
     },
+    ...(showRanks ? [
+      {
+        key: 'VectorRank', label: 'Vector Rank', width: '100px',
+        render: (d) => renderRank(d.VectorRank),
+        sortValue: (d) => d.VectorRank
+      },
+      {
+        key: 'TextRank', label: 'Text Rank', width: '90px',
+        render: (d) => renderRank(d.TextRank),
+        sortValue: (d) => d.TextRank
+      }
+    ] : []),
     {
       key: 'Content', label: 'Content',
       render: (d) => {
@@ -358,7 +474,7 @@ function SearchTab({ tenantId, collectionId }) {
           {/* Vector Search */}
           <CollapsibleSection title="Vector Search" defaultOpen={true}>
             <div className="form-group">
-              <label>Embeddings (comma-separated floats){dimensionality ? ` — dimensionality: ${dimensionality}` : ''}</label>
+              <label>Embeddings (comma-separated floats){dimensionality ? `, dimensionality: ${dimensionality}` : ''}</label>
               <textarea value={embeddings} onChange={(e) => setEmbeddings(e.target.value)} rows={3} placeholder="0.1, 0.2, 0.3, ..." />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
@@ -395,33 +511,106 @@ function SearchTab({ tenantId, collectionId }) {
               <label>Query</label>
               <textarea value={fullTextQuery} onChange={(e) => setFullTextQuery(e.target.value)} rows={2} placeholder="Enter search terms (e.g. OAuth2 PKCE configuration)" />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
               <div className="form-group">
-                <label>Ranking Function</label>
-                <select value={fullTextSearchType} onChange={(e) => setFullTextSearchType(e.target.value)}>
+                <label htmlFor="ft-rank-function">Ranking Function</label>
+                <select id="ft-rank-function" value={fullTextSearchType} onChange={(e) => setFullTextSearchType(e.target.value)}>
                   {TEXT_SEARCH_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
               </div>
               <div className="form-group">
-                <label>Language</label>
-                <input type="text" value={fullTextLanguage} onChange={(e) => setFullTextLanguage(e.target.value)} placeholder="english" />
+                <label htmlFor="ft-match-mode">Match Mode</label>
+                <select id="ft-match-mode" value={fullTextMatchMode} onChange={(e) => setFullTextMatchMode(e.target.value)} aria-describedby="ft-match-mode-help">
+                  {MATCH_MODES.map(m => <option key={m.value} value={m.value} title={m.help}>{m.label}</option>)}
+                </select>
+                <span id="ft-match-mode-help" style={HINT_STYLE}>{selectedMatchMode.help}</span>
               </div>
               <div className="form-group">
-                <label>Normalization</label>
-                <input type="number" value={fullTextNormalization} onChange={(e) => setFullTextNormalization(e.target.value)} min={0} />
+                <label htmlFor="ft-language">Language</label>
+                <input id="ft-language" type="text" value={fullTextLanguage} onChange={(e) => setFullTextLanguage(e.target.value)} placeholder="english" />
+              </div>
+              <div className="form-group">
+                <label htmlFor="ft-normalization">Normalization (0-63)</label>
+                <input
+                  id="ft-normalization" type="number" step="1"
+                  min={NORMALIZATION_RANGE.min} max={NORMALIZATION_RANGE.max}
+                  value={fullTextNormalization}
+                  onChange={(e) => setFullTextNormalization(e.target.value)}
+                  placeholder={String(DEFAULT_NORMALIZATION)}
+                  aria-invalid={!!fieldErrors.fullTextNormalization}
+                  style={fieldErrors.fullTextNormalization ? INVALID_STYLE : undefined}
+                />
+                <FieldError message={fieldErrors.fullTextNormalization} />
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               <div className="form-group">
-                <label>Min Text Score</label>
-                <input type="number" step="any" value={fullTextMinScore} onChange={(e) => setFullTextMinScore(e.target.value)} placeholder="0.0" />
+                <label htmlFor="ft-min-score">Min Text Score</label>
+                <input id="ft-min-score" type="number" step="any" value={fullTextMinScore} onChange={(e) => setFullTextMinScore(e.target.value)} placeholder="0.0" />
               </div>
               <div className="form-group">
-                <label>Text Weight (hybrid blend, 0.0-1.0)</label>
-                <input type="number" step="0.1" min="0" max="1" value={fullTextWeight} onChange={(e) => setFullTextWeight(e.target.value)} placeholder="0.5" />
+                <label htmlFor="ft-text-weight">Text Weight (hybrid blend, 0.0-1.0)</label>
+                <input
+                  id="ft-text-weight" type="number" step="0.1"
+                  min={TEXT_WEIGHT_RANGE.min} max={TEXT_WEIGHT_RANGE.max}
+                  value={fullTextWeight}
+                  onChange={(e) => setFullTextWeight(e.target.value)}
+                  placeholder={String(DEFAULT_TEXT_WEIGHT)}
+                  aria-invalid={!!fieldErrors.fullTextWeight}
+                  style={fieldErrors.fullTextWeight ? INVALID_STYLE : undefined}
+                />
+                <span style={HINT_STYLE}>Share given to the text leg in hybrid search; the vector leg gets the rest. 0 ranks by vector only.</span>
+                <FieldError message={fieldErrors.fullTextWeight} />
               </div>
             </div>
           </CollapsibleSection>
+
+          {/* Hybrid ranking: only meaningful when both a vector and a text query are supplied */}
+          {isHybrid && (
+            <CollapsibleSection title="Hybrid Ranking" defaultOpen={true}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+                <div className="form-group">
+                  <label htmlFor="hy-strategy">Hybrid Strategy</label>
+                  <select id="hy-strategy" value={hybridStrategy} onChange={(e) => setHybridStrategy(e.target.value)} aria-describedby="hy-strategy-help">
+                    {HYBRID_STRATEGIES.map(s => <option key={s.value} value={s.value} title={s.help}>{s.label}</option>)}
+                  </select>
+                  <span id="hy-strategy-help" style={HINT_STYLE}>{selectedStrategy.help}</span>
+                </div>
+                {showRrfK && (
+                  <div className="form-group">
+                    <label htmlFor="hy-rrf-k">RRF k</label>
+                    <input
+                      id="hy-rrf-k" type="number" step="1"
+                      min={RRF_K_RANGE.min} max={RRF_K_RANGE.max}
+                      value={hybridRrfK}
+                      onChange={(e) => setHybridRrfK(e.target.value)}
+                      placeholder="60"
+                      aria-invalid={!!fieldErrors.hybridRrfK}
+                      style={fieldErrors.hybridRrfK ? INVALID_STYLE : undefined}
+                    />
+                    <span style={HINT_STYLE}>Rank smoothing constant, 1-100000 (default 60). Larger values flatten rank differences.</span>
+                    <FieldError message={fieldErrors.hybridRrfK} />
+                  </div>
+                )}
+                {showCandidatePool && (
+                  <div className="form-group">
+                    <label htmlFor="hy-candidate-pool">Candidate Pool</label>
+                    <input
+                      id="hy-candidate-pool" type="number" step="1"
+                      min={CANDIDATE_POOL_RANGE.min} max={CANDIDATE_POOL_RANGE.max}
+                      value={hybridCandidatePool}
+                      onChange={(e) => setHybridCandidatePool(e.target.value)}
+                      placeholder="Auto"
+                      aria-invalid={!!fieldErrors.hybridCandidatePool}
+                      style={fieldErrors.hybridCandidatePool ? INVALID_STYLE : undefined}
+                    />
+                    <span style={HINT_STYLE}>Candidates each leg retrieves before fusion, 1-10000. Leave blank for automatic (max of 4x Max Results and 100, capped at 1000).</span>
+                    <FieldError message={fieldErrors.hybridCandidatePool} />
+                  </div>
+                )}
+              </div>
+            </CollapsibleSection>
+          )}
 
           {/* Filters */}
           <CollapsibleSection title="Filters">
@@ -554,6 +743,18 @@ function SearchTab({ tenantId, collectionId }) {
           <p style={{ marginBottom: 12, color: 'var(--text-secondary)' }}>
             {results.TotalRecords || 0} total results {results.EndOfResults ? '' : `(showing first ${results.Documents?.length || 0})`}
           </p>
+          {results.Notice && (
+            <div
+              role="status"
+              style={{
+                marginBottom: 12, padding: '10px 16px', fontSize: 14, borderRadius: 6,
+                background: 'var(--card-bg)', color: 'var(--text)',
+                border: '1px solid var(--border)', borderLeft: '4px solid var(--warning)'
+              }}
+            >
+              <strong>Notice:</strong> {results.Notice}
+            </div>
+          )}
           <div className="card">
             <DataTable
               data={results.Documents || []}
@@ -856,7 +1057,7 @@ function QueryTab({ tenantId, collectionId }) {
             <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
               {results.TotalRecords || 0} total records
               {results.RecordsRemaining > 0 ? ` (${results.RecordsRemaining} remaining)` : ''}
-              {results.EndOfResults ? ' — end of results' : ''}
+              {results.EndOfResults ? ' (end of results)' : ''}
             </p>
             {!results.EndOfResults && results.ContinuationToken && (
               <button type="button" className="btn btn-secondary" onClick={handleNextPage} disabled={loading}>

@@ -1978,13 +1978,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"SortOrder\": \"ScoreDescending\",\n  \"MaxResults\": 10,\n  \"FullText\": {\n    \"Query\": \"machine learning neural networks\",\n    \"SearchType\": \"TsRank\",\n    \"Language\": \"english\",\n    \"Normalization\": 32,\n    \"MinimumScore\": 0.01\n  }\n}",
+              "raw": "{\n  \"SortOrder\": \"ScoreDescending\",\n  \"MaxResults\": 10,\n  \"FullText\": {\n    \"Query\": \"machine learning neural networks\",\n    \"MatchMode\": \"Any\",\n    \"SearchType\": \"TsRank\",\n    \"Language\": \"english\",\n    \"Normalization\": 32,\n    \"MinimumScore\": 0.01\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
-            }
+            },
+            "description": "Full-text-only search. With `MatchMode` `Any` (the default) a document matches when it contains any meaningful word of the query after stemming and stop-word removal, and documents matching more and rarer words rank higher. Set `MatchMode` to `All` to require every term. `Language` must be a PostgreSQL text search configuration; only `english` is served by the full-text index. A query made only of stop words returns zero results and a `Notice`."
           },
           "response": []
         },
@@ -2020,13 +2021,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"SortOrder\": \"ScoreDescending\",\n  \"MaxResults\": 10,\n  \"Vector\": {\n    \"SearchType\": \"CosineSimilarity\",\n    \"Embeddings\": [0.1, 0.2, 0.3]\n  },\n  \"FullText\": {\n    \"Query\": \"machine learning\",\n    \"TextWeight\": 0.3\n  }\n}",
+              "raw": "{\n  \"SortOrder\": \"ScoreDescending\",\n  \"MaxResults\": 10,\n  \"Vector\": {\n    \"SearchType\": \"CosineSimilarity\",\n    \"Embeddings\": [\n      0.1,\n      0.2,\n      0.3\n    ]\n  },\n  \"FullText\": {\n    \"Query\": \"machine learning\",\n    \"TextWeight\": 0.3\n  },\n  \"Hybrid\": {\n    \"Strategy\": \"Rrf\",\n    \"RrfK\": 60,\n    \"CandidatePool\": 100\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
-            }
+            },
+            "description": "Hybrid search with weighted Reciprocal Rank Fusion, the default strategy. The vector leg and the text leg each retrieve their top `CandidatePool` documents under the same filters, and the union is ranked by `((1 - w) / (k + VectorRank) + w / (k + TextRank)) * (k + 1)`, where `w` is `FullText.TextWeight` and `k` is `Hybrid.RrfK`. A text match is not required. Scores are in [0, 1], each hit reports `VectorScore`, `VectorRank`, `TextScore` and `TextRank`, and `TotalRecords` is the size of the fused candidate set (at most 2 x CandidatePool). Change `Strategy` to `Linear` for a normalized score blend."
           },
           "response": []
         },
@@ -2062,13 +2064,143 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"SortOrder\": \"TextScoreDescending\",\n  \"MaxResults\": 20,\n  \"FullText\": {\n    \"Query\": \"database migration\",\n    \"SearchType\": \"TsRankCd\"\n  },\n  \"LabelFilter\": {\n    \"Required\": [\"documentation\"]\n  },\n  \"Terms\": {\n    \"Excluded\": [\"deprecated\"]\n  },\n  \"CreatedAfter\": \"2025-01-01T00:00:00Z\"\n}",
+              "raw": "{\n  \"SortOrder\": \"TextScoreDescending\",\n  \"MaxResults\": 20,\n  \"FullText\": {\n    \"Query\": \"database migration\",\n    \"MatchMode\": \"All\",\n    \"SearchType\": \"TsRankCd\"\n  },\n  \"LabelFilter\": {\n    \"Required\": [\n      \"documentation\"\n    ]\n  },\n  \"Terms\": {\n    \"Excluded\": [\n      \"deprecated\"\n    ]\n  },\n  \"CreatedAfter\": \"2025-01-01T00:00:00Z\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
-            }
+            },
+            "description": "Full-text search combined with label, terms and date filters. `MatchMode` `All` requires both words to appear, and `TsRankCd` (cover density) rewards documents where they appear close together."
+          },
+          "response": []
+        },
+        {
+          "name": "Full-text: phrase",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1.0/tenants/{{tenant_id}}/collections/{{collection_id}}/search",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1.0",
+                "tenants",
+                "{{tenant_id}}",
+                "collections",
+                "{{collection_id}}",
+                "search"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"SortOrder\": \"ScoreDescending\",\n  \"MaxResults\": 10,\n  \"FullText\": {\n    \"Query\": \"chunk key\",\n    \"MatchMode\": \"Phrase\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Phrase match (`phraseto_tsquery`): the words must appear next to each other and in this order after stemming. \"chunk key\" matches \"the chunk key is\" but not \"the key of the chunk\"."
+          },
+          "response": []
+        },
+        {
+          "name": "Full-text: web search",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1.0/tenants/{{tenant_id}}/collections/{{collection_id}}/search",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1.0",
+                "tenants",
+                "{{tenant_id}}",
+                "collections",
+                "{{collection_id}}",
+                "search"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"SortOrder\": \"ScoreDescending\",\n  \"MaxResults\": 10,\n  \"FullText\": {\n    \"Query\": \"\\\"vector index\\\" or embeddings -deprecated\",\n    \"MatchMode\": \"WebSearch\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Search-box syntax (`websearch_to_tsquery`). Quoted text is a phrase, `or` separates alternatives, and a leading `-` excludes a word. This example finds documents about vector indexes or embeddings while leaving out anything that mentions deprecated."
+          },
+          "response": []
+        },
+        {
+          "name": "Hybrid: legacy filter",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1.0/tenants/{{tenant_id}}/collections/{{collection_id}}/search",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1.0",
+                "tenants",
+                "{{tenant_id}}",
+                "collections",
+                "{{collection_id}}",
+                "search"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"SortOrder\": \"ScoreDescending\",\n  \"MaxResults\": 10,\n  \"Vector\": {\n    \"SearchType\": \"CosineSimilarity\",\n    \"Embeddings\": [\n      0.1,\n      0.2,\n      0.3\n    ]\n  },\n  \"FullText\": {\n    \"Query\": \"machine learning\",\n    \"MatchMode\": \"All\",\n    \"TextWeight\": 0.3\n  },\n  \"Hybrid\": {\n    \"Strategy\": \"Filter\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Restores the hybrid behavior from before the search fix. With `Strategy` `Filter`, the text query is a required filter, so only documents matching it are returned, ranked by `(1 - w) * vectorScore + w * textScore` on raw scales. Combined with `MatchMode` `All` it reproduces the old results exactly. Use it only if you depend on that behavior; `Rrf` is the recommended default."
           },
           "response": []
         },
@@ -2114,7 +2246,8 @@
           },
           "response": []
         }
-      ]
+      ],
+      "description": "Vector, full-text and hybrid search against `{{collection_id}}`. A request with only `Vector` is a vector search, only `FullText` is a full-text search, and both together is a hybrid search combined according to `Hybrid.Strategy` (`Rrf` by default). See REST_API.md, Search Modes, for scoring details."
     },
     {
       "name": "Request History",

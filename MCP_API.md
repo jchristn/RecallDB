@@ -242,6 +242,35 @@ All authenticated tools take `bearerToken`. Listed below are the additional argu
 |------|-----------|---------|
 | `search/query` | `tenantId`, `collectionId`, `search` | Vector / full-text / hybrid search with filters and optional neighbor enrichment. |
 
+The `search` argument is a JSON-encoded `SearchQuery`, the same body the REST search endpoint takes (see [REST_API.md, Search Modes](REST_API.md#search-modes) for the full semantics). The mode follows from what you send: a non-empty `Vector.Embeddings` gives a vector leg, a non-blank `FullText.Query` gives a text leg, and both together give a hybrid search.
+
+Fields that shape full-text and hybrid results:
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `FullText.MatchMode` | string | `Any` | `Any` (any meaningful term), `All` (every term), `Phrase` (adjacent, in order), `WebSearch` (`"quoted phrase"`, `or`, `-exclude`) |
+| `FullText.TextWeight` | double | `0.5` | Text leg's share in hybrid, 0.0-1.0; the vector leg gets the rest |
+| `FullText.Language` | string | `english` | Must be a PostgreSQL text search configuration; only `english` uses the index |
+| `FullText.Normalization` | int | `32` | ts_rank normalization bitmask, 0-63 |
+| `Hybrid.Strategy` | string | `Rrf` | `Rrf` (rank fusion over the union of both legs), `Linear` (normalized score blend over the union), `Filter` (legacy: text query required, raw score blend) |
+| `Hybrid.RrfK` | int | `60` | RRF constant, 1-100000 |
+| `Hybrid.CandidatePool` | int or null | null | Candidates per leg before fusion, 1-10000. Null means `max(MaxResults * 4, 100)` capped at 1000 |
+
+The result is a `SearchResult`. In a hybrid `Rrf` or `Linear` search each document carries a fused `Score` in [0, 1], the raw `VectorScore` and `TextScore`, and its 1-based `VectorRank` and `TextRank` (omitted when the document is absent from that leg). `TotalRecords` is the size of the fused candidate set, at most `2 * CandidatePool`. When the server wants to explain something about the run (a query of only stop words, a language with no index, or `Hybrid` sent without both legs) the result includes a `Notice` string. Out-of-range values produce a 400.
+
+Hybrid example (arguments for `tools/call`):
+
+```json
+{
+  "bearerToken": "default",
+  "tenantId": "default",
+  "collectionId": "docs",
+  "search": "{\"Vector\":{\"SearchType\":\"CosineSimilarity\",\"Embeddings\":[0.1,0.2,0.3]},\"FullText\":{\"Query\":\"how do I run the test suite\",\"MatchMode\":\"Any\",\"TextWeight\":0.5},\"Hybrid\":{\"Strategy\":\"Rrf\",\"RrfK\":60},\"MaxResults\":10}"
+}
+```
+
+To get the pre-fix behavior (only documents containing every term, ranked by vector within them), send `"FullText":{"Query":"...","MatchMode":"All"}` with `"Hybrid":{"Strategy":"Filter"}`.
+
 ### requestHistory (admin)
 
 | Tool | Arguments | Purpose |

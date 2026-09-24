@@ -71,6 +71,10 @@ namespace RecallDb.Server.Observability
         public const string TagMcpTool = "mcp.tool";
         /// <summary>Tag key: search mode.</summary>
         public const string TagSearchMode = "recalldb.search.mode";
+        /// <summary>Tag key: full-text match mode (any, all, phrase, websearch, or none when there is no text leg).</summary>
+        public const string TagSearchMatchMode = "recalldb.search.match_mode";
+        /// <summary>Tag key: hybrid strategy (rrf, linear, filter, or none when the search is not hybrid).</summary>
+        public const string TagSearchHybridStrategy = "recalldb.search.hybrid_strategy";
 
         // ----- HTTP transport instruments -----
 
@@ -290,19 +294,31 @@ namespace RecallDb.Server.Observability
         /// <param name="statusCode">HTTP-equivalent status code.</param>
         /// <param name="seconds">Search duration in seconds.</param>
         /// <param name="resultCount">Number of documents returned.</param>
-        public static void RecordSearch(string origin, string mode, bool success, int statusCode, double seconds, int resultCount)
+        /// <param name="matchMode">Full-text match mode (any, all, phrase, websearch, or none).</param>
+        /// <param name="hybridStrategy">Hybrid strategy (rrf, linear, filter, or none).</param>
+        public static void RecordSearch(string origin, string mode, bool success, int statusCode, double seconds, int resultCount, string matchMode = "none", string hybridStrategy = "none")
         {
             string outcome = ClassifyOutcome(success, statusCode);
             TagList tags = new TagList
             {
                 { TagOrigin, origin },
                 { TagSearchMode, mode ?? "unknown" },
+                { TagSearchMatchMode, matchMode ?? "none" },
+                { TagSearchHybridStrategy, hybridStrategy ?? "none" },
                 { TagOutcome, outcome }
             };
             SearchDuration.Record(seconds, tags);
             SearchQueries.Add(1, tags);
             if (success && resultCount >= 0)
-                SearchResults.Record(resultCount, new TagList { { TagOrigin, origin }, { TagSearchMode, mode ?? "unknown" } });
+            {
+                SearchResults.Record(resultCount, new TagList
+                {
+                    { TagOrigin, origin },
+                    { TagSearchMode, mode ?? "unknown" },
+                    { TagSearchMatchMode, matchMode ?? "none" },
+                    { TagSearchHybridStrategy, hybridStrategy ?? "none" }
+                });
+            }
         }
 
         /// <summary>

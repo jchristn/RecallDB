@@ -37,6 +37,25 @@ Run against a specific endpoint with a custom bearer token:
 dotnet run -- https://recalldb.example.com my-bearer-token
 ```
 
+## Full-Text and Hybrid Search Coverage
+
+The harness exercises the full-text and hybrid search options, so it needs a server that supports `FullText.MatchMode` and `Hybrid`:
+
+- Full-text search matches any query term by default (`MatchMode` `Any`). The harness checks that a query containing one indexed word and one nonexistent word returns results under `Any` and none under `All` (which restores the previous all-terms behavior).
+- Hybrid search defaults to reciprocal rank fusion (`Hybrid.Strategy` `Rrf`). Results may include documents that did not match the text query, whose `TextScore` is absent; fused scores are in the range 0 to 1 and `VectorRank`/`TextRank` are reported. `Hybrid.Strategy` `Filter` restores the previous hybrid behavior, where every result must match the text query.
+- Invalid options (`TextWeight` 1.5, `Normalization` 64, `Hybrid.RrfK` 0, an unknown `Language`) are expected to return HTTP 400.
+
+A minimal hybrid RRF request body:
+
+```json
+{
+  "Vector": { "SearchType": "CosineSimilarity", "Embeddings": [0.9, 0.1, 0.05] },
+  "FullText": { "Query": "machine learning", "TextWeight": 0.5 },
+  "Hybrid": { "Strategy": "Rrf", "RrfK": 60 },
+  "MaxResults": 10
+}
+```
+
 ## Output
 
 The test harness runs 100+ integration tests and outputs results in this format:

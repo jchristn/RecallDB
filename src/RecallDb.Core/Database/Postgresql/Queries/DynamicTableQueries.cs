@@ -27,7 +27,8 @@ namespace RecallDb.Core.Database.Postgresql.Queries
                 "content TEXT, " +
                 "binary_data BYTEA, " +
                 "embeddings vector(" + dimensionality + "), " +
-                "created_utc TIMESTAMPTZ(6) NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')" +
+                "created_utc TIMESTAMPTZ(6) NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'), " +
+                GetStoredTsVectorColumnDefinition() +
                 ");";
         }
 
@@ -47,9 +48,89 @@ namespace RecallDb.Core.Database.Postgresql.Queries
                 "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_didp ON collection_" + tableName + " (document_id, position);",
                 "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_crt ON collection_" + tableName + " (created_utc);",
                 "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_hnsw ON collection_" + tableName + " USING hnsw (embeddings vector_cosine_ops) WITH (m = 16, ef_construction = 64);",
-                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_trgm ON collection_" + tableName + " USING gin (content gin_trgm_ops);",
-                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_fts ON collection_" + tableName + " USING gin (to_tsvector('english', COALESCE(content, '')));"
+                "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_trgm ON collection_" + tableName + " USING gin (content gin_trgm_ops);"
             };
+        }
+
+        /// <summary>
+        /// Get the SQL to add the stored, generated content_tsv column to an existing collection documents table.
+        /// Idempotent (ADD COLUMN IF NOT EXISTS). On a table that lacks the column this rewrites the table while
+        /// holding an ACCESS EXCLUSIVE lock.
+        /// </summary>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <returns>SQL query string.</returns>
+        public static string GetAddStoredTsVectorColumn(string collectionId)
+        {
+            string tableName = SanitizeTableName(collectionId);
+            return "ALTER TABLE collection_" + tableName + " ADD COLUMN IF NOT EXISTS " + GetStoredTsVectorColumnDefinition() + ";";
+        }
+
+        /// <summary>
+        /// Get the SQL to create the GIN index on the stored content_tsv column.
+        /// The column must exist.
+        /// </summary>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <returns>SQL query string.</returns>
+        public static string GetCreateStoredTsVectorIndex(string collectionId)
+        {
+            string tableName = SanitizeTableName(collectionId);
+            string ixId = GetIndexIdentifier(collectionId);
+            return "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_tsv ON collection_" + tableName + " USING gin (content_tsv);";
+        }
+
+        /// <summary>
+        /// Get the SQL to create the legacy GIN expression index on to_tsvector('english', content).
+        /// Used only for collections that do not yet have the stored content_tsv column (when the startup
+        /// migration is disabled), so full-text search keeps an index.
+        /// </summary>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <returns>SQL query string.</returns>
+        public static string GetCreateLegacyFullTextIndex(string collectionId)
+        {
+            string tableName = SanitizeTableName(collectionId);
+            string ixId = GetIndexIdentifier(collectionId);
+            return "CREATE INDEX IF NOT EXISTS idx_col_" + ixId + "_fts ON collection_" + tableName + " USING gin (to_tsvector('english', COALESCE(content, '')));";
+        }
+
+        /// <summary>
+        /// Get the SQL to drop the legacy GIN expression index, which the content_tsv index supersedes.
+        /// Run only after the content_tsv index exists, so there is never a window without a text index.
+        /// </summary>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <returns>SQL query string.</returns>
+        public static string GetDropLegacyFullTextIndex(string collectionId)
+        {
+            string ixId = GetIndexIdentifier(collectionId);
+            return "DROP INDEX IF EXISTS idx_col_" + ixId + "_fts;";
+        }
+
+        /// <summary>
+        /// Get the SQL that returns one row when the collection documents table has the content_tsv column.
+        /// </summary>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <returns>SQL query string.</returns>
+        public static string GetStoredTsVectorColumnExists(string collectionId)
+        {
+            string tableName = SanitizeTableName(collectionId);
+            return
+                "SELECT 1 AS present FROM information_schema.columns " +
+                "WHERE table_schema = current_schema() " +
+                "AND table_name = 'collection_" + tableName.ToLowerInvariant() + "' " +
+                "AND column_name = 'content_tsv';";
+        }
+
+        /// <summary>
+        /// Get the SQL that returns the planner's row estimate for a collection documents table
+        /// (pg_class.reltuples; cheap, approximate, and -1 or 0 for a table never analyzed).
+        /// </summary>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <returns>SQL query string.</returns>
+        public static string GetEstimatedRowCount(string collectionId)
+        {
+            string tableName = SanitizeTableName(collectionId);
+            return
+                "SELECT reltuples::bigint AS estimate FROM pg_class " +
+                "WHERE oid = to_regclass('collection_" + tableName + "');";
         }
 
         /// <summary>
@@ -145,6 +226,13 @@ namespace RecallDb.Core.Database.Postgresql.Queries
         }
 
         #region Private-Methods
+
+        private static string GetStoredTsVectorColumnDefinition()
+        {
+            // The index language is fixed to english; other text search configurations are evaluated through
+            // the unindexed to_tsvector expression path at query time.
+            return "content_tsv tsvector GENERATED ALWAYS AS (to_tsvector('english', COALESCE(content, ''))) STORED";
+        }
 
         private static string SanitizeTableName(string collectionId)
         {

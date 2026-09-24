@@ -119,6 +119,24 @@ namespace RecallDb.Core.Models
         }
 
         /// <summary>
+        /// Informational message about how the search was evaluated, or null when there is nothing to report.
+        /// Set, for example, when the text query contained no searchable terms (only stop words), when a
+        /// full-text language is not served by the index, or when Hybrid options were supplied without both
+        /// a vector and a text query. A notice never indicates failure.
+        /// </summary>
+        public string Notice
+        {
+            get
+            {
+                return _Notice;
+            }
+            set
+            {
+                _Notice = value;
+            }
+        }
+
+        /// <summary>
         /// Total time in milliseconds the query took from start to finish.
         /// </summary>
         public double TotalMs
@@ -145,6 +163,7 @@ namespace RecallDb.Core.Models
         private long _RecordsRemaining = 0;
         private List<DocumentRecord> _Documents = new List<DocumentRecord>();
         private double _TotalMs = 0;
+        private string _Notice = null;
 
         #endregion
 
@@ -155,6 +174,20 @@ namespace RecallDb.Core.Models
         /// </summary>
         public SearchResult()
         {
+        }
+
+        #endregion
+
+        #region Public-Methods
+
+        /// <summary>
+        /// Append a sentence to Notice, keeping any notice already present.
+        /// </summary>
+        /// <param name="notice">Notice text. Null or empty values are ignored.</param>
+        public void AddNotice(string notice)
+        {
+            if (string.IsNullOrEmpty(notice)) return;
+            _Notice = string.IsNullOrEmpty(_Notice) ? notice : _Notice + " " + notice;
         }
 
         #endregion

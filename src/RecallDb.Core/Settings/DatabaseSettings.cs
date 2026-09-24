@@ -142,6 +142,49 @@ namespace RecallDb.Core.Settings
             }
         }
 
+        /// <summary>
+        /// Add the stored, GIN-indexed content_tsv column to existing collections at startup.
+        /// Adding a stored generated column rewrites the table while holding an ACCESS EXCLUSIVE lock, so on a
+        /// very large collection startup can block for seconds to minutes. Set to false to skip the rewrite and
+        /// run it in a maintenance window instead (restart with true). While a collection lacks the column,
+        /// full-text search stays correct through the legacy expression index; only ranking speed is affected.
+        /// New collections always get the column. Overridden by the RECALLDB_DB_MIGRATE_FTS_COLUMN environment
+        /// variable (true or false).
+        /// Default: true.
+        /// </summary>
+        public bool MigrateFullTextColumn
+        {
+            get
+            {
+                return _MigrateFullTextColumn;
+            }
+            set
+            {
+                _MigrateFullTextColumn = value;
+            }
+        }
+
+        /// <summary>
+        /// Command timeout, in seconds, for schema maintenance statements run when collections are created and by
+        /// the startup schema pass: adding the content_tsv column (a full table rewrite that also rebuilds every
+        /// index, including HNSW) and building indexes. These can take minutes on large collections, far longer
+        /// than the 30-second default used for ordinary queries.
+        /// Default: 0 (no limit). Minimum: 0. Maximum: 86400 (one day).
+        /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the value is outside 0-86400.</exception>
+        public int SchemaCommandTimeoutSeconds
+        {
+            get
+            {
+                return _SchemaCommandTimeoutSeconds;
+            }
+            set
+            {
+                if (value < 0 || value > 86400) throw new ArgumentOutOfRangeException(nameof(SchemaCommandTimeoutSeconds), "SchemaCommandTimeoutSeconds must be between 0 (no limit) and 86400.");
+                _SchemaCommandTimeoutSeconds = value;
+            }
+        }
+
         #endregion
 
         #region Private-Members
@@ -154,6 +197,8 @@ namespace RecallDb.Core.Settings
         private string _Schema = "public";
         private bool _RequireEncryption = false;
         private bool _LogQueries = false;
+        private bool _MigrateFullTextColumn = true;
+        private int _SchemaCommandTimeoutSeconds = 0;
 
         #endregion
 

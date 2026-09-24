@@ -74,14 +74,33 @@ namespace RecallDb.Sdk.Models
         public double Distance { get; set; }
 
         /// <summary>
-        /// Score (populated during search).
+        /// Score (populated during search). In hybrid Rrf and Linear searches this is the fused score in the range 0.0 to 1.0.
         /// </summary>
         public double Score { get; set; }
 
         /// <summary>
-        /// Full-text relevance score (populated during full-text or hybrid search).
+        /// Raw vector similarity in the vector search type's units (populated during vector-only and hybrid search).
+        /// Null when not applicable.
+        /// </summary>
+        public double? VectorScore { get; set; }
+
+        /// <summary>
+        /// Full-text relevance score, the raw ts_rank value (populated during full-text or hybrid search).
+        /// In hybrid Rrf and Linear searches this is null for documents that did not match the text query.
         /// </summary>
         public double? TextScore { get; set; }
+
+        /// <summary>
+        /// 1-based rank of this document in the hybrid vector leg (Rrf and Linear strategies only).
+        /// Null when the document was outside the vector leg's candidates or the search was not hybrid.
+        /// </summary>
+        public int? VectorRank { get; set; }
+
+        /// <summary>
+        /// 1-based rank of this document in the hybrid text leg (Rrf and Linear strategies only).
+        /// Null when the document did not match the text query or the search was not hybrid.
+        /// </summary>
+        public int? TextRank { get; set; }
 
         /// <summary>
         /// Neighboring chunks surrounding this document in positional order.

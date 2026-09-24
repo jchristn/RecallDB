@@ -3,12 +3,14 @@ namespace RecallDb.Server.Services
     using System;
     using System.Collections.Generic;
     using System.Diagnostics;
+    using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
 
     using SyslogLogging;
 
     using RecallDb.Core.Database;
+    using RecallDb.Core.Enums;
     using RecallDb.Core.Models;
     using RecallDb.Server.Classes;
 
@@ -17,6 +19,20 @@ namespace RecallDb.Server.Services
     /// </summary>
     public class SearchService : ServiceBase
     {
+        #region Public-Members
+
+        /// <summary>
+        /// Notice returned when Hybrid options are supplied without both a vector and a text query.
+        /// </summary>
+        public const string NoticeHybridIgnored = "Hybrid options were ignored because the search does not include both a vector query and a text query.";
+
+        /// <summary>
+        /// Notice returned when a vector search carries a FullText object whose Query is blank.
+        /// </summary>
+        public const string NoticeBlankFullTextIgnored = "FullText.Query was blank, so the search ran as vector-only.";
+
+        #endregion
+
         #region Private-Members
 
         private readonly DocumentService _Documents;
@@ -67,6 +83,19 @@ namespace RecallDb.Server.Services
                 }
             }
 
+            bool hasVector = HasVector(query);
+            bool hasFullText = HasFullText(query);
+
+            if (query.FullText != null && !hasFullText && !hasVector)
+                return ServiceResult.Fail(400, "Bad request", "FullText.Query is required for a full-text search.");
+
+            if (hasFullText)
+            {
+                string languageError = await ValidateLanguageAsync(query.FullText.Language, token).ConfigureAwait(false);
+                if (languageError != null)
+                    return ServiceResult.Fail(400, "Bad request", languageError);
+            }
+
             CollectionMetadata col = await _Database.Collections.ReadAsync(ctx.TenantId, ctx.CollectionId).ConfigureAwait(false);
             if (col == null)
                 return ServiceResult.Fail(404, "Not found", "Collection not found.");
@@ -74,6 +103,8 @@ namespace RecallDb.Server.Services
             string cid = ctx.CollectionId;
             string origin = ctx.Origin == RecallDb.Core.Enums.RequestOriginEnum.Mcp ? "mcp" : "rest";
             string mode = DeriveSearchMode(query);
+            string matchMode = DeriveMatchMode(query);
+            string hybridStrategy = DeriveHybridStrategy(query);
 
             Stopwatch sw = Stopwatch.StartNew();
             SearchResult result;
@@ -81,18 +112,26 @@ namespace RecallDb.Server.Services
             {
                 searchActivity?.SetTag(RecallDb.Server.Observability.ServerTelemetry.TagOrigin, origin);
                 searchActivity?.SetTag(RecallDb.Server.Observability.ServerTelemetry.TagSearchMode, mode);
+                searchActivity?.SetTag(RecallDb.Server.Observability.ServerTelemetry.TagSearchMatchMode, matchMode);
+                searchActivity?.SetTag(RecallDb.Server.Observability.ServerTelemetry.TagSearchHybridStrategy, hybridStrategy);
                 try
                 {
-                    result = await _Database.Search.SearchAsync(cid, col.Dimensionality, query).ConfigureAwait(false);
+                    result = await _Database.Search.SearchAsync(cid, col.Dimensionality, query, token).ConfigureAwait(false);
                     await _Documents.AttachLabelsAndTagsAsync(cid, result.Documents).ConfigureAwait(false);
                 }
                 catch (Exception e)
                 {
                     RecallDb.Core.Observability.RecallDbTelemetry.RecordException(searchActivity, e);
-                    RecallDb.Server.Observability.ServerTelemetry.RecordSearch(origin, mode, false, 500, sw.Elapsed.TotalSeconds, -1);
+                    RecallDb.Server.Observability.ServerTelemetry.RecordSearch(origin, mode, false, 500, sw.Elapsed.TotalSeconds, -1, matchMode, hybridStrategy);
                     throw;
                 }
             }
+
+            if (query.Hybrid != null && !(hasVector && hasFullText))
+                result.AddNotice(NoticeHybridIgnored);
+
+            if (hasVector && query.FullText != null && !hasFullText)
+                result.AddNotice(NoticeBlankFullTextIgnored);
 
             if (query.IncludeNeighbors.HasValue && query.IncludeNeighbors.Value > 0 && result.Documents != null && result.Documents.Count > 0)
             {
@@ -177,7 +216,7 @@ namespace RecallDb.Server.Services
             SanitizeScores(result.Documents);
 
             int resultCount = result.Documents != null ? result.Documents.Count : 0;
-            RecallDb.Server.Observability.ServerTelemetry.RecordSearch(origin, mode, true, 200, sw.Elapsed.TotalSeconds, resultCount);
+            RecallDb.Server.Observability.ServerTelemetry.RecordSearch(origin, mode, true, 200, sw.Elapsed.TotalSeconds, resultCount, matchMode, hybridStrategy);
 
             return ServiceResult.Ok(result);
         }
@@ -196,19 +235,66 @@ namespace RecallDb.Server.Services
                 if (double.IsNaN(doc.Score) || double.IsInfinity(doc.Score)) doc.Score = 0;
                 if (doc.TextScore.HasValue && (double.IsNaN(doc.TextScore.Value) || double.IsInfinity(doc.TextScore.Value)))
                     doc.TextScore = 0;
+                if (doc.VectorScore.HasValue && (double.IsNaN(doc.VectorScore.Value) || double.IsInfinity(doc.VectorScore.Value)))
+                    doc.VectorScore = 0;
                 if (doc.Neighbors != null) SanitizeScores(doc.Neighbors);
             }
+        }
+
+        // Same predicates as SearchMethods.SearchAsync, so search.mode tags agree with what actually ran.
+        private static bool HasVector(SearchQuery query)
+        {
+            return query != null && query.Vector != null && query.Vector.Embeddings != null && query.Vector.Embeddings.Count > 0;
+        }
+
+        private static bool HasFullText(SearchQuery query)
+        {
+            return query != null && query.FullText != null && !string.IsNullOrWhiteSpace(query.FullText.Query);
         }
 
         private static string DeriveSearchMode(SearchQuery query)
         {
             if (query == null) return "unknown";
-            bool hasVector = query.Vector != null;
-            bool hasFullText = query.FullText != null;
+            bool hasVector = HasVector(query);
+            bool hasFullText = HasFullText(query);
             if (hasVector && hasFullText) return "hybrid";
             if (hasVector) return "vector";
             if (hasFullText) return "fulltext";
             return "filter";
+        }
+
+        private static string DeriveMatchMode(SearchQuery query)
+        {
+            if (!HasFullText(query)) return "none";
+            return query.FullText.MatchMode.ToString().ToLowerInvariant();
+        }
+
+        private static string DeriveHybridStrategy(SearchQuery query)
+        {
+            if (!HasVector(query) || !HasFullText(query)) return "none";
+            HybridStrategyEnum strategy = query.Hybrid != null ? query.Hybrid.Strategy : HybridStrategyEnum.Rrf;
+            return strategy.ToString().ToLowerInvariant();
+        }
+
+        private async Task<string> ValidateLanguageAsync(string language, CancellationToken token)
+        {
+            // A null or blank language means the default (english).
+            if (string.IsNullOrWhiteSpace(language)) return null;
+
+            string normalized = language.Trim().ToLowerInvariant();
+            List<string> allowed = await _Database.ListTextSearchConfigurationsAsync(token).ConfigureAwait(false);
+
+            // No allowlist (driver without text search catalogs): fall back to a strict identifier check.
+            if (allowed == null || allowed.Count < 1)
+            {
+                bool plain = normalized.All(c => (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_');
+                return plain ? null : "FullText.Language '" + language + "' is not a valid text search configuration name.";
+            }
+
+            if (allowed.Contains(normalized)) return null;
+
+            return "FullText.Language '" + language + "' is not a text search configuration installed in the database. "
+                + "Valid values: " + string.Join(", ", allowed) + ".";
         }
 
         #endregion

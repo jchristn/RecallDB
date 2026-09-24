@@ -691,8 +691,11 @@ async function testSearchFullTextHybrid() {
     const r = await doSearch({ Vector: { SearchType: "CosineSimilarity", Embeddings: VECTOR_EMBEDDINGS }, FullText: { Query: "machine learning", TextWeight: 0.3 }, MaxResults: 10 });
     const docs = r.Documents || [];
     assertTrue(docs.length > 0, "Hybrid search should return results");
+    // The default hybrid strategy is Rrf. A text match is not required, so TextScore is absent for
+    // documents that only matched the vector leg.
+    assertTrue(docs.some(d => d.TextScore != null && d.TextScore > 0), "At least one hybrid result should have a TextScore");
     for (const doc of docs) {
-        assertTrue(doc.TextScore != null && doc.TextScore > 0, "TextScore should be populated");
+        assertTrue(doc.TextScore == null || doc.TextScore > 0, "TextScore should be absent or > 0");
         assertTrue(doc.Score > 0, "Score should be > 0 (blended)");
     }
 }
@@ -714,6 +717,87 @@ async function testSearchFullTextBackwardCompat() {
     const docs = r.Documents || [];
     assertTrue(docs.length > 0, "Vector-only search should still work");
     for (const doc of docs) assertTrue(doc.Score > 0, "Score should be > 0");
+}
+
+async function testSearchFullTextMatchModeAny() {
+    const r = await doSearch({ FullText: { Query: "learning nonexistentzzzterm", MatchMode: "Any" }, MaxResults: 10 });
+    const docs = r.Documents || [];
+    assertTrue(docs.length > 0, "MatchMode Any should return documents that match any term");
+    for (const doc of docs) assertTrue(doc.TextScore != null && doc.TextScore > 0, "TextScore should be > 0");
+}
+
+async function testSearchFullTextMatchModeAll() {
+    const r = await doSearch({ FullText: { Query: "learning nonexistentzzzterm", MatchMode: "All" }, MaxResults: 10 });
+    assertEqual(0, r.TotalRecords || 0, "MatchMode All should return 0 results when one term is absent");
+    assertEqual(0, (r.Documents || []).length, "Documents list should be empty");
+}
+
+async function testSearchFullTextHybridRrf() {
+    const r = await doSearch({
+        Vector: { SearchType: "CosineSimilarity", Embeddings: VECTOR_EMBEDDINGS },
+        FullText: { Query: "machine learning", TextWeight: 0.5 },
+        Hybrid: { Strategy: "Rrf", RrfK: 60 },
+        MaxResults: 10
+    });
+    const docs = r.Documents || [];
+    assertTrue(docs.length > 0, "Hybrid Rrf search should return results");
+    for (const doc of docs) {
+        assertGte(doc.Score, 0, "Rrf Score");
+        assertLte(doc.Score, 1, "Rrf Score");
+        assertTrue(doc.VectorRank != null || doc.TextRank != null, "Each Rrf result should have a VectorRank or a TextRank");
+        if (doc.TextRank == null) assertTrue(doc.TextScore == null, "TextScore should be absent when TextRank is absent");
+    }
+    assertTrue(docs.some(d => d.VectorRank != null), "At least one Rrf result should have a VectorRank");
+    assertTrue(docs.some(d => d.TextRank != null), "At least one Rrf result should have a TextRank");
+}
+
+async function testSearchFullTextHybridFilter() {
+    const r = await doSearch({
+        Vector: { SearchType: "CosineSimilarity", Embeddings: VECTOR_EMBEDDINGS },
+        FullText: { Query: "machine learning", MatchMode: "All", TextWeight: 0.3 },
+        Hybrid: { Strategy: "Filter" },
+        MaxResults: 10
+    });
+    const docs = r.Documents || [];
+    assertTrue(docs.length > 0, "Hybrid Filter search should return results");
+    for (const doc of docs) {
+        assertTrue(doc.TextScore != null && doc.TextScore > 0, "Every Filter result should have a TextScore");
+        assertTrue(doc.Score > 0, "Score should be > 0 (blended)");
+    }
+}
+
+async function assertSearchBadRequest(query) {
+    try {
+        await _adminClient.search(_testTenantId, _testCollectionId, query);
+        throw new Error("Expected 400 Bad Request but call succeeded");
+    } catch (e) {
+        if (e instanceof RecallDbException) {
+            assertEqual(400, e.statusCode, "Status code");
+        } else {
+            throw e;
+        }
+    }
+}
+
+async function testSearchFullTextValidationTextWeight() {
+    await assertSearchBadRequest({ FullText: { Query: "learning", TextWeight: 1.5 }, MaxResults: 10 });
+}
+
+async function testSearchFullTextValidationNormalization() {
+    await assertSearchBadRequest({ FullText: { Query: "learning", Normalization: 64 }, MaxResults: 10 });
+}
+
+async function testSearchFullTextValidationRrfK() {
+    await assertSearchBadRequest({
+        Vector: { SearchType: "CosineSimilarity", Embeddings: VECTOR_EMBEDDINGS },
+        FullText: { Query: "learning" },
+        Hybrid: { Strategy: "Rrf", RrfK: 0 },
+        MaxResults: 10
+    });
+}
+
+async function testSearchFullTextValidationLanguage() {
+    await assertSearchBadRequest({ FullText: { Query: "learning", Language: "english'); drop table x;--" }, MaxResults: 10 });
 }
 
 // ---------------------------------------------------------------------------
@@ -1184,6 +1268,14 @@ async function main() {
     await runTest("Search full-text: with filters", testSearchFullTextWithFilters);
     await runTest("Search full-text: no match", testSearchFullTextNoMatch);
     await runTest("Search full-text: backward compat", testSearchFullTextBackwardCompat);
+    await runTest("Search full-text: match mode any matches any term", testSearchFullTextMatchModeAny);
+    await runTest("Search full-text: match mode all requires every term", testSearchFullTextMatchModeAll);
+    await runTest("Search full-text: hybrid rrf fused scores and ranks", testSearchFullTextHybridRrf);
+    await runTest("Search full-text: hybrid filter legacy requires text match", testSearchFullTextHybridFilter);
+    await runTest("Search full-text: validation rejects text weight 1.5", testSearchFullTextValidationTextWeight);
+    await runTest("Search full-text: validation rejects normalization 64", testSearchFullTextValidationNormalization);
+    await runTest("Search full-text: validation rejects hybrid rrf k 0", testSearchFullTextValidationRrfK);
+    await runTest("Search full-text: validation rejects unknown language", testSearchFullTextValidationLanguage);
 
     // 22. Search Result Validation
     await runTest("Search validation: result fields", testSearchResultFields);

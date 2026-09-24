@@ -1,5 +1,6 @@
 namespace RecallDb.Core.Models
 {
+    using System;
     using System.Text.Json.Serialization;
     using RecallDb.Core.Enums;
 
@@ -13,6 +14,8 @@ namespace RecallDb.Core.Models
         /// <summary>
         /// The search text to match against document content.
         /// Processed by PostgreSQL's text search parser (stemming, stop word removal).
+        /// A null or whitespace-only query means "no full-text": in a request that also has a vector it is
+        /// ignored, and on its own it is rejected with 400.
         /// </summary>
         public string Query
         {
@@ -23,6 +26,28 @@ namespace RecallDb.Core.Models
             set
             {
                 _Query = value;
+            }
+        }
+
+        /// <summary>
+        /// How the query string is turned into a tsquery, which decides which documents match.
+        /// Any (default): documents containing any meaningful term, ranked by relevance.
+        /// All: every term required (the behavior before MatchMode existed).
+        /// Phrase: terms adjacent and in order.
+        /// WebSearch: Google-style syntax ("quoted phrase", or, -exclude).
+        /// </summary>
+        [JsonConverter(typeof(JsonStringEnumConverter))]
+        public TextMatchModeEnum MatchMode
+        {
+            get
+            {
+                return _MatchMode;
+            }
+            set
+            {
+                if (!Enum.IsDefined(typeof(TextMatchModeEnum), value))
+                    throw new ArgumentOutOfRangeException(nameof(MatchMode), "MatchMode must be one of Any, All, Phrase, or WebSearch.");
+                _MatchMode = value;
             }
         }
 
@@ -45,7 +70,9 @@ namespace RecallDb.Core.Models
 
         /// <summary>
         /// PostgreSQL text search configuration to use (e.g., "english", "simple", "spanish").
-        /// Default: "english".
+        /// Default: "english". The server validates the value against the configurations installed in the
+        /// database (pg_ts_config) and rejects anything else with 400. Only "english" is served by the
+        /// stored, indexed content_tsv column; other configurations work but evaluate without an index.
         /// </summary>
         public string Language
         {
@@ -62,8 +89,10 @@ namespace RecallDb.Core.Models
         /// <summary>
         /// Normalization option for ts_rank scoring (PostgreSQL normalization bitmask).
         /// 0 = none, 1 = log(length), 2 = length, 32 = self+1 (0-1 range).
-        /// Default: 32 (normalized to 0-1 range).
+        /// Flags can be combined (the value is a bitmask of 1, 2, 4, 8, 16, and 32).
+        /// Default: 32 (normalized to 0-1 range). Minimum: 0. Maximum: 63.
         /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the value is outside 0-63.</exception>
         public int Normalization
         {
             get
@@ -72,13 +101,18 @@ namespace RecallDb.Core.Models
             }
             set
             {
+                if (value < 0 || value > 63)
+                    throw new ArgumentOutOfRangeException(nameof(Normalization), "Normalization must be between 0 and 63 (the ts_rank normalization bitmask).");
                 _Normalization = value;
             }
         }
 
         /// <summary>
-        /// Minimum text relevance score threshold for results.
-        /// Documents scoring below this value are excluded.
+        /// Minimum text relevance score (TextScore) threshold. Applied in SQL, so TotalRecords and pagination
+        /// reflect it. In full-text-only search, documents below the threshold are excluded. In hybrid Rrf and
+        /// Linear search, it gates the text leg: a document below the threshold gets no text rank but can still
+        /// be returned through the vector leg. In hybrid Filter search, documents below it are excluded.
+        /// Default: null (no threshold).
         /// </summary>
         public double? MinimumScore
         {
@@ -93,12 +127,13 @@ namespace RecallDb.Core.Models
         }
 
         /// <summary>
-        /// Weight to apply to the text score when combining with vector score
-        /// in hybrid search mode. Must be between 0.0 and 1.0.
-        /// The vector weight is computed as (1.0 - TextWeight).
-        /// Default: 0.5 (equal weighting).
+        /// The text leg's share (w) when combining with the vector leg in hybrid search; the vector leg gets
+        /// (1.0 - TextWeight). The meaning is the same in every hybrid strategy: 0.0 ranks by the vector leg only,
+        /// 1.0 ranks by the text leg only.
+        /// Default: 0.5 (equal weighting). Minimum: 0.0. Maximum: 1.0.
         /// Only used when both Vector and FullText queries are present.
         /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the value is outside 0.0-1.0 or is not a finite number.</exception>
         public double TextWeight
         {
             get
@@ -107,6 +142,8 @@ namespace RecallDb.Core.Models
             }
             set
             {
+                if (double.IsNaN(value) || value < 0.0 || value > 1.0)
+                    throw new ArgumentOutOfRangeException(nameof(TextWeight), "TextWeight must be between 0.0 and 1.0.");
                 _TextWeight = value;
             }
         }
@@ -116,6 +153,7 @@ namespace RecallDb.Core.Models
         #region Private-Members
 
         private string _Query = null;
+        private TextMatchModeEnum _MatchMode = TextMatchModeEnum.Any;
         private TextSearchTypeEnum _SearchType = TextSearchTypeEnum.TsRank;
         private string _Language = "english";
         private int _Normalization = 32;

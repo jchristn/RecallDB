@@ -227,8 +227,9 @@ namespace RecallDb.Core.Models
         }
 
         /// <summary>
-        /// Full-text relevance score (transient, populated during search).
-        /// Only present when a FullText query is used.
+        /// Full-text relevance score (transient, populated during search): the raw ts_rank or ts_rank_cd value.
+        /// Only present when a FullText query is used. In hybrid Rrf and Linear search it is null for documents
+        /// that are not text matches.
         /// </summary>
         public double? TextScore
         {
@@ -239,6 +240,55 @@ namespace RecallDb.Core.Models
             set
             {
                 _TextScore = value;
+            }
+        }
+
+        /// <summary>
+        /// Vector similarity score of this document against the query vector (transient, populated during
+        /// vector and hybrid search), in the metric's own units (for example cosine similarity).
+        /// In hybrid search Score is the fused score, so this preserves the raw similarity. Null otherwise.
+        /// </summary>
+        public double? VectorScore
+        {
+            get
+            {
+                return _VectorScore;
+            }
+            set
+            {
+                _VectorScore = value;
+            }
+        }
+
+        /// <summary>
+        /// 1-based rank of this document in the hybrid vector leg (transient, populated during hybrid Rrf and
+        /// Linear search). Null when the document was not among the vector leg's candidates.
+        /// </summary>
+        public int? VectorRank
+        {
+            get
+            {
+                return _VectorRank;
+            }
+            set
+            {
+                _VectorRank = value;
+            }
+        }
+
+        /// <summary>
+        /// 1-based rank of this document in the hybrid text leg (transient, populated during hybrid Rrf and
+        /// Linear search). Null when the document was not a text match among the text leg's candidates.
+        /// </summary>
+        public int? TextRank
+        {
+            get
+            {
+                return _TextRank;
+            }
+            set
+            {
+                _TextRank = value;
             }
         }
 
@@ -307,6 +357,9 @@ namespace RecallDb.Core.Models
         private double _Distance = 0;
         private double _Score = 0;
         private double? _TextScore = null;
+        private double? _VectorScore = null;
+        private int? _VectorRank = null;
+        private int? _TextRank = null;
         private List<DocumentRecord> _Neighbors = null;
         private List<string> _Labels = new List<string>();
         private Dictionary<string, string> _Tags = new Dictionary<string, string>();
@@ -364,11 +417,14 @@ namespace RecallDb.Core.Models
                 doc.Score = DataTableHelper.GetDoubleValue(row, "score");
             }
 
-            // TextScore may or may not be present (only in full-text or hybrid search results)
-            if (row.Table.Columns.Contains("text_score"))
-            {
-                doc.TextScore = DataTableHelper.GetDoubleValue(row, "text_score");
-            }
+            // TextScore may or may not be present (only in full-text or hybrid search results), and is NULL
+            // in fused hybrid results for documents that are not text matches
+            doc.TextScore = DataTableHelper.GetNullableDoubleValue(row, "text_score");
+
+            // Hybrid-only columns; absent (null) in other search modes
+            doc.VectorScore = DataTableHelper.GetNullableDoubleValue(row, "vector_score");
+            doc.VectorRank = DataTableHelper.GetNullableIntValue(row, "vector_rank");
+            doc.TextRank = DataTableHelper.GetNullableIntValue(row, "text_rank");
 
             return doc;
         }

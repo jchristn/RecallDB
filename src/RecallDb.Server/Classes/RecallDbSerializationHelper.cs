@@ -1,5 +1,6 @@
 namespace RecallDb.Server.Classes
 {
+    using System;
     using System.Text.Json;
     using System.Text.Json.Serialization;
     using WatsonWebserver.Core;
@@ -21,11 +22,21 @@ namespace RecallDb.Server.Classes
 
         /// <summary>
         /// Deserialize JSON to an instance.
+        /// A model setter that rejects a value (ArgumentException, including ArgumentOutOfRangeException) is
+        /// rethrown as a JsonException carrying the setter's message, so the webserver answers 400 rather than 500.
         /// </summary>
+        /// <exception cref="JsonException">Thrown when the JSON is malformed or a value is rejected by a model setter.</exception>
         public T DeserializeJson<T>(string json)
         {
             if (string.IsNullOrEmpty(json)) return default;
-            return JsonSerializer.Deserialize<T>(json, _Options);
+            try
+            {
+                return JsonSerializer.Deserialize<T>(json, _Options);
+            }
+            catch (ArgumentException e)
+            {
+                throw new JsonException(e.Message, e);
+            }
         }
 
         /// <summary>

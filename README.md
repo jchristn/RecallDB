@@ -38,7 +38,7 @@ Most vector databases store embeddings and call it a day. RecallDB stores the **
 | **Key-value tags** | Structured metadata with 10 filter operators (equals, contains, range, null checks) |
 | **SHA256 hashes + ETags** | Deduplication, cache invalidation, and change detection out of the box |
 | **Content length** | Token budget awareness without recomputing |
-| **Full-text search** | TF-IDF-like relevance scoring with ts_rank &mdash; find documents by lexical relevance, not just semantic similarity |
+| **Full-text search** | Relevance-ranked keyword search with ts_rank, backed by a stored, GIN-indexed `tsvector`. Find documents by lexical relevance, not just semantic similarity |
 
 This isn't a thin wrapper around pgvector. It's an **opinionated persistence schema** that normalizes how AI-ready data is stored, indexed, and retrieved, so you stop reinventing the storage layer for every project.
 
@@ -47,7 +47,7 @@ This isn't a thin wrapper around pgvector. It's an **opinionated persistence sch
 - **Multi-tenant isolation** &mdash; tenants, users, credentials, and collections are fully scoped. One deployment serves many clients.
 - **Per-collection vector tables** &mdash; each collection gets its own Postgres table with dedicated HNSW indexes (`m=16`, `ef_construction=64`). No noisy-neighbor problems.
 - **5 distance metrics** &mdash; cosine similarity, cosine distance, Euclidean similarity, Euclidean distance, inner product. Pick what fits your embedding model.
-- **Three search modes** &mdash; vector similarity (nearest-neighbor), full-text relevance (ts_rank/ts_rank_cd scored), and hybrid (blended vector + full-text scoring with configurable weights). Mix and match in a single request.
+- **Three search modes**: vector similarity (nearest-neighbor), full-text relevance (any-term, all-terms, phrase, or web-search syntax, ranked with ts_rank/ts_rank_cd), and hybrid (the vector and text results fused by weighted Reciprocal Rank Fusion, with a tunable text weight). Mix and match in a single request.
 - **Compound search queries** &mdash; combine any search mode with label filters, tag conditions, content term matching, and date ranges in a single request.
 - **Bring your own embeddings** &mdash; no vendor lock-in to any embedding provider. Use OpenAI, Cohere, Ollama, or anything that outputs a float array.
 - **40+ REST endpoints** &mdash; full CRUD for tenants, users, credentials, collections, documents, labels, and tags. Includes batch delete by keys and filter-based delete for bulk operations.
@@ -125,8 +125,32 @@ curl -X POST http://localhost:8600/v1.0/tenants/default/collections/default/sear
   -d '{
     "FullText": {
       "Query": "machine learning neural networks",
+      "MatchMode": "Any",
       "SearchType": "TsRank",
       "MinimumScore": 0.01
+    },
+    "MaxResults": 10
+  }'
+```
+
+### Hybrid Search
+
+```bash
+curl -X POST http://localhost:8600/v1.0/tenants/default/collections/default/search \
+  -H "Authorization: Bearer default" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Vector": {
+      "SearchType": "CosineSimilarity",
+      "Embeddings": [0.1, 0.2, 0.3]
+    },
+    "FullText": {
+      "Query": "how do I run the test suite",
+      "TextWeight": 0.5
+    },
+    "Hybrid": {
+      "Strategy": "Rrf",
+      "RrfK": 60
     },
     "MaxResults": 10
   }'
@@ -144,9 +168,9 @@ RecallDB search goes well beyond nearest-neighbor. A single query can combine an
 
 **Terms** &mdash; case-insensitive substring matching on document content. Require terms, exclude terms, or both.
 
-**Full-Text Search** &mdash; scored full-text search powered by Postgres `tsvector` and `tsquery`. Ranking uses `ts_rank` or `ts_rank_cd` for TF-IDF-like relevance scoring. Includes stemming, stop word removal, and configurable language support. Set a `MinimumScore` threshold to filter low-relevance results. This is distinct from the `Terms` substring filter: `Terms` does literal substring matching with no ranking, while `FullText` scores and ranks results by lexical relevance.
+**Full-Text Search**: scored full-text search powered by Postgres `tsvector` and `tsquery`, with stemming, stop word removal, and any installed Postgres text search language. By default a document matches if it contains any meaningful word in the query, and documents that match more (and rarer) words rank higher, so a natural-language question like "how do I run the test suite" finds useful results instead of only the documents that happen to contain every word. Set `MatchMode` to `All` to require every term, `Phrase` for words in order, or `WebSearch` for `"quoted phrase"`, `or` and `-exclude` syntax. Ranking uses `ts_rank` or `ts_rank_cd`, and `MinimumScore` drops low-relevance results. Don't confuse it with the `Terms` filter: `Terms` does literal substring matching with no ranking, while `FullText` ranks results by lexical relevance.
 
-**Hybrid Search** &mdash; combine vector similarity and full-text relevance in a single query with configurable blending weights. The final score is a weighted sum of the normalized vector score and full-text rank, letting you tune how much semantic vs. lexical relevance influences result ordering.
+**Hybrid Search**: send a vector and a text query together and RecallDB runs both, then fuses the two ranked lists with weighted Reciprocal Rank Fusion. The result is a union, so a document can come back because it is semantically close, because it matches the keywords, or both. It no longer comes back empty just because no document contains every keyword. Scores are normalized to [0, 1], and each hit reports its `VectorRank` and `TextRank`. `FullText.TextWeight` sets how much the text leg counts. Two other strategies are available through `Hybrid.Strategy`: `Linear` blends normalized scores, and `Filter` keeps the older behavior of ranking by vector only within documents that match the text query.
 
 **Date ranges** &mdash; `CreatedBefore` and `CreatedAfter` for temporal scoping.
 
@@ -168,7 +192,7 @@ var results = await client.SearchAsync("ten_default", "col_default", new SearchQ
 {
     Vector = new VectorQuery
     {
-        SearchType = SearchTypeEnum.CosineSimilarity,
+        SearchType = "CosineSimilarity",
         Embeddings = new List<float> { 0.1f, 0.2f, 0.3f },
         MinimumScore = 0.7
     },
@@ -180,7 +204,7 @@ var neighborResults = await client.SearchAsync("ten_default", "col_default", new
 {
     Vector = new VectorQuery
     {
-        SearchType = SearchTypeEnum.CosineSimilarity,
+        SearchType = "CosineSimilarity",
         Embeddings = new List<float> { 0.1f, 0.2f, 0.3f }
     },
     IncludeNeighbors = 2,
@@ -193,12 +217,35 @@ var ftResults = await client.SearchAsync("ten_default", "col_default", new Searc
     FullText = new FullTextQuery
     {
         Query = "machine learning neural networks",
-        SearchType = FullTextSearchTypeEnum.TsRank,
+        MatchMode = "Any",
+        SearchType = "TsRank",
         MinimumScore = 0.01
     },
     MaxResults = 10
 });
+
+// Hybrid search (vector and text fused with RRF)
+var hybridResults = await client.SearchAsync("ten_default", "col_default", new SearchQuery
+{
+    Vector = new VectorQuery
+    {
+        SearchType = "CosineSimilarity",
+        Embeddings = new List<float> { 0.1f, 0.2f, 0.3f }
+    },
+    FullText = new FullTextQuery
+    {
+        Query = "how do I run the test suite",
+        TextWeight = 0.5
+    },
+    Hybrid = new HybridQuery
+    {
+        Strategy = "Rrf"
+    },
+    MaxResults = 10
+});
 ```
+
+The C# SDK models take enum values as strings (`SearchType`, `MatchMode`, `Strategy`), matching what goes over the wire. The server-side enums are `SearchTypeEnum`, `TextSearchTypeEnum`, `TextMatchModeEnum` and `HybridStrategyEnum`; see [REST_API.md](REST_API.md#enumerations).
 
 ### Python
 
@@ -263,6 +310,7 @@ Server settings live in `recalldb.json`. Environment variables override selected
 | `RECALLDB_DB_NAME` | Database name |
 | `RECALLDB_DB_USER` | Database username |
 | `RECALLDB_DB_PASS` | Database password |
+| `RECALLDB_DB_MIGRATE_FTS_COLUMN` | Overrides `Database.MigrateFullTextColumn` (`true` or `false`) |
 | `RECALLDB_MCP_ENABLED` | Enable/disable the MCP server |
 | `RECALLDB_MCP_HOSTNAME` | MCP bind hostname |
 | `RECALLDB_MCP_PORT` | MCP port |
@@ -272,6 +320,10 @@ Server settings live in `recalldb.json`. Environment variables override selected
 | `RECALLDB_OBS_PROM_PORT` | Prometheus scrape endpoint port (default `9464`) |
 | `RECALLDB_OTLP_ENDPOINT` | OTLP trace endpoint (e.g. `http://tempo:4317`) |
 | `RECALLDB_OTLP_PROTOCOL` | OTLP protocol (`grpc` or `httpprotobuf`) |
+
+`Database.MigrateFullTextColumn` (default `true`) controls a one-time schema upgrade at startup. Every collection table carries a stored `content_tsv` column with a GIN index so full-text ranking reads a precomputed `tsvector` instead of re-tokenizing each candidate row. New collections get it when they are created. Collections created by an earlier build get it the next time the server starts, and that is the part to plan for: adding a stored generated column rewrites the table under an `ACCESS EXCLUSIVE` lock, so a large collection is unavailable, and startup waits, until the rewrite finishes. If you have very large collections, set the flag to `false`, then restart with it set to `true` during a maintenance window to run the upgrade. Search still works without the column; the text match falls back to the older expression index and is slower, not wrong.
+
+Expect the rewrite to take longer than the row count suggests. PostgreSQL rebuilds every index on the table as part of it, HNSW included, so a 50,000-document collection with 64-dimension embeddings took about 46 seconds on a laptop. Those schema statements run without a command timeout by default; `Database.SchemaCommandTimeoutSeconds` (default `0`, meaning no limit, maximum `86400`) caps them if you would rather have a slow migration fail and log a warning than hold startup.
 
 ## Architecture
 
@@ -325,7 +377,7 @@ RecallDB is instrumented end-to-end with [OpenTelemetry](https://opentelemetry.i
 - **HTTP (REST)** &mdash; request rate, duration, in-flight count, and status classes for every inbound request.
 - **MCP** &mdash; per-tool invocation rate, duration, in-flight count, and outcome.
 - **Application** &mdash; a unified operation family across both transports (labeled `origin=rest|mcp`, resource, and operation).
-- **Search** &mdash; latency and result counts by mode (vector, full-text, hybrid).
+- **Search**: latency and result counts by mode (vector, full-text, hybrid), text match mode, and hybrid strategy.
 - **Database** &mdash; query rate, duration, in-flight count, and rows returned for the PostgreSQL layer.
 - **Runtime / process** &mdash; .NET GC, threads, exceptions, working-set memory, and uptime.
 

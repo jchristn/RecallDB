@@ -549,7 +549,12 @@ class RecallDbClient {
      * Supports three search modes:
      * - Vector-only: provide Vector without FullText.
      * - Full-text-only: provide FullText without Vector.
-     * - Hybrid: provide both Vector and FullText for blended scoring.
+     * - Hybrid: provide both Vector and FullText for blended scoring. By default the two legs are
+     *   combined with reciprocal rank fusion (Hybrid.Strategy "Rrf"), so a text match is not required.
+     *
+     * Full-text queries match documents containing any of the query's terms by default
+     * (FullText.MatchMode "Any"). Use MatchMode "All" to require every term (the previous behavior), and
+     * Hybrid.Strategy "Filter" to restore the previous hybrid behavior (text match required, raw scores blended).
      *
      * @param {string} tenantId - Tenant ID.
      * @param {string} collectionId - Collection ID.
@@ -559,16 +564,34 @@ class RecallDbClient {
      * @param {Object} [query.FullText] - Full-text search query parameters.
      * @param {string} query.FullText.Query - Search text (required). Processed with stemming and stop word removal.
      * @param {string} [query.FullText.SearchType] - Ranking function: "TsRank" (default) or "TsRankCd" (cover density).
-     * @param {string} [query.FullText.Language] - Text search configuration, default "english".
-     * @param {number} [query.FullText.Normalization] - ts_rank normalization bitmask, default 32 (0-1 range).
+     * @param {string} [query.FullText.MatchMode] - How the query text is matched: "Any" (default, any term matches),
+     *   "All" (every term required), "Phrase" (terms adjacent and in order), or "WebSearch"
+     *   (web-search syntax: "quoted phrase", or, -exclude).
+     * @param {string} [query.FullText.Language] - Text search configuration installed on the server, default "english".
+     *   Unknown configurations are rejected with 400.
+     * @param {number} [query.FullText.Normalization] - ts_rank normalization bitmask (0-63), default 32 (0-1 range).
      * @param {number} [query.FullText.MinimumScore] - Minimum text relevance score threshold.
-     * @param {number} [query.FullText.TextWeight] - Weight for text score in hybrid mode (0.0-1.0, default 0.5).
+     * @param {number} [query.FullText.TextWeight] - Share of the text leg in hybrid mode (0.0-1.0, default 0.5); the vector
+     *   leg gets 1 - TextWeight. Values outside 0.0-1.0 are rejected with 400.
+     * @param {Object} [query.Hybrid] - Hybrid options, used only when both Vector (with Embeddings) and FullText (with a
+     *   non-blank Query) are provided. Default null (reciprocal rank fusion with default settings).
+     * @param {string} [query.Hybrid.Strategy] - "Rrf" (default, reciprocal rank fusion, scores 0-1), "Linear" (weighted sum of
+     *   normalized scores, 0-1), or "Filter" (legacy: text match required, raw scores blended).
+     * @param {number} [query.Hybrid.RrfK] - Reciprocal rank fusion constant k (1-100000, default 60).
+     * @param {number} [query.Hybrid.CandidatePool] - Candidates each leg retrieves before fusion (1-10000). Default null
+     *   (max(MaxResults * 4, 100), capped at 1000).
      * @param {Object} [query.LabelFilter] - Label filter with Required and Excluded arrays.
      * @param {Object} [query.TagFilter] - Tag filter with Required and Excluded condition arrays.
      * @param {Object} [query.Terms] - Terms filter for content matching, e.g. { Required: ["term1"], Excluded: ["term2"] }.
      * @param {number} [query.MaxResults] - Maximum results (1-1000, default 10).
      * @param {number} [query.IncludeNeighbors] - Number of neighboring chunks before and after each matched chunk to include (0-10). When set, each document in the response will include a Neighbors array of surrounding chunks ordered by position.
-     * @returns {Promise<Object>} Search result. Documents include Score and, when FullText is used, TextScore (number). When IncludeNeighbors is set, documents include a Neighbors array.
+     * @returns {Promise<Object>} Search result. Documents include Score and, when FullText is used, TextScore (number).
+     *   Documents may also include VectorScore (raw similarity in the vector metric's units, vector-only and hybrid searches),
+     *   VectorRank and TextRank (1-based ranks in the hybrid vector and text legs, Rrf and Linear only). In hybrid Rrf and
+     *   Linear searches Score is the fused score (0-1) and TextScore, TextRank, or VectorRank are absent when the document
+     *   was not in that leg. The result may include a Notice string describing how the search was evaluated (for example,
+     *   when the text query had no searchable terms or hybrid options were ignored). When IncludeNeighbors is set,
+     *   documents include a Neighbors array.
      */
     async search(tenantId, collectionId, query) {
         return this._post(

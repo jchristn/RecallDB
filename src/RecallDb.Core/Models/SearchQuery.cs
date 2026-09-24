@@ -123,7 +123,7 @@ namespace RecallDb.Core.Models
         /// <summary>
         /// Full-text search query parameters for content relevance scoring.
         /// When provided without Vector, performs a standalone full-text search.
-        /// When provided with Vector, performs a hybrid search combining both scores.
+        /// When provided with Vector, performs a hybrid search; see Hybrid for how the two legs are combined.
         /// </summary>
         public FullTextQuery FullText
         {
@@ -134,6 +134,23 @@ namespace RecallDb.Core.Models
             set
             {
                 _FullText = value;
+            }
+        }
+
+        /// <summary>
+        /// Hybrid search options (strategy, RRF constant, candidate pool).
+        /// Only used when both Vector (with embeddings) and FullText (with a non-blank Query) are present.
+        /// Default: null, which means the Rrf strategy with k = 60 and the default candidate pool.
+        /// </summary>
+        public HybridQuery Hybrid
+        {
+            get
+            {
+                return _Hybrid;
+            }
+            set
+            {
+                _Hybrid = value;
             }
         }
 
@@ -154,6 +171,9 @@ namespace RecallDb.Core.Models
 
         /// <summary>
         /// Minimum score threshold for results.
+        /// For full-text and hybrid searches it applies to Score in SQL (the normalized fused score for hybrid
+        /// Rrf and Linear), so TotalRecords and pagination reflect it. For vector-only searches it is applied
+        /// to the returned page.
         /// </summary>
         public double? MinimumScore
         {
@@ -169,6 +189,7 @@ namespace RecallDb.Core.Models
 
         /// <summary>
         /// Maximum score threshold for results.
+        /// Applied the same way as MinimumScore.
         /// </summary>
         public double? MaximumScore
         {
@@ -295,6 +316,7 @@ namespace RecallDb.Core.Models
         private TagFilterSet _TagFilter = null;
         private VectorQuery _Vector = null;
         private FullTextQuery _FullText = null;
+        private HybridQuery _Hybrid = null;
         private TermsFilter _Terms = null;
         private int? _IncludeNeighbors = null;
         private double? _MinimumScore = null;

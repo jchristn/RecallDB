@@ -11,4 +11,10 @@
     <PackageReference Include="Voltaic" Version="0.6.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Used only by the opt-in schema cases in HybridSearchSuites (RECALLDB_TEST_DB), which call the
+         driver's startup schema pass directly and inspect the database with Npgsql. -->
+    <ProjectReference Include="..\RecallDb.Core\RecallDb.Core.csproj" />
+  </ItemGroup>
+
 </Project>

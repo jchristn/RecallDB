@@ -222,6 +222,14 @@ namespace RecallDb.Sdk.TestHarness
             await RunTest("Search full-text: sort text score descending", TestSearchFullTextSortDescending);
             await RunTest("Search full-text: sort text score ascending", TestSearchFullTextSortAscending);
             await RunTest("Search full-text: backward compat vector-only", TestSearchFullTextBackwardCompat);
+            await RunTest("Search full-text: match mode any matches any term", TestSearchFullTextMatchModeAny);
+            await RunTest("Search full-text: match mode all requires every term", TestSearchFullTextMatchModeAll);
+            await RunTest("Search full-text: hybrid rrf fused scores and ranks", TestSearchFullTextHybridRrf);
+            await RunTest("Search full-text: hybrid filter legacy requires text match", TestSearchFullTextHybridFilter);
+            await RunTest("Search full-text: validation rejects text weight 1.5", TestSearchFullTextValidationTextWeight);
+            await RunTest("Search full-text: validation rejects normalization 64", TestSearchFullTextValidationNormalization);
+            await RunTest("Search full-text: validation rejects hybrid rrf k 0", TestSearchFullTextValidationRrfK);
+            await RunTest("Search full-text: validation rejects unknown language", TestSearchFullTextValidationLanguage);
 
             // 22. Search Result Validation
             await RunTest("Search validation: result fields", TestSearchResultFields);
@@ -1515,7 +1523,9 @@ namespace RecallDb.Sdk.TestHarness
             List<float> embeddings = null,
             string vectorSearchType = null,
             LabelFilter labelFilter = null,
-            TermsFilter termsFilter = null)
+            TermsFilter termsFilter = null,
+            string matchMode = null,
+            HybridQuery hybrid = null)
         {
             SearchQuery sq = new SearchQuery();
             sq.MaxResults = maxResults;
@@ -1530,6 +1540,8 @@ namespace RecallDb.Sdk.TestHarness
             sq.FullText.Normalization = normalization;
             sq.FullText.MinimumScore = minimumScore;
             sq.FullText.TextWeight = textWeight;
+            if (matchMode != null) sq.FullText.MatchMode = matchMode;
+            sq.Hybrid = hybrid;
 
             if (embeddings != null)
             {
@@ -1570,9 +1582,12 @@ namespace RecallDb.Sdk.TestHarness
                 embeddings: SearchEmbeddings(),
                 textWeight: 0.3)).ConfigureAwait(false);
             AssertTrue(result.Documents.Count > 0, "Hybrid search should return results");
+            // The default hybrid strategy is Rrf. A text match is not required, so TextScore is null for
+            // documents that only matched the vector leg.
+            AssertTrue(result.Documents.Any(d => d.TextScore.HasValue && d.TextScore.Value > 0), "At least one hybrid result should have a TextScore");
             foreach (DocumentRecord doc in result.Documents)
             {
-                AssertTrue(doc.TextScore.HasValue && doc.TextScore.Value > 0, "TextScore should be populated in hybrid mode");
+                AssertTrue(!doc.TextScore.HasValue || doc.TextScore.Value > 0, "TextScore should be null or > 0 in hybrid mode");
                 AssertTrue(doc.Score > 0, "Score should be > 0 (blended)");
             }
         }
@@ -1652,6 +1667,92 @@ namespace RecallDb.Sdk.TestHarness
                 AssertTrue(doc.Score > 0, "Score should be > 0");
                 AssertTrue(!doc.TextScore.HasValue || doc.TextScore.Value == 0, "TextScore should be null or 0 in vector-only mode");
             }
+        }
+
+        private static async Task TestSearchFullTextMatchModeAny()
+        {
+            SearchResult result = await DoSearch(MakeFullTextQuery("learning nonexistentzzzterm", matchMode: "Any")).ConfigureAwait(false);
+            AssertTrue(result.Documents.Count > 0, "MatchMode Any should return documents that match any term");
+            foreach (DocumentRecord doc in result.Documents)
+            {
+                AssertTrue(doc.TextScore.HasValue && doc.TextScore.Value > 0, "TextScore should be > 0");
+            }
+        }
+
+        private static async Task TestSearchFullTextMatchModeAll()
+        {
+            SearchResult result = await DoSearch(MakeFullTextQuery("learning nonexistentzzzterm", matchMode: "All")).ConfigureAwait(false);
+            AssertEqual(0, (int)result.TotalRecords, "MatchMode All should return no documents when one term is absent");
+            AssertTrue(result.Documents.Count == 0, "Documents list should be empty");
+        }
+
+        private static async Task TestSearchFullTextHybridRrf()
+        {
+            HybridQuery hybrid = new HybridQuery();
+            hybrid.Strategy = "Rrf";
+            hybrid.RrfK = 60;
+            SearchResult result = await DoSearch(MakeFullTextQuery(
+                "machine learning",
+                embeddings: SearchEmbeddings(),
+                hybrid: hybrid)).ConfigureAwait(false);
+            AssertTrue(result.Documents.Count > 0, "Hybrid Rrf search should return results");
+            foreach (DocumentRecord doc in result.Documents)
+            {
+                AssertGreaterThanOrEqual(doc.Score, 0.0, "Rrf Score");
+                AssertLessThanOrEqual(doc.Score, 1.0, "Rrf Score");
+                AssertTrue(doc.VectorRank.HasValue || doc.TextRank.HasValue, "Each Rrf result should have a VectorRank or a TextRank");
+                if (!doc.TextRank.HasValue) AssertTrue(!doc.TextScore.HasValue, "TextScore should be null when TextRank is null");
+            }
+            AssertTrue(result.Documents.Any(d => d.VectorRank.HasValue), "At least one Rrf result should have a VectorRank");
+            AssertTrue(result.Documents.Any(d => d.TextRank.HasValue), "At least one Rrf result should have a TextRank");
+        }
+
+        private static async Task TestSearchFullTextHybridFilter()
+        {
+            HybridQuery hybrid = new HybridQuery();
+            hybrid.Strategy = "Filter";
+            SearchResult result = await DoSearch(MakeFullTextQuery(
+                "machine learning",
+                embeddings: SearchEmbeddings(),
+                textWeight: 0.3,
+                matchMode: "All",
+                hybrid: hybrid)).ConfigureAwait(false);
+            AssertTrue(result.Documents.Count > 0, "Hybrid Filter search should return results");
+            foreach (DocumentRecord doc in result.Documents)
+            {
+                AssertTrue(doc.TextScore.HasValue && doc.TextScore.Value > 0, "Every Filter result should have a TextScore");
+                AssertTrue(doc.Score > 0, "Score should be > 0 (blended)");
+            }
+        }
+
+        private static async Task TestSearchFullTextValidationTextWeight()
+        {
+            await AssertSearchBadRequest(MakeFullTextQuery("learning", textWeight: 1.5)).ConfigureAwait(false);
+        }
+
+        private static async Task TestSearchFullTextValidationNormalization()
+        {
+            await AssertSearchBadRequest(MakeFullTextQuery("learning", normalization: 64)).ConfigureAwait(false);
+        }
+
+        private static async Task TestSearchFullTextValidationRrfK()
+        {
+            HybridQuery hybrid = new HybridQuery();
+            hybrid.Strategy = "Rrf";
+            hybrid.RrfK = 0;
+            await AssertSearchBadRequest(MakeFullTextQuery("learning", embeddings: SearchEmbeddings(), hybrid: hybrid)).ConfigureAwait(false);
+        }
+
+        private static async Task TestSearchFullTextValidationLanguage()
+        {
+            await AssertSearchBadRequest(MakeFullTextQuery("learning", language: "english'); drop table x;--")).ConfigureAwait(false);
+        }
+
+        private static async Task AssertSearchBadRequest(SearchQuery query)
+        {
+            string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/search";
+            using HttpResponseMessage response = await RawPostAsync(_RawAdminClient, path, query).ConfigureAwait(false);
+            AssertStatusCode(response, HttpStatusCode.BadRequest);
         }
 
         #endregion
