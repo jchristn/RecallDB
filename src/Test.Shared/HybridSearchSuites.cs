@@ -13,6 +13,7 @@ namespace Test.Shared
     using Npgsql;
 
     using RecallDb.Core.Database.Postgresql;
+    using RecallDb.Core.Database.Postgresql.Queries;
     using RecallDb.Core.Settings;
 
     using Touchstone.Core;
@@ -592,15 +593,9 @@ namespace Test.Shared
 
         private static string IndexId(string collectionId)
         {
-            // Mirrors DynamicTableQueries.GetIndexIdentifier.
-            string sanitized = collectionId.Replace("-", "_").Replace(".", "_");
-            if (sanitized.StartsWith("col_", StringComparison.Ordinal) && sanitized.Length > 4)
-            {
-                int nextUnderscore = sanitized.IndexOf('_', 4);
-                if (nextUnderscore > 4) return sanitized.Substring(4, nextUnderscore - 4).ToLowerInvariant();
-            }
-            if (sanitized.Length <= 8) return sanitized.ToLowerInvariant();
-            return sanitized.Substring(sanitized.Length - 8).ToLowerInvariant();
+            // Use the production identifier directly rather than a copy, so a change to the naming scheme cannot
+            // leave the tests asserting against a stale one.
+            return DynamicTableQueries.GetIndexIdentifier(collectionId);
         }
 
         private static DatabaseSettings SettingsFromConnectionString(string connectionString)

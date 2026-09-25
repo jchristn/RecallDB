@@ -8,6 +8,7 @@ namespace RecallDb.Server.Services
     using SyslogLogging;
 
     using RecallDb.Core.Database;
+    using RecallDb.Core.Database.Postgresql.Queries;
     using RecallDb.Core.Models;
     using RecallDb.Server.Classes;
 
@@ -120,8 +121,31 @@ namespace RecallDb.Server.Services
             if (col == null)
                 return ServiceResult.Fail(400, "Bad request", "Request body is required.");
 
+            // The id flows unescaped into every DDL/DML statement as a table and index name, so a client-supplied id
+            // must be a plain identifier. Server-generated ids always satisfy this; reject anything else rather than
+            // letting it reach SQL.
+            if (!DynamicTableQueries.IsValidResourceId(col.Id))
+                return ServiceResult.Fail(400, "Bad request",
+                    "Collection id must be 1-48 characters of letters, digits, underscore, hyphen, or dot.");
+
             col.TenantId = ctx.TenantId;
-            col = await _Database.Collections.CreateAsync(col).ConfigureAwait(false);
+
+            try
+            {
+                col = await _Database.Collections.CreateAsync(col).ConfigureAwait(false);
+            }
+            catch (DuplicateCollectionException)
+            {
+                // Report the existing collection's id so a client can adopt it instead of retrying a create that will
+                // always fail. 409 (not 200 with the existing collection) is deliberate: it does not hide a
+                // dimensionality mismatch between what the caller asked for and what already exists.
+                CollectionMetadata existing = await _Database.Collections.ReadByNameAsync(ctx.TenantId, col.Name).ConfigureAwait(false);
+                string existingId = existing != null ? existing.Id : null;
+                return ServiceResult.Fail(409, "Conflict",
+                    "A collection named '" + col.Name + "' already exists in this tenant"
+                    + (existingId != null ? " (id " + existingId + ")." : "."));
+            }
+
             return ServiceResult.Ok(col, 201);
         }
 
@@ -182,7 +206,7 @@ namespace RecallDb.Server.Services
             if (col == null)
                 return ServiceResult.Fail(404, "Not found", "Collection not found.");
 
-            string tableName = ctx.CollectionId.Replace("-", "_").Replace(".", "_");
+            string tableName = DynamicTableQueries.SanitizeTableName(ctx.CollectionId);
             string docsTable = "collection_" + tableName;
             string labelsTable = "collection_" + tableName + "_labels";
             string tagsTable = "collection_" + tableName + "_tags";

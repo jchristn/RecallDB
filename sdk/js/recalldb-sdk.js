@@ -333,7 +333,7 @@ class RecallDbClient {
      */
     async getDocument(tenantId, collectionId, documentKey) {
         return this._get(
-            `/v1.0/tenants/${tenantId}/collections/${collectionId}/documents/${documentKey}`);
+            `/v1.0/tenants/${encodeURIComponent(tenantId)}/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentKey)}`);
     }
 
     /**
@@ -346,7 +346,7 @@ class RecallDbClient {
      */
     async getDocumentByPosition(tenantId, collectionId, documentId, position) {
         return this._get(
-            `/v1.0/tenants/${tenantId}/collections/${collectionId}/documents/${documentId}/${position}`);
+            `/v1.0/tenants/${encodeURIComponent(tenantId)}/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/${position}`);
     }
 
     /**
@@ -359,7 +359,7 @@ class RecallDbClient {
      */
     async updateDocument(tenantId, collectionId, documentKey, document) {
         return this._put(
-            `/v1.0/tenants/${tenantId}/collections/${collectionId}/documents/${documentKey}`,
+            `/v1.0/tenants/${encodeURIComponent(tenantId)}/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentKey)}`,
             document);
     }
 
@@ -371,7 +371,7 @@ class RecallDbClient {
      */
     async deleteDocument(tenantId, collectionId, documentKey) {
         await this._delete(
-            `/v1.0/tenants/${tenantId}/collections/${collectionId}/documents/${documentKey}`);
+            `/v1.0/tenants/${encodeURIComponent(tenantId)}/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentKey)}`);
     }
 
     /**
@@ -383,7 +383,7 @@ class RecallDbClient {
      */
     async documentExists(tenantId, collectionId, documentKey) {
         return this._head(
-            `/v1.0/tenants/${tenantId}/collections/${collectionId}/documents/${documentKey}`);
+            `/v1.0/tenants/${encodeURIComponent(tenantId)}/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentKey)}`);
     }
 
     /**

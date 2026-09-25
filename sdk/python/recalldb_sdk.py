@@ -5,6 +5,7 @@ Provides a client for interacting with the RecallDB REST API.
 """
 
 import requests
+from urllib.parse import quote
 
 
 class RecallDbException(Exception):
@@ -423,7 +424,7 @@ class RecallDbClient:
             dict: Document record.
         """
         return self._get(
-            f"/v1.0/tenants/{tenant_id}/collections/{collection_id}/documents/{document_key}")
+            f"/v1.0/tenants/{quote(str(tenant_id), safe='')}/collections/{quote(str(collection_id), safe='')}/documents/{quote(str(document_key), safe='')}")
 
     def get_document_by_position(self, tenant_id, collection_id, document_id, position):
         """
@@ -439,7 +440,7 @@ class RecallDbClient:
             dict: Document record.
         """
         return self._get(
-            f"/v1.0/tenants/{tenant_id}/collections/{collection_id}/documents/{document_id}/{position}")
+            f"/v1.0/tenants/{quote(str(tenant_id), safe='')}/collections/{quote(str(collection_id), safe='')}/documents/{quote(str(document_id), safe='')}/{position}")
 
     def update_document(self, tenant_id, collection_id, document_key, document):
         """
@@ -455,7 +456,7 @@ class RecallDbClient:
             dict: Updated document record.
         """
         return self._put(
-            f"/v1.0/tenants/{tenant_id}/collections/{collection_id}/documents/{document_key}",
+            f"/v1.0/tenants/{quote(str(tenant_id), safe='')}/collections/{quote(str(collection_id), safe='')}/documents/{quote(str(document_key), safe='')}",
             document)
 
     def delete_document(self, tenant_id, collection_id, document_key):
@@ -468,7 +469,7 @@ class RecallDbClient:
             document_key: Document key.
         """
         self._delete(
-            f"/v1.0/tenants/{tenant_id}/collections/{collection_id}/documents/{document_key}")
+            f"/v1.0/tenants/{quote(str(tenant_id), safe='')}/collections/{quote(str(collection_id), safe='')}/documents/{quote(str(document_key), safe='')}")
 
     def document_exists(self, tenant_id, collection_id, document_key):
         """
@@ -483,7 +484,7 @@ class RecallDbClient:
             bool: True if the document exists.
         """
         return self._head(
-            f"/v1.0/tenants/{tenant_id}/collections/{collection_id}/documents/{document_key}")
+            f"/v1.0/tenants/{quote(str(tenant_id), safe='')}/collections/{quote(str(collection_id), safe='')}/documents/{quote(str(document_key), safe='')}")
 
     def enumerate_documents(self, tenant_id, collection_id, query=None):
         """

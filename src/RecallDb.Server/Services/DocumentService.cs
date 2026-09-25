@@ -10,6 +10,7 @@ namespace RecallDb.Server.Services
     using SyslogLogging;
 
     using RecallDb.Core.Database;
+    using RecallDb.Core.Database.Postgresql.Queries;
     using RecallDb.Core.Models;
     using RecallDb.Server.Classes;
 
@@ -357,7 +358,7 @@ namespace RecallDb.Server.Services
             if (doc == null)
                 return ServiceResult.Fail(404, "Not found", "Document not found.");
 
-            string tableName = ctx.CollectionId.Replace("-", "_").Replace(".", "_");
+            string tableName = DynamicTableQueries.SanitizeTableName(ctx.CollectionId);
             string docsTable = "collection_" + tableName;
             string labelsTable = "collection_" + tableName + "_labels";
             string tagsTable = "collection_" + tableName + "_tags";

@@ -330,6 +330,43 @@ async function testDocumentUpdate() {
     assertEqual("This is an updated test document.", resp.Content, "Content");
 }
 
+async function testDocumentSpecialKeyRoundTrip() {
+    // Keys that would change the URL's path, query, or fragment if the SDK did not URL-encode each segment.
+    const keys = ["mem123#0", "a/b/c", "50%off", "hello world", "q?x=1", "café_über"];
+    for (const key of keys) {
+        const created = await _adminClient.createDocument(_testTenantId, _testCollectionId, {
+            DocumentKey: key,
+            DocumentId: "special",
+            Content: "content for " + key,
+            ContentType: "Text",
+            Position: 0,
+            Embeddings: [0.1, 0.2, 0.3]
+        });
+        assertEqual(key, created.DocumentKey, "Created key");
+
+        const read = await _adminClient.getDocument(_testTenantId, _testCollectionId, key);
+        assertEqual(key, read.DocumentKey, "Read key");
+        assertEqual("content for " + key, read.Content, "Read content");
+
+        assertTrue(await _adminClient.documentExists(_testTenantId, _testCollectionId, key),
+            "Document with key '" + key + "' should exist");
+
+        const updated = await _adminClient.updateDocument(_testTenantId, _testCollectionId, key, {
+            DocumentKey: key,
+            DocumentId: "special",
+            Content: "updated for " + key,
+            ContentType: "Text",
+            Position: 0,
+            Embeddings: [0.3, 0.2, 0.1]
+        });
+        assertEqual("updated for " + key, updated.Content, "Updated content");
+
+        await _adminClient.deleteDocument(_testTenantId, _testCollectionId, key);
+        assertTrue(!(await _adminClient.documentExists(_testTenantId, _testCollectionId, key)),
+            "Document with key '" + key + "' should be gone after delete");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Test-8: Document Batch
 // ---------------------------------------------------------------------------
@@ -1181,6 +1218,7 @@ async function main() {
     await runTest("Document: PUT update", testDocumentUpdate);
 
     // 8. Document Batch
+    await runTest("Document: keys with special characters round-trip", testDocumentSpecialKeyRoundTrip);
     await runTest("Document: POST batch create", testDocumentBatchCreate);
 
     // 9. Label CRUD

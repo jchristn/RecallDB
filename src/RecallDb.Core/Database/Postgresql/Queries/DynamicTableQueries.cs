@@ -1,10 +1,26 @@
 namespace RecallDb.Core.Database.Postgresql.Queries
 {
+    using System;
+    using System.Collections.Generic;
+    using System.Security.Cryptography;
+    using System.Text;
+    using System.Text.RegularExpressions;
+
     /// <summary>
     /// SQL queries for creating and managing dynamic per-collection tables.
     /// </summary>
     public static class DynamicTableQueries
     {
+        /// <summary>
+        /// Maximum length of the per-collection index identifier. PostgreSQL truncates identifiers to 63 bytes
+        /// (NAMEDATALEN - 1); the longest framing built around the identifier is "idx_col_" (8) + identifier +
+        /// "_l_dkey"/"_t_dkey" (7), so the identifier may be up to 48 characters and stay within the limit.
+        /// </summary>
+        public const int MaxIndexIdentifierLength = 48;
+
+        private static readonly Regex _ValidResourceId = new Regex("^[A-Za-z0-9_]+$", RegexOptions.Compiled);
+        private static readonly Regex _CreateIndexNameAndTable = new Regex(
+            @"IF NOT EXISTS (?<name>\S+) ON (?<table>\S+)", RegexOptions.Compiled);
         /// <summary>
         /// Get the SQL to create a collection documents table.
         /// </summary>
@@ -234,27 +250,119 @@ namespace RecallDb.Core.Database.Postgresql.Queries
             return "content_tsv tsvector GENERATED ALWAYS AS (to_tsvector('english', COALESCE(content, ''))) STORED";
         }
 
-        private static string SanitizeTableName(string collectionId)
+        /// <summary>
+        /// Sanitize a collection id into the suffix used to build its table names. Hyphens and dots map to
+        /// underscores; any other character means the id could break out of an identifier in a DDL/DML statement,
+        /// so it is rejected rather than silently altered (silent alteration could also collapse two distinct ids
+        /// onto one table name). Valid server-generated and client-supplied ids contain only [A-Za-z0-9_].
+        /// </summary>
+        /// <param name="collectionId">Collection id.</param>
+        /// <returns>Table-name-safe suffix.</returns>
+        /// <exception cref="ArgumentException">Thrown when the id contains characters outside [A-Za-z0-9_-.].</exception>
+        public static string SanitizeTableName(string collectionId)
         {
             if (string.IsNullOrEmpty(collectionId)) return "unknown";
-            return collectionId.Replace("-", "_").Replace(".", "_");
+            string sanitized = collectionId.Replace("-", "_").Replace(".", "_");
+            if (!_ValidResourceId.IsMatch(sanitized))
+                throw new ArgumentException("Collection id contains characters that are not allowed in an identifier: " + collectionId, nameof(collectionId));
+            return sanitized;
         }
 
-        private static string GetIndexIdentifier(string collectionId)
+        /// <summary>
+        /// Whether a resource id is safe to embed in an identifier and to route through a URL: 1 to 48 characters
+        /// of [A-Za-z0-9_] (hyphen and dot are also accepted because they are mapped to underscore for table names).
+        /// </summary>
+        /// <param name="id">Resource id.</param>
+        /// <returns>True when the id is valid.</returns>
+        public static bool IsValidResourceId(string id)
         {
-            string sanitized = SanitizeTableName(collectionId);
+            if (string.IsNullOrEmpty(id)) return false;
+            if (id.Length > MaxIndexIdentifierLength) return false;
+            return _ValidResourceId.IsMatch(id.Replace("-", "_").Replace(".", "_"));
+        }
 
-            if (sanitized.StartsWith("col_") && sanitized.Length > 4)
+        /// <summary>
+        /// Derive the per-collection index identifier from the whole collection id, so two collections created in
+        /// the same millisecond (whose ids share a timestamp component) never produce colliding index names.
+        /// The full sanitized, lower-cased id is used when it fits within <see cref="MaxIndexIdentifierLength"/>;
+        /// a longer id (client-supplied, or a future longer format) falls back to a deterministic short hash that
+        /// keeps every generated name within PostgreSQL's 63-byte limit. Lower-casing matches the table names,
+        /// which are already folded to lower case by unquoted-identifier rules.
+        /// </summary>
+        /// <param name="collectionId">Collection id.</param>
+        /// <returns>Collision-free index identifier.</returns>
+        public static string GetIndexIdentifier(string collectionId)
+        {
+            string sanitized = SanitizeTableName(collectionId).ToLowerInvariant();
+            if (sanitized.Length <= MaxIndexIdentifierLength) return sanitized;
+
+            byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(collectionId));
+            return "h" + Convert.ToHexString(hash, 0, 12).ToLowerInvariant();
+        }
+
+        #endregion
+
+        #region Index-Specs
+
+        /// <summary>
+        /// Describes a single per-collection index: its name under the current (full-id) scheme, the table it is on,
+        /// the suffix that identifies its role, the CREATE statement, and whether it is unique.
+        /// </summary>
+        public sealed class CollectionIndexSpec
+        {
+            /// <summary>Index name.</summary>
+            public string Name { get; set; }
+            /// <summary>Table the index is on.</summary>
+            public string Table { get; set; }
+            /// <summary>Suffix identifying the index's role (e.g. dkey, hnsw, l_dkey, t_kv).</summary>
+            public string Suffix { get; set; }
+            /// <summary>CREATE statement (idempotent, IF NOT EXISTS).</summary>
+            public string CreateSql { get; set; }
+            /// <summary>Whether the index is unique.</summary>
+            public bool IsUnique { get; set; }
+        }
+
+        /// <summary>
+        /// The full set of indexes a healthy collection should have, under the current (full-id) naming scheme.
+        /// The CREATE statements are the same ones used at creation, so this is the single source of truth for the
+        /// startup repair (which renames or builds missing indexes and drops leftovers).
+        /// </summary>
+        /// <param name="collectionId">Collection id.</param>
+        /// <param name="includeTsv">Include the stored content_tsv GIN index.</param>
+        /// <param name="includeLegacyFts">Include the legacy expression full-text index (used when there is no content_tsv column).</param>
+        /// <returns>Index specifications.</returns>
+        public static List<CollectionIndexSpec> GetExpectedIndexes(string collectionId, bool includeTsv, bool includeLegacyFts)
+        {
+            string ixId = GetIndexIdentifier(collectionId);
+            string prefix = "idx_col_" + ixId + "_";
+
+            List<string> statements = new List<string>();
+            statements.AddRange(GetCreateCollectionIndexes(collectionId));
+            if (includeTsv) statements.Add(GetCreateStoredTsVectorIndex(collectionId));
+            if (includeLegacyFts) statements.Add(GetCreateLegacyFullTextIndex(collectionId));
+            statements.AddRange(GetCreateLabelsIndexes(collectionId));
+            statements.AddRange(GetCreateTagsIndexes(collectionId));
+
+            List<CollectionIndexSpec> specs = new List<CollectionIndexSpec>();
+            foreach (string statement in statements)
             {
-                int nextUnderscore = sanitized.IndexOf('_', 4);
-                if (nextUnderscore > 4)
+                Match match = _CreateIndexNameAndTable.Match(statement);
+                if (!match.Success) continue;
+                string name = match.Groups["name"].Value;
+                // PostgreSQL folds unquoted identifiers to lower case, so the catalog stores the table name in lower
+                // case; use that canonical form so catalog lookups by table name match.
+                string table = match.Groups["table"].Value.ToLowerInvariant();
+                string suffix = name.StartsWith(prefix, StringComparison.Ordinal) ? name.Substring(prefix.Length) : name;
+                specs.Add(new CollectionIndexSpec
                 {
-                    return sanitized.Substring(4, nextUnderscore - 4);
-                }
+                    Name = name,
+                    Table = table,
+                    Suffix = suffix,
+                    CreateSql = statement,
+                    IsUnique = statement.IndexOf("UNIQUE", StringComparison.Ordinal) >= 0
+                });
             }
-
-            if (sanitized.Length <= 8) return sanitized;
-            return sanitized.Substring(sanitized.Length - 8);
+            return specs;
         }
 
         #endregion

@@ -12,6 +12,7 @@ namespace RecallDb.Core.Database.Postgresql
     using SyslogLogging;
     using RecallDb.Core.Database.Interfaces;
     using RecallDb.Core.Database.Postgresql.Implementations;
+    using RecallDb.Core.Models;
     using RecallDb.Core.Database.Postgresql.Queries;
     using RecallDb.Core.Observability;
     using RecallDb.Core.Settings;
@@ -122,6 +123,59 @@ namespace RecallDb.Core.Database.Postgresql
         }
 
         /// <summary>
+        /// Create a collection and its backing tables and indexes in a single transaction. The collections row, the
+        /// documents/labels/tags tables, and every index (including the stored content_tsv GIN index) are created
+        /// together, so any failure rolls the whole thing back and never leaves a collections row without its tables
+        /// or a documents table missing indexes. Because the index names now derive from the full collection id,
+        /// two collections created in the same millisecond no longer share names.
+        /// </summary>
+        /// <param name="collection">Collection metadata to create.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Task.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when collection is null.</exception>
+        /// <exception cref="DuplicateCollectionException">Thrown when the tenant already has a collection with the same name.</exception>
+        public async Task CreateCollectionAtomicAsync(CollectionMetadata collection, CancellationToken token = default)
+        {
+            if (collection == null) throw new ArgumentNullException(nameof(collection));
+
+            List<string> queries = new List<string>();
+            queries.Add(
+                "INSERT INTO collections " +
+                "(id, tenant_id, name, description, dimensionality, active, created_utc, last_update_utc) " +
+                "VALUES (" +
+                "'" + Sanitize(collection.Id) + "', " +
+                "'" + Sanitize(collection.TenantId) + "', " +
+                "'" + Sanitize(collection.Name) + "', " +
+                FormatNullableString(collection.Description) + ", " +
+                collection.Dimensionality + ", " +
+                FormatBoolean(collection.Active) + ", " +
+                "'" + FormatDateTime(collection.CreatedUtc) + "', " +
+                "'" + FormatDateTime(collection.LastUpdateUtc) + "'" +
+                ");");
+            queries.Add(DynamicTableQueries.GetCreateCollectionTable(collection.Id, collection.Dimensionality));
+            queries.AddRange(DynamicTableQueries.GetCreateCollectionIndexes(collection.Id));
+            // A new table already has the content_tsv column (GetCreateCollectionTable includes it), so its GIN
+            // index can be built in the same transaction; no migration branch is needed at creation.
+            queries.Add(DynamicTableQueries.GetCreateStoredTsVectorIndex(collection.Id));
+            queries.Add(DynamicTableQueries.GetCreateLabelsTable(collection.Id));
+            queries.AddRange(DynamicTableQueries.GetCreateLabelsIndexes(collection.Id));
+            queries.Add(DynamicTableQueries.GetCreateTagsTable(collection.Id));
+            queries.AddRange(DynamicTableQueries.GetCreateTagsIndexes(collection.Id));
+
+            try
+            {
+                await ExecuteQueriesAsync(queries, true, _Settings.SchemaCommandTimeoutSeconds, token).ConfigureAwait(false);
+            }
+            catch (PostgresException pe) when (pe.SqlState == "23505" && pe.ConstraintName == "idx_collections_tenant_name")
+            {
+                throw new DuplicateCollectionException(collection.TenantId, collection.Name, pe);
+            }
+
+            _StoredTsVectorCache[collection.Id] = true;
+            if (_Logging != null) _Logging.Info(_Header + "created collection " + collection.Id + " atomically");
+        }
+
+        /// <summary>
         /// Ensure the tables and indexes for every existing collection are present. Re-runs the
         /// idempotent CREATE TABLE / CREATE INDEX IF NOT EXISTS statements for each collection so
         /// that collections created before an index was introduced (e.g. the HNSW vector index and
@@ -138,7 +192,8 @@ namespace RecallDb.Core.Database.Postgresql
             DataTable result = await ExecuteQueryAsync("SELECT id, dimensionality FROM collections", false, token).ConfigureAwait(false);
             if (result == null || result.Rows.Count == 0) return;
 
-            int ensured = 0;
+            int repaired = 0;
+            int unhealthy = 0;
 
             foreach (DataRow row in result.Rows)
             {
@@ -149,16 +204,175 @@ namespace RecallDb.Core.Database.Postgresql
 
                 try
                 {
-                    await CreateCollectionTablesInternalAsync(collectionId, dimensionality, _Settings.MigrateFullTextColumn, token).ConfigureAwait(false);
-                    ensured++;
+                    bool healthy = await RepairCollectionSchemaAsync(collectionId, dimensionality, _Settings.MigrateFullTextColumn, token).ConfigureAwait(false);
+                    repaired++;
+                    if (!healthy) unhealthy++;
                 }
                 catch (Exception e)
                 {
+                    unhealthy++;
                     if (_Logging != null) _Logging.Warn(_Header + "unable to ensure schema for collection " + collectionId + ": " + e.Message);
                 }
             }
 
-            if (_Logging != null) _Logging.Info(_Header + "ensured schema for " + ensured + " collection(s)");
+            if (_Logging != null)
+                _Logging.Info(_Header + "schema pass complete: checked " + result.Rows.Count + ", processed " + repaired + ", still unhealthy " + unhealthy);
+        }
+
+        /// <summary>
+        /// Bring one collection's schema up to the current (full-id) index naming scheme, repairing damage from the
+        /// historical index-name collision. Ensures the documents, labels, and tags tables exist; migrates the
+        /// content_tsv column if configured; renames existing old-scheme indexes to the new names in place (instant,
+        /// no rebuild); builds any index that is genuinely missing; and drops leftover old-scheme indexes. The unique
+        /// document_key index is only built when the table has no duplicate keys; duplicates are logged and left for
+        /// an operator to resolve. Index existence is read from the catalog per table, so a name shared with another
+        /// collection's old-scheme index can never cause a rename or drop on the wrong table.
+        /// </summary>
+        /// <param name="collectionId">Collection id.</param>
+        /// <param name="dimensionality">Vector dimensionality.</param>
+        /// <param name="migrateFullTextColumn">Whether to add the stored content_tsv column when it is missing.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>True when the collection has its full set of indexes afterwards; false when something was left unhealthy (e.g. a unique index skipped due to duplicates).</returns>
+        private async Task<bool> RepairCollectionSchemaAsync(string collectionId, int dimensionality, bool migrateFullTextColumn, CancellationToken token)
+        {
+            // PostgreSQL folds unquoted identifiers to lower case, so the tables are stored under their lower-cased
+            // names. Use that canonical form for every catalog lookup (pg_indexes, information_schema).
+            string docsTable = ("collection_" + DynamicTableQueries.SanitizeTableName(collectionId)).ToLowerInvariant();
+            string labelsTable = docsTable + "_labels";
+            string tagsTable = docsTable + "_tags";
+            string[] tables = new[] { docsTable, labelsTable, tagsTable };
+
+            // 1. Ensure all three tables exist. This fixes collision "losers" whose labels/tags tables were never
+            //    created because the earlier DDL batch stopped at the first failing index statement.
+            await ExecuteQueriesAsync(new List<string>
+            {
+                DynamicTableQueries.GetCreateCollectionTable(collectionId, dimensionality),
+                DynamicTableQueries.GetCreateLabelsTable(collectionId),
+                DynamicTableQueries.GetCreateTagsTable(collectionId)
+            }, false, _Settings.SchemaCommandTimeoutSeconds, token).ConfigureAwait(false);
+
+            // 2. Decide the final index set. The collection keeps the stored content_tsv index when it already has the
+            //    column or we are allowed to add it; otherwise it keeps the legacy expression index.
+            bool hasColumnNow = await ColumnExistsAsync(docsTable, "content_tsv", token).ConfigureAwait(false);
+            bool willHaveTsv = hasColumnNow || migrateFullTextColumn;
+            List<DynamicTableQueries.CollectionIndexSpec> desired =
+                DynamicTableQueries.GetExpectedIndexes(collectionId, includeTsv: willHaveTsv, includeLegacyFts: !willHaveTsv);
+            HashSet<string> desiredNames = new HashSet<string>(desired.Count);
+            foreach (DynamicTableQueries.CollectionIndexSpec spec in desired) desiredNames.Add(spec.Name);
+
+            // 3. Read existing indexes per table.
+            Dictionary<string, List<string>> existing = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            foreach (string table in tables) existing[table] = await ListIndexNamesAsync(table, token).ConfigureAwait(false);
+
+            // 4. Rename pass: convert any old-scheme index (same table, same role suffix, different identifier) to its
+            //    new name in place. ALTER INDEX ... RENAME is instant and avoids rebuilding healthy collections.
+            foreach (DynamicTableQueries.CollectionIndexSpec spec in desired)
+            {
+                List<string> onTable = existing[spec.Table];
+                if (onTable.Contains(spec.Name)) continue;
+
+                string oldName = null;
+                foreach (string name in onTable)
+                {
+                    if (name == spec.Name) continue;
+                    if (!name.StartsWith("idx_col_", StringComparison.Ordinal)) continue;
+                    if (!name.EndsWith("_" + spec.Suffix, StringComparison.Ordinal)) continue;
+                    if (desiredNames.Contains(name)) continue; // a different role's correct name; never repurpose it
+                    oldName = name;
+                    break;
+                }
+                if (oldName == null) continue;
+
+                await ExecuteQueriesAsync(new List<string> { "ALTER INDEX " + oldName + " RENAME TO " + spec.Name + ";" },
+                    false, _Settings.SchemaCommandTimeoutSeconds, token).ConfigureAwait(false);
+                onTable.Remove(oldName);
+                onTable.Add(spec.Name);
+                if (_Logging != null) _Logging.Info(_Header + "renamed index " + oldName + " to " + spec.Name);
+            }
+
+            // 5. content_tsv column migration and its index (skips the tsv index build when it was just renamed).
+            await EnsureFullTextSchemaAsync(collectionId, migrateFullTextColumn, token).ConfigureAwait(false);
+            existing[docsTable] = await ListIndexNamesAsync(docsTable, token).ConfigureAwait(false);
+
+            // 6. Build any index still missing. The unique document_key index is skipped (with a warning) when the
+            //    table has duplicate keys, since CREATE UNIQUE INDEX would fail; the other indexes are still built.
+            bool healthy = true;
+            foreach (DynamicTableQueries.CollectionIndexSpec spec in desired)
+            {
+                if (existing[spec.Table].Contains(spec.Name)) continue;
+
+                if (spec.IsUnique)
+                {
+                    List<string> duplicates = await FindDuplicateDocumentKeysAsync(spec.Table, token).ConfigureAwait(false);
+                    if (duplicates.Count > 0)
+                    {
+                        healthy = false;
+                        if (_Logging != null)
+                            _Logging.Warn(_Header + "collection " + collectionId + " has duplicate document_key values ("
+                                + string.Join(", ", duplicates) + "); leaving unique index " + spec.Name
+                                + " unbuilt until the duplicates are resolved");
+                        continue;
+                    }
+                }
+
+                await ExecuteQueriesAsync(new List<string> { spec.CreateSql }, false, _Settings.SchemaCommandTimeoutSeconds, token).ConfigureAwait(false);
+                existing[spec.Table].Add(spec.Name);
+            }
+
+            // 7. Drop leftover old-scheme indexes (idx_col_*) that are not part of the desired set, selected by table
+            //    name so a name shared with another collection's index can never trigger a drop on the wrong table.
+            foreach (string table in tables)
+            {
+                foreach (string name in await ListIndexNamesAsync(table, token).ConfigureAwait(false))
+                {
+                    if (!name.StartsWith("idx_col_", StringComparison.Ordinal)) continue;
+                    if (desiredNames.Contains(name)) continue;
+                    await ExecuteQueriesAsync(new List<string> { "DROP INDEX IF EXISTS " + name + ";" },
+                        false, _Settings.SchemaCommandTimeoutSeconds, token).ConfigureAwait(false);
+                    if (_Logging != null) _Logging.Info(_Header + "dropped leftover index " + name + " on " + table);
+                }
+            }
+
+            return healthy;
+        }
+
+        private async Task<List<string>> ListIndexNamesAsync(string table, CancellationToken token)
+        {
+            DataTable result = await ExecuteQueryAsync(
+                "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() AND tablename = '" + Sanitize(table) + "'",
+                false, token).ConfigureAwait(false);
+            List<string> names = new List<string>();
+            if (result != null)
+                foreach (DataRow row in result.Rows)
+                    if (row["indexname"] != null && row["indexname"] != DBNull.Value) names.Add(row["indexname"].ToString());
+            return names;
+        }
+
+        private async Task<bool> ColumnExistsAsync(string table, string column, CancellationToken token)
+        {
+            DataTable result = await ExecuteQueryAsync(
+                "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = '"
+                + Sanitize(table) + "' AND column_name = '" + Sanitize(column) + "'", false, token).ConfigureAwait(false);
+            return result != null && result.Rows.Count > 0;
+        }
+
+        private async Task<List<string>> FindDuplicateDocumentKeysAsync(string table, CancellationToken token)
+        {
+            List<string> duplicates = new List<string>();
+            try
+            {
+                DataTable result = await ExecuteQueryAsync(
+                    "SELECT document_key FROM " + table + " GROUP BY document_key HAVING COUNT(*) > 1 LIMIT 10",
+                    false, token).ConfigureAwait(false);
+                if (result != null)
+                    foreach (DataRow row in result.Rows)
+                        if (row["document_key"] != null && row["document_key"] != DBNull.Value) duplicates.Add(row["document_key"].ToString());
+            }
+            catch (PostgresException)
+            {
+                // Table missing a document_key column (should not happen for a real collection); treat as no duplicates.
+            }
+            return duplicates;
         }
 
         /// <summary>

@@ -723,7 +723,7 @@ Create a new collection. This creates the backing document, label, and tag table
 }
 ```
 
-`Id` is auto-generated if not provided. `Active` defaults to `true`. `Dimensionality` defaults to `384` and must be greater than `0`.
+`Id` is auto-generated if not provided. When supplied, it must be 1-48 characters of letters, digits, underscore, hyphen, or dot; anything else is rejected with `400`. `Active` defaults to `true`. `Dimensionality` defaults to `384` and must be greater than `0`.
 
 **Response `201`**
 
@@ -737,6 +737,16 @@ Create a new collection. This creates the backing document, label, and tag table
   "Active": true,
   "CreatedUtc": "2025-01-15T12:00:00Z",
   "LastUpdateUtc": "2025-01-15T12:00:00Z"
+}
+```
+
+**Response `409`** — A collection with the same name already exists in the tenant. The `Context` names the existing collection's id so a client can read and adopt it instead of retrying.
+
+```json
+{
+  "Error": "Conflict",
+  "StatusCode": 409,
+  "Context": "A collection named 'Research Papers' already exists in this tenant (id col_01JEXAMPLE)."
 }
 ```
 

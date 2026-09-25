@@ -130,6 +130,9 @@ namespace RecallDb.Sdk.TestHarness
             // 8. Document Batch
             await RunTest("Document: POST batch create", TestDocumentBatchCreate);
 
+            // 8b. Document keys with URL-significant and non-ASCII characters
+            await RunTest("Document: keys with special characters round-trip", TestDocumentSpecialKeyRoundTrip);
+
             // 9. Label CRUD
             await RunTest("Label: PUT create", TestLabelCreate);
             await RunTest("Label: GET list", TestLabelList);
@@ -830,6 +833,40 @@ namespace RecallDb.Sdk.TestHarness
             {
                 DocumentRecord readDoc = await _AdminClient.GetDocumentAsync(_TestTenantId, _TestCollectionId, batchKey).ConfigureAwait(false);
                 AssertNotNull(readDoc, "Batch document " + batchKey);
+            }
+        }
+
+        private static async Task TestDocumentSpecialKeyRoundTrip()
+        {
+            // Keys that would change the URL's path, query, or fragment if the SDK did not URL-encode each segment.
+            string[] keys = new[] { "mem123#0", "a/b/c", "50%off", "hello world", "q?x=1", "café_über" };
+            foreach (string key in keys)
+            {
+                DocumentRecord doc = new DocumentRecord();
+                doc.DocumentKey = key;
+                doc.DocumentId = "special";
+                doc.Content = "content for " + key;
+                doc.ContentType = "Text";
+                doc.Position = 0;
+                doc.Embeddings = new List<float> { 0.1f, 0.2f, 0.3f };
+
+                DocumentRecord created = await _AdminClient.CreateDocumentAsync(_TestTenantId, _TestCollectionId, doc).ConfigureAwait(false);
+                AssertEqual(key, created.DocumentKey, "Created key");
+
+                DocumentRecord read = await _AdminClient.GetDocumentAsync(_TestTenantId, _TestCollectionId, key).ConfigureAwait(false);
+                AssertEqual(key, read.DocumentKey, "Read key");
+                AssertEqual("content for " + key, read.Content, "Read content");
+
+                bool exists = await _AdminClient.DocumentExistsAsync(_TestTenantId, _TestCollectionId, key).ConfigureAwait(false);
+                AssertTrue(exists, "Document with key '" + key + "' should exist");
+
+                doc.Content = "updated for " + key;
+                DocumentRecord updated = await _AdminClient.UpdateDocumentAsync(_TestTenantId, _TestCollectionId, key, doc).ConfigureAwait(false);
+                AssertEqual("updated for " + key, updated.Content, "Updated content");
+
+                await _AdminClient.DeleteDocumentAsync(_TestTenantId, _TestCollectionId, key).ConfigureAwait(false);
+                bool existsAfter = await _AdminClient.DocumentExistsAsync(_TestTenantId, _TestCollectionId, key).ConfigureAwait(false);
+                AssertTrue(!existsAfter, "Document with key '" + key + "' should be gone after delete");
             }
         }
 

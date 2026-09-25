@@ -20,6 +20,7 @@ namespace Test.Shared
         {
             List<TestSuiteDescriptor> suites = new List<TestSuiteDescriptor>(BuildSuites());
             suites.Add(HybridSearchSuites.Suite);
+            suites.Add(CollectionIntegritySuites.Suite);
             suites.Add(RecallDbMcpSuites.Suite);
             return suites;
         }

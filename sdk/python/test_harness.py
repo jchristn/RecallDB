@@ -339,6 +339,42 @@ def test_document_update():
     assert_equal("This is an updated test document.", resp.get("Content"), "Content")
 
 
+def test_document_special_key_round_trip():
+    # Keys that would change the URL's path, query, or fragment if the SDK did not URL-encode each segment.
+    keys = ["mem123#0", "a/b/c", "50%off", "hello world", "q?x=1", "café_über"]
+    for key in keys:
+        created = _admin_client.create_document(_test_tenant_id, _test_collection_id, {
+            "DocumentKey": key,
+            "DocumentId": "special",
+            "Content": "content for " + key,
+            "ContentType": "Text",
+            "Position": 0,
+            "Embeddings": [0.1, 0.2, 0.3]
+        })
+        assert_equal(key, created.get("DocumentKey"), "Created key")
+
+        read = _admin_client.get_document(_test_tenant_id, _test_collection_id, key)
+        assert_equal(key, read.get("DocumentKey"), "Read key")
+        assert_equal("content for " + key, read.get("Content"), "Read content")
+
+        assert_true(_admin_client.document_exists(_test_tenant_id, _test_collection_id, key),
+                    "Document with key '" + key + "' should exist")
+
+        updated = _admin_client.update_document(_test_tenant_id, _test_collection_id, key, {
+            "DocumentKey": key,
+            "DocumentId": "special",
+            "Content": "updated for " + key,
+            "ContentType": "Text",
+            "Position": 0,
+            "Embeddings": [0.3, 0.2, 0.1]
+        })
+        assert_equal("updated for " + key, updated.get("Content"), "Updated content")
+
+        _admin_client.delete_document(_test_tenant_id, _test_collection_id, key)
+        assert_true(not _admin_client.document_exists(_test_tenant_id, _test_collection_id, key),
+                    "Document with key '" + key + "' should be gone after delete")
+
+
 # ---------------------------------------------------------------------------
 # Test-8: Document Batch
 # ---------------------------------------------------------------------------
@@ -1546,6 +1582,7 @@ def main():
     run_test("Document: PUT update", test_document_update)
 
     # 8. Document Batch
+    run_test("Document: keys with special characters round-trip", test_document_special_key_round_trip)
     run_test("Document: POST batch create", test_document_batch_create)
 
     # 9. Label CRUD

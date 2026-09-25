@@ -1403,6 +1403,17 @@ namespace RecallDb.Server
             return req.Http.Metadata as AuthenticationResult;
         }
 
+        /// <summary>
+        /// Read a route path parameter and URL-decode it. Path segments (tenant id, collection id, document key,
+        /// document id) arrive percent-encoded from a correct client, so a key containing '#', '?', '/', '%', a
+        /// space, or a non-ASCII character round-trips only when it is decoded here before use.
+        /// </summary>
+        private static string DecodeParam(ApiRequest req, string name)
+        {
+            string raw = req.Parameters[name];
+            return raw == null ? null : Uri.UnescapeDataString(raw);
+        }
+
         private static RequestContext BuildContext(ApiRequest req, string requestType)
         {
             RequestContext ctx = new RequestContext();
@@ -1496,7 +1507,7 @@ namespace RecallDb.Server
         private static async Task<object> TenantReadRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "tenant/read");
-            ctx.TenantId = req.Parameters["id"];
+            ctx.TenantId = DecodeParam(req, "id");
             ServiceResult result = await _Services.Tenants.ReadAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1504,7 +1515,7 @@ namespace RecallDb.Server
         private static async Task<object> TenantExistsRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "tenant/exists");
-            ctx.TenantId = req.Parameters["id"];
+            ctx.TenantId = DecodeParam(req, "id");
             ServiceResult result = await _Services.Tenants.ExistsAsync(ctx).ConfigureAwait(false);
             return MapExists(req, result);
         }
@@ -1528,7 +1539,7 @@ namespace RecallDb.Server
         private static async Task<object> TenantUpdateRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "tenant/update");
-            ctx.TenantId = req.Parameters["id"];
+            ctx.TenantId = DecodeParam(req, "id");
             ctx.Payload = req.Data as TenantMetadata;
             ServiceResult result = await _Services.Tenants.UpdateAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1537,7 +1548,7 @@ namespace RecallDb.Server
         private static async Task<object> TenantDeleteRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "tenant/delete");
-            ctx.TenantId = req.Parameters["id"];
+            ctx.TenantId = DecodeParam(req, "id");
             ServiceResult result = await _Services.Tenants.DeleteAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1549,7 +1560,7 @@ namespace RecallDb.Server
         private static async Task<object> UserListRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "user/enumerate");
-            ctx.TenantId = req.Parameters["tid"];
+            ctx.TenantId = DecodeParam(req, "tid");
             ServiceResult result = await _Services.Users.ListAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1557,8 +1568,8 @@ namespace RecallDb.Server
         private static async Task<object> UserReadRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "user/read");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.UserId = req.Parameters["id"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.UserId = DecodeParam(req, "id");
             ServiceResult result = await _Services.Users.ReadAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1566,8 +1577,8 @@ namespace RecallDb.Server
         private static async Task<object> UserExistsRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "user/exists");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.UserId = req.Parameters["id"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.UserId = DecodeParam(req, "id");
             ServiceResult result = await _Services.Users.ExistsAsync(ctx).ConfigureAwait(false);
             return MapExists(req, result);
         }
@@ -1575,7 +1586,7 @@ namespace RecallDb.Server
         private static async Task<object> UserEnumerateRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "user/enumerate");
-            ctx.TenantId = req.Parameters["tid"];
+            ctx.TenantId = DecodeParam(req, "tid");
             ctx.Query = req.Data as EnumerationQuery;
             ServiceResult result = await _Services.Users.EnumerateAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1584,7 +1595,7 @@ namespace RecallDb.Server
         private static async Task<object> UserCreateRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "user/create");
-            ctx.TenantId = req.Parameters["tid"];
+            ctx.TenantId = DecodeParam(req, "tid");
             ctx.Payload = req.Data as UserMaster;
             ServiceResult result = await _Services.Users.CreateAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1593,8 +1604,8 @@ namespace RecallDb.Server
         private static async Task<object> UserUpdateRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "user/update");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.UserId = req.Parameters["id"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.UserId = DecodeParam(req, "id");
             ctx.Payload = req.Data as UserMaster;
             ServiceResult result = await _Services.Users.UpdateAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1603,8 +1614,8 @@ namespace RecallDb.Server
         private static async Task<object> UserDeleteRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "user/delete");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.UserId = req.Parameters["id"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.UserId = DecodeParam(req, "id");
             ServiceResult result = await _Services.Users.DeleteAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1616,7 +1627,7 @@ namespace RecallDb.Server
         private static async Task<object> CredentialListRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "credential/enumerate");
-            ctx.TenantId = req.Parameters["tid"];
+            ctx.TenantId = DecodeParam(req, "tid");
             ServiceResult result = await _Services.Credentials.ListAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1624,8 +1635,8 @@ namespace RecallDb.Server
         private static async Task<object> CredentialReadRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "credential/read");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.ResourceId = req.Parameters["id"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.ResourceId = DecodeParam(req, "id");
             ServiceResult result = await _Services.Credentials.ReadAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1633,8 +1644,8 @@ namespace RecallDb.Server
         private static async Task<object> CredentialExistsRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "credential/exists");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.ResourceId = req.Parameters["id"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.ResourceId = DecodeParam(req, "id");
             ServiceResult result = await _Services.Credentials.ExistsAsync(ctx).ConfigureAwait(false);
             return MapExists(req, result);
         }
@@ -1642,7 +1653,7 @@ namespace RecallDb.Server
         private static async Task<object> CredentialEnumerateRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "credential/enumerate");
-            ctx.TenantId = req.Parameters["tid"];
+            ctx.TenantId = DecodeParam(req, "tid");
             ctx.Query = req.Data as EnumerationQuery;
             ServiceResult result = await _Services.Credentials.EnumerateAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1651,7 +1662,7 @@ namespace RecallDb.Server
         private static async Task<object> CredentialCreateRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "credential/create");
-            ctx.TenantId = req.Parameters["tid"];
+            ctx.TenantId = DecodeParam(req, "tid");
             ctx.Payload = req.Data as Credential;
             ServiceResult result = await _Services.Credentials.CreateAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1660,8 +1671,8 @@ namespace RecallDb.Server
         private static async Task<object> CredentialUpdateRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "credential/update");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.ResourceId = req.Parameters["id"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.ResourceId = DecodeParam(req, "id");
             ctx.Payload = req.Data as Credential;
             ServiceResult result = await _Services.Credentials.UpdateAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1670,8 +1681,8 @@ namespace RecallDb.Server
         private static async Task<object> CredentialDeleteRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "credential/delete");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.ResourceId = req.Parameters["id"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.ResourceId = DecodeParam(req, "id");
             ServiceResult result = await _Services.Credentials.DeleteAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1683,7 +1694,7 @@ namespace RecallDb.Server
         private static async Task<object> CollectionListRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "collection/enumerate");
-            ctx.TenantId = req.Parameters["tid"];
+            ctx.TenantId = DecodeParam(req, "tid");
             ServiceResult result = await _Services.Collections.ListAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1691,8 +1702,8 @@ namespace RecallDb.Server
         private static async Task<object> CollectionReadRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "collection/read");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ServiceResult result = await _Services.Collections.ReadAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1700,8 +1711,8 @@ namespace RecallDb.Server
         private static async Task<object> CollectionExistsRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "collection/exists");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ServiceResult result = await _Services.Collections.ExistsAsync(ctx).ConfigureAwait(false);
             return MapExists(req, result);
         }
@@ -1709,7 +1720,7 @@ namespace RecallDb.Server
         private static async Task<object> CollectionEnumerateRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "collection/enumerate");
-            ctx.TenantId = req.Parameters["tid"];
+            ctx.TenantId = DecodeParam(req, "tid");
             ctx.Query = req.Data as EnumerationQuery;
             ServiceResult result = await _Services.Collections.EnumerateAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1718,7 +1729,7 @@ namespace RecallDb.Server
         private static async Task<object> CollectionCreateRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "collection/create");
-            ctx.TenantId = req.Parameters["tid"];
+            ctx.TenantId = DecodeParam(req, "tid");
             ctx.Payload = req.Data as CollectionMetadata;
             ServiceResult result = await _Services.Collections.CreateAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1727,8 +1738,8 @@ namespace RecallDb.Server
         private static async Task<object> CollectionUpdateRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "collection/update");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ctx.Payload = req.Data as CollectionMetadata;
             ServiceResult result = await _Services.Collections.UpdateAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1737,8 +1748,8 @@ namespace RecallDb.Server
         private static async Task<object> CollectionDeleteRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "collection/delete");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ServiceResult result = await _Services.Collections.DeleteAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1746,8 +1757,8 @@ namespace RecallDb.Server
         private static async Task<object> CollectionStatsRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "collection/stats");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ServiceResult result = await _Services.Collections.StatsAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1759,8 +1770,8 @@ namespace RecallDb.Server
         private static async Task<object> DocumentListRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "document/enumerate");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ServiceResult result = await _Services.Documents.ListAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1768,9 +1779,9 @@ namespace RecallDb.Server
         private static async Task<object> DocumentReadRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "document/read");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
-            ctx.DocumentKey = req.Parameters["docKey"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
+            ctx.DocumentKey = DecodeParam(req, "docKey");
             ServiceResult result = await _Services.Documents.ReadAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1778,10 +1789,10 @@ namespace RecallDb.Server
         private static async Task<object> DocumentReadByPositionRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "document/readByPosition");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
-            ctx.DocumentId = req.Parameters["docId"];
-            if (int.TryParse(req.Parameters["position"], out int position)) ctx.Position = position;
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
+            ctx.DocumentId = DecodeParam(req, "docId");
+            if (int.TryParse(DecodeParam(req, "position"), out int position)) ctx.Position = position;
             ServiceResult result = await _Services.Documents.ReadByPositionAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1789,9 +1800,9 @@ namespace RecallDb.Server
         private static async Task<object> DocumentExistsRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "document/exists");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
-            ctx.DocumentKey = req.Parameters["docKey"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
+            ctx.DocumentKey = DecodeParam(req, "docKey");
             ServiceResult result = await _Services.Documents.ExistsAsync(ctx).ConfigureAwait(false);
             return MapExists(req, result);
         }
@@ -1799,8 +1810,8 @@ namespace RecallDb.Server
         private static async Task<object> DocumentEnumerateRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "document/enumerate");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ctx.Query = req.Data as EnumerationQuery;
             ServiceResult result = await _Services.Documents.EnumerateAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1809,8 +1820,8 @@ namespace RecallDb.Server
         private static async Task<object> DocumentCreateRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "document/create");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ctx.Payload = req.Data as DocumentRecord;
             ServiceResult result = await _Services.Documents.CreateAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1819,9 +1830,9 @@ namespace RecallDb.Server
         private static async Task<object> DocumentUpdateRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "document/update");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
-            ctx.DocumentKey = req.Parameters["docKey"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
+            ctx.DocumentKey = DecodeParam(req, "docKey");
             ctx.Payload = req.Data as DocumentRecord;
             ServiceResult result = await _Services.Documents.UpdateAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1830,9 +1841,9 @@ namespace RecallDb.Server
         private static async Task<object> DocumentDeleteRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "document/delete");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
-            ctx.DocumentKey = req.Parameters["docKey"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
+            ctx.DocumentKey = DecodeParam(req, "docKey");
             ServiceResult result = await _Services.Documents.DeleteAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1840,8 +1851,8 @@ namespace RecallDb.Server
         private static async Task<object> DocumentBatchDeleteRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "document/batchDelete");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ctx.Payload = req.Data as BatchDeleteRequest;
             ServiceResult result = await _Services.Documents.BatchDeleteAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1850,8 +1861,8 @@ namespace RecallDb.Server
         private static async Task<object> DocumentDeleteByFilterRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "document/deleteByFilter");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ctx.Query = req.Data as EnumerationQuery;
             ServiceResult result = await _Services.Documents.DeleteByFilterAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1860,8 +1871,8 @@ namespace RecallDb.Server
         private static async Task<object> DocumentBatchRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "document/batchCreate");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ctx.Payload = req.Data as List<DocumentRecord>;
             ServiceResult result = await _Services.Documents.BatchCreateAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1870,9 +1881,9 @@ namespace RecallDb.Server
         private static async Task<object> DocumentStatsRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "document/stats");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
-            ctx.DocumentKey = req.Parameters["docKey"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
+            ctx.DocumentKey = DecodeParam(req, "docKey");
             ServiceResult result = await _Services.Documents.StatsAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1884,8 +1895,8 @@ namespace RecallDb.Server
         private static async Task<object> LabelListRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "label/enumerate");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ServiceResult result = await _Services.Labels.ListAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1893,9 +1904,9 @@ namespace RecallDb.Server
         private static async Task<object> LabelReadRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "label/read");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
-            ctx.ResourceId = req.Parameters["id"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
+            ctx.ResourceId = DecodeParam(req, "id");
             ServiceResult result = await _Services.Labels.ReadAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1903,8 +1914,8 @@ namespace RecallDb.Server
         private static async Task<object> LabelCreateRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "label/create");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ctx.Payload = req.Data as LabelRecord;
             ServiceResult result = await _Services.Labels.CreateAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1913,9 +1924,9 @@ namespace RecallDb.Server
         private static async Task<object> LabelDeleteRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "label/delete");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
-            ctx.ResourceId = req.Parameters["id"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
+            ctx.ResourceId = DecodeParam(req, "id");
             ServiceResult result = await _Services.Labels.DeleteAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1923,8 +1934,8 @@ namespace RecallDb.Server
         private static async Task<object> LabelDistinctRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "label/read");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ServiceResult result = await _Services.Labels.DistinctAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1936,8 +1947,8 @@ namespace RecallDb.Server
         private static async Task<object> TagListRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "tag/enumerate");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ServiceResult result = await _Services.Tags.ListAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1945,9 +1956,9 @@ namespace RecallDb.Server
         private static async Task<object> TagReadRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "tag/read");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
-            ctx.ResourceId = req.Parameters["id"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
+            ctx.ResourceId = DecodeParam(req, "id");
             ServiceResult result = await _Services.Tags.ReadAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1955,8 +1966,8 @@ namespace RecallDb.Server
         private static async Task<object> TagCreateRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "tag/create");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ctx.Payload = req.Data as TagRecord;
             ServiceResult result = await _Services.Tags.CreateAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -1965,9 +1976,9 @@ namespace RecallDb.Server
         private static async Task<object> TagDeleteRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "tag/delete");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
-            ctx.ResourceId = req.Parameters["id"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
+            ctx.ResourceId = DecodeParam(req, "id");
             ServiceResult result = await _Services.Tags.DeleteAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1975,8 +1986,8 @@ namespace RecallDb.Server
         private static async Task<object> TagDistinctRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "tag/read");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ServiceResult result = await _Services.Tags.DistinctAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -1988,8 +1999,8 @@ namespace RecallDb.Server
         private static async Task<object> SearchRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "search/query");
-            ctx.TenantId = req.Parameters["tid"];
-            ctx.CollectionId = req.Parameters["cid"];
+            ctx.TenantId = DecodeParam(req, "tid");
+            ctx.CollectionId = DecodeParam(req, "cid");
             ctx.Search = req.Data as SearchQuery;
             ServiceResult result = await _Services.Search.SearchAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
@@ -2035,7 +2046,7 @@ namespace RecallDb.Server
         private static async Task<object> RequestHistoryReadRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "requestHistory/read");
-            ctx.ResourceId = req.Parameters["guid"];
+            ctx.ResourceId = DecodeParam(req, "guid");
             ServiceResult result = await _Services.RequestHistory.ReadAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }
@@ -2043,7 +2054,7 @@ namespace RecallDb.Server
         private static async Task<object> RequestHistoryDeleteRoute(ApiRequest req)
         {
             RequestContext ctx = BuildContext(req, "requestHistory/delete");
-            ctx.ResourceId = req.Parameters["guid"];
+            ctx.ResourceId = DecodeParam(req, "guid");
             ServiceResult result = await _Services.RequestHistory.DeleteAsync(ctx).ConfigureAwait(false);
             return MapResult(req, result);
         }

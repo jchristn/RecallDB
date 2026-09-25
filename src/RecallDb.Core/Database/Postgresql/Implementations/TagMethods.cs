@@ -8,6 +8,7 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
     using System.Threading.Tasks;
     using SyslogLogging;
     using RecallDb.Core.Database.Interfaces;
+    using RecallDb.Core.Database.Postgresql.Queries;
     using RecallDb.Core.Enums;
     using RecallDb.Core.Helpers;
     using RecallDb.Core.Models;
@@ -348,8 +349,7 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
 
         private string SanitizeTableName(string collectionId)
         {
-            if (string.IsNullOrEmpty(collectionId)) return "unknown";
-            return collectionId.Replace("-", "_").Replace(".", "_");
+            return DynamicTableQueries.SanitizeTableName(collectionId);
         }
 
         private string FormatNullableInt(int? value)

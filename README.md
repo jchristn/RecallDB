@@ -325,6 +325,8 @@ Server settings live in `recalldb.json`. Environment variables override selected
 
 Expect the rewrite to take longer than the row count suggests. PostgreSQL rebuilds every index on the table as part of it, HNSW included, so a 50,000-document collection with 64-dimension embeddings took about 46 seconds on a laptop. Those schema statements run without a command timeout by default; `Database.SchemaCommandTimeoutSeconds` (default `0`, meaning no limit, maximum `86400`) caps them if you would rather have a slow migration fail and log a warning than hold startup.
 
+The same startup pass also brings each collection's indexes up to the current naming scheme. Index names derive from the full collection id (earlier builds used only the id's millisecond component, so two collections created in the same millisecond could collide and leave one without some of its indexes). Existing indexes are renamed in place — an instant `ALTER INDEX ... RENAME`, not a rebuild — and any index or side table that a past collision left missing is created. A collection whose documents table holds duplicate `document_key` values keeps working without its unique index; the duplicates are logged at warning level and left for you to resolve, since removing them means choosing which rows to drop. To see which collections are affected before upgrading, run `migrations/002_inspect_damaged_collections.sql` against the database.
+
 ## Architecture
 
 ```

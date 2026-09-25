@@ -54,22 +54,9 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
         {
             if (collection == null) throw new ArgumentNullException(nameof(collection));
 
-            string query =
-                "INSERT INTO collections " +
-                "(id, tenant_id, name, description, dimensionality, active, created_utc, last_update_utc) " +
-                "VALUES (" +
-                "'" + _Driver.Sanitize(collection.Id) + "', " +
-                "'" + _Driver.Sanitize(collection.TenantId) + "', " +
-                "'" + _Driver.Sanitize(collection.Name) + "', " +
-                _Driver.FormatNullableString(collection.Description) + ", " +
-                collection.Dimensionality + ", " +
-                _Driver.FormatBoolean(collection.Active) + ", " +
-                "'" + _Driver.FormatDateTime(collection.CreatedUtc) + "', " +
-                "'" + _Driver.FormatDateTime(collection.LastUpdateUtc) + "'" +
-                ")";
-
-            await _Driver.ExecuteQueryAsync(query, true, token).ConfigureAwait(false);
-            await _Driver.CreateCollectionTablesAsync(collection.Id, collection.Dimensionality, token).ConfigureAwait(false);
+            // The collections row and every backing table and index are created in a single transaction, so a
+            // failure never leaves a row without its tables or a documents table missing indexes.
+            await _Driver.CreateCollectionAtomicAsync(collection, token).ConfigureAwait(false);
 
             if (_Logging != null) _Logging.Debug(_Header + "created collection " + collection.Id + " in tenant " + collection.TenantId);
             return collection;

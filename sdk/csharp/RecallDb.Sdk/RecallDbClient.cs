@@ -464,7 +464,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             if (string.IsNullOrEmpty(documentKey)) throw new ArgumentNullException(nameof(documentKey));
             return await GetAsync<DocumentRecord>(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/documents/" + documentKey,
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/documents/" + Seg(documentKey),
                 token).ConfigureAwait(false);
         }
 
@@ -483,7 +483,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             if (string.IsNullOrEmpty(documentId)) throw new ArgumentNullException(nameof(documentId));
             return await GetAsync<DocumentRecord>(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/documents/" + documentId + "/" + position,
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/documents/" + Seg(documentId) + "/" + position,
                 token).ConfigureAwait(false);
         }
 
@@ -503,7 +503,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(documentKey)) throw new ArgumentNullException(nameof(documentKey));
             if (document == null) throw new ArgumentNullException(nameof(document));
             return await PutAsync<DocumentRecord>(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/documents/" + documentKey,
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/documents/" + Seg(documentKey),
                 document, token).ConfigureAwait(false);
         }
 
@@ -520,7 +520,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             if (string.IsNullOrEmpty(documentKey)) throw new ArgumentNullException(nameof(documentKey));
             await DeleteAsync(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/documents/" + documentKey,
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/documents/" + Seg(documentKey),
                 token).ConfigureAwait(false);
         }
 
@@ -538,7 +538,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             if (string.IsNullOrEmpty(documentKey)) throw new ArgumentNullException(nameof(documentKey));
             return await HeadAsync(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/documents/" + documentKey,
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/documents/" + Seg(documentKey),
                 token).ConfigureAwait(false);
         }
 
@@ -830,6 +830,16 @@ namespace RecallDb.Sdk
         #endregion
 
         #region Private-Methods
+
+        /// <summary>
+        /// URL-encode a single path segment supplied by the caller (a tenant id, collection id, document id, or
+        /// document key). Without this, a key containing '#', '?', '/', or '%' would change the request's path,
+        /// query, or fragment instead of being sent literally.
+        /// </summary>
+        private static string Seg(string value)
+        {
+            return Uri.EscapeDataString(value);
+        }
 
         private async Task<T> GetAsync<T>(string path, CancellationToken token)
         {
