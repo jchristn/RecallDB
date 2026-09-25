@@ -69,8 +69,10 @@ Every MCP connection begins with the standard handshake:
 - `initialize` — the client sends its protocol version, capabilities, and client info; the server responds with the negotiated protocol version, its capabilities, and server info (`RecallDB.McpServer` / version).
 - `notifications/initialized` — the client notification after successful initialization.
 - `tools/list` — enumerates all available tools and their input schemas.
-- `tools/call` — invokes a tool.
-- `ping` — liveness check (bypasses authentication).
+- `tools/call` — invokes a tool. This is the only way to call a tool: sending a tool name as the JSON-RPC `method` returns `-32601` (method not found).
+- `ping` — liveness check (bypasses authentication). Returns an empty object, `{}`.
+
+`tools/list` returns only RecallDB's tools; the server publishes no diagnostic tools such as `echo` or `getTime`.
 
 ## Authentication
 
@@ -109,8 +111,9 @@ Argument conventions:
 
 - Identifiers are camelCase strings: `tenantId`, `collectionId`, `documentKey`, `documentId`, `position`, `userId`, `credentialId`, `labelId`, `tagId`, `guid`.
 - Complex bodies are passed as a **single JSON string argument** and deserialized server-side: `tenant`, `user`, `credential`, `collection`, `document`, `documents`, `label`, `tag`, `search`, `batchDelete`, and the pagination `query` / `filter`.
-- On success the tool returns the operation's payload (the same object shape REST returns). Delete-style operations return `{ "Success": true }`.
-- On failure the tool raises a JSON-RPC error whose message begins with the HTTP-equivalent status code (for example `403 Forbidden: Access denied.`, `404 Not found: ...`, `400 Bad request: ...`).
+- On success the tool returns the operation's payload (the same object shape REST returns), serialized as JSON in a single text content block: `{"content":[{"type":"text","text":"{\"Id\":\"default\",...}"}]}`. Delete-style operations return `{ "Success": true }`; `*/exists` tools return `true` or `false`.
+- On failure the tool raises a JSON-RPC error (code `-32603`) whose message begins with the HTTP-equivalent status code (for example `403 Forbidden: Access denied.`, `404 Not found: ...`, `400 Bad request: ...`) and whose `data` is `{ "statusCode": 403 }`.
+- Arguments are checked against the tool's input schema before the tool runs. A missing required argument or a value of the wrong type returns `-32602` naming the argument.
 
 ## Enumeration and pagination
 
@@ -283,6 +286,7 @@ To get the pre-fix behavior (only documents containing every term, ranked by vec
 ## Example: end-to-end (C#, Voltaic client)
 
 ```csharp
+using System.Text.Json;
 using Voltaic.Core;
 using Voltaic.Mcp;
 
@@ -297,24 +301,35 @@ await client.CallAsync("initialize", new
     clientInfo = new { name = "example", version = "1.0.0" }
 });
 
-// Create a collection
+// Create a collection. Tools are invoked through tools/call; the payload is JSON in content[0].text.
 string collectionJson = "{\"Id\":\"docs\",\"Name\":\"Docs\",\"Dimensionality\":3}";
-string created = await client.CallAsync<string>("collection/create", new
+JsonElement created = await client.CallAsync<JsonElement>("tools/call", new
 {
-    bearerToken = "default",
-    tenantId = "default",
-    collection = collectionJson
+    name = "collection/create",
+    arguments = new
+    {
+        bearerToken = "default",
+        tenantId = "default",
+        collection = collectionJson
+    }
 });
+string collectionText = created.GetProperty("content")[0].GetProperty("text").GetString();
 
 // Enumerate documents (paginated, not "get all")
-string page = await client.CallAsync<string>("document/enumerate", new
+JsonElement page = await client.CallAsync<JsonElement>("tools/call", new
 {
-    bearerToken = "default",
-    tenantId = "default",
-    collectionId = "docs",
-    query = "{\"MaxResults\":50}"
+    name = "document/enumerate",
+    arguments = new
+    {
+        bearerToken = "default",
+        tenantId = "default",
+        collectionId = "docs",
+        query = "{\"MaxResults\":50}"
+    }
 });
 ```
+
+`CallAsync<T>` throws on a JSON-RPC error. Use the untyped `CallAsync(...)`, which returns the `JsonRpcResponse`, to read `Error.Code`, `Error.Message`, and `Error.Data` instead.
 
 ## Errors
 
@@ -325,4 +340,6 @@ string page = await client.CallAsync<string>("document/enumerate", new
 | 403 | Authorization denied (wrong tenant, or admin/tenant-admin required). |
 | 404 | Resource not found. |
 
-Tool failures surface as JSON-RPC errors whose message is prefixed with the status code, so clients can branch on the failure class.
+Tool failures surface as JSON-RPC errors (code `-32603`) whose message is prefixed with the status code and whose `data.statusCode` carries it as a number, so clients can branch on the failure class. The 401 above is an HTTP status on the `POST /mcp` response itself, returned before the request reaches a tool.
+
+Protocol-level errors use the standard JSON-RPC codes: `-32601` for an unknown method (including a tool name sent as the method), and `-32602` for an unknown tool, a `tools/call` without a `name`, or arguments that fail the tool's input schema.

@@ -12,11 +12,11 @@
     <PackageReference Include="Watson" Version="7.*" />
     <PackageReference Include="SyslogLogging" Version="*" />
     <PackageReference Include="Inputty" Version="*" />
-    <PackageReference Include="Voltaic" Version="0.6.1" />
-    <PackageReference Include="OpenTelemetry" Version="1.18.0" />
-    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.18.0" />
-    <PackageReference Include="OpenTelemetry.Exporter.Prometheus.HttpListener" Version="1.18.0-beta.1" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.18.0" />
+    <PackageReference Include="Voltaic" Version="2.0.0" />
+    <PackageReference Include="OpenTelemetry" Version="1.19.1" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.19.1" />
+    <PackageReference Include="OpenTelemetry.Exporter.Prometheus.HttpListener" Version="1.19.1-beta.1" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.19.0" />
   </ItemGroup>
 
   <!-- The Prometheus HttpListener exporter is only published as a prerelease; suppress the prerelease-dependency warning. -->

@@ -2,12 +2,16 @@ namespace Test.Shared
 {
     using System;
     using System.Collections.Generic;
+    using System.Linq;
+    using System.Net;
+    using System.Net.Http;
     using System.Text.Json;
     using System.Threading;
     using System.Threading.Tasks;
 
     using Touchstone.Core;
 
+    using Voltaic.Core;
     using Voltaic.Mcp;
 
     using static Test.Shared.TestHelpers;
@@ -119,6 +123,49 @@ namespace Test.Shared
                     AssertTrue(count > 0, "Expected tools in catalog");
                 }),
 
+                // 1b. tools/list publishes only RecallDB's tools: Voltaic 2.x no longer adds demo tools
+                Case("McpToolsListOnlyApplicationTools", "MCP: tools/list has no Voltaic demo tools", async ct =>
+                {
+                    JsonElement result = await _Mcp.CallAsync<JsonElement>("tools/list", null).ConfigureAwait(false);
+                    HashSet<string> names = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (JsonElement tool in GetProperty(result, "tools").EnumerateArray())
+                        names.Add(GetString(tool, "name"));
+
+                    foreach (string demo in DemoToolNames)
+                        AssertFalse(names.Contains(demo), "Voltaic demo tool should not be published: " + demo);
+
+                    foreach (string name in names)
+                        AssertTrue(name.Contains('/'), "Every RecallDB tool is namespaced with '/': " + name);
+
+                    AssertTrue(names.Contains("server/info"), "server/info should be published");
+                    AssertTrue(names.Contains("search/query"), "search/query should be published");
+                }),
+
+                // 1c. protocol ping returns an empty object, not "pong"
+                Case("McpPing", "MCP: ping returns {}", async ct =>
+                {
+                    await _Mcp.PingAsync(0, ct).ConfigureAwait(false);
+                    JsonRpcResponse response = await _Mcp.CallAsync("ping", null, 0, ct).ConfigureAwait(false);
+                    AssertTrue(response.Error == null, "ping should not return an error");
+                    JsonElement result = ToElement(response.Result);
+                    AssertTrue(result.ValueKind == JsonValueKind.Object, "ping result should be an object, got " + result.ValueKind);
+                    AssertFalse(result.EnumerateObject().Any(), "ping result should be empty, got " + result.GetRawText());
+                }),
+
+                // 1d. tools/call wraps the tool payload in an MCP tool result
+                Case("McpToolCallEnvelope", "MCP: tools/call returns a text content block", async ct =>
+                {
+                    JsonRpcResponse response = await CallToolRawAsync("server/info", new { }).ConfigureAwait(false);
+                    AssertTrue(response.Error == null, "server/info should succeed");
+                    JsonElement result = ToElement(response.Result);
+                    JsonElement content = GetProperty(result, "content");
+                    AssertTrue(content.ValueKind == JsonValueKind.Array && content.GetArrayLength() == 1, "content should hold one block");
+                    AssertEqual("text", GetString(content[0], "type"), "content[0].type");
+                    AssertFalse(GetBool(result, "isError"), "isError should not be set on success");
+                    JsonElement info = JsonDocument.Parse(GetString(content[0], "text")).RootElement;
+                    AssertEqual("RecallDB", GetString(info, "Name"), "server/info Name inside text block");
+                }),
+
                 // 2. server/info (no auth)
                 Case("McpServerInfo", "MCP: server/info", async ct =>
                 {
@@ -156,8 +203,15 @@ namespace Test.Shared
                 Case("McpTenantExists", "MCP: tenant/exists", async ct =>
                 {
                     if (string.IsNullOrEmpty(_McpTenantId)) return;
-                    bool exists = await _Mcp.CallAsync<bool>("tenant/exists", new { bearerToken = ApiKey, tenantId = _McpTenantId }).ConfigureAwait(false);
-                    AssertTrue(exists, "tenant/exists should be true for created tenant");
+                    JsonElement exists = await CallAsync("tenant/exists", new { bearerToken = ApiKey, tenantId = _McpTenantId }).ConfigureAwait(false);
+                    AssertTrue(exists.ValueKind == JsonValueKind.True, "tenant/exists should be true for created tenant");
+                }),
+
+                // 6b. tenant/exists for a missing tenant is false, not an error
+                Case("McpTenantExistsFalse", "MCP: tenant/exists false for missing tenant", async ct =>
+                {
+                    JsonElement exists = await CallAsync("tenant/exists", new { bearerToken = ApiKey, tenantId = "ten_does_not_exist_xyz" }).ConfigureAwait(false);
+                    AssertTrue(exists.ValueKind == JsonValueKind.False, "tenant/exists should be false for a missing tenant");
                 }),
 
                 // 7. tenant/enumerate returns pagination shape
@@ -259,6 +313,9 @@ namespace Test.Shared
                     await AssertMcpDenied(
                         () => CallAsync("tenant/read", new { bearerToken = "not-a-real-token", tenantId = "default" }),
                         "tenant/read with an invalid token should be denied");
+
+                    JsonRpcResponse response = await CallToolRawAsync("tenant/read", new { bearerToken = "not-a-real-token", tenantId = "default" }).ConfigureAwait(false);
+                    AssertToolFailure(response, 403, "tenant/read with an invalid token");
                 }),
 
                 // 15. NEGATIVE: enumerate (admin-only) with invalid token denied
@@ -269,12 +326,86 @@ namespace Test.Shared
                         "tenant/enumerate with a non-admin/invalid token should be denied");
                 }),
 
-                // 16. NEGATIVE: missing required argument
+                // 16. NEGATIVE: missing required argument is rejected by input-schema validation
                 Case("McpMissingArg", "MCP negative: missing required argument", async ct =>
                 {
-                    await AssertMcpThrows(
-                        () => CallAsync("tenant/read", new { bearerToken = ApiKey }),
-                        "tenant/read without tenantId should fail");
+                    JsonRpcResponse response = await CallToolRawAsync("tenant/read", new { bearerToken = ApiKey }).ConfigureAwait(false);
+                    AssertRpcError(response, -32602, "tenantId", "tenant/read without tenantId should fail validation");
+                }),
+
+                // 16b. NEGATIVE: a tool can no longer be invoked as a bare JSON-RPC method
+                Case("McpBareToolCallRejected", "MCP negative: bare tool method returns -32601", async ct =>
+                {
+                    JsonRpcResponse bare = await _Mcp.CallAsync("server/info", new { }, 0, ct).ConfigureAwait(false);
+                    AssertRpcError(bare, -32601, null, "server/info called as a bare method should be method-not-found");
+
+                    JsonRpcResponse bareAuth = await _Mcp.CallAsync("tenant/read", new { bearerToken = ApiKey, tenantId = "default" }, 0, ct).ConfigureAwait(false);
+                    AssertRpcError(bareAuth, -32601, null, "tenant/read called as a bare method should be method-not-found");
+                }),
+
+                // 16c. NEGATIVE: Voltaic's former demo tools are not callable
+                Case("McpDemoToolsNotCallable", "MCP negative: demo tools are not callable", async ct =>
+                {
+                    foreach (string demo in DemoToolNames)
+                    {
+                        JsonRpcResponse viaTools = await CallToolRawAsync(demo, new { }).ConfigureAwait(false);
+                        AssertRpcError(viaTools, -32602, "not found", "tools/call " + demo + " should report the tool as not found");
+                    }
+
+                    foreach (string method in new[] { "getSessions", "getClients", "echo", "getTime" })
+                    {
+                        JsonRpcResponse bare = await _Mcp.CallAsync(method, new { }, 0, ct).ConfigureAwait(false);
+                        AssertRpcError(bare, -32601, null, "bare " + method + " should be method-not-found");
+                    }
+                }),
+
+                // 16d. NEGATIVE: unknown tool and missing tool name
+                Case("McpUnknownTool", "MCP negative: unknown tool and missing name", async ct =>
+                {
+                    JsonRpcResponse unknown = await CallToolRawAsync("tenant/nope", new { bearerToken = ApiKey }).ConfigureAwait(false);
+                    AssertRpcError(unknown, -32602, "not found", "an unknown tool should be rejected");
+
+                    JsonRpcResponse noName = await _Mcp.CallAsync("tools/call", new { arguments = new { } }, 0, ct).ConfigureAwait(false);
+                    AssertRpcError(noName, -32602, "name", "tools/call without a name should be rejected");
+                }),
+
+                // 16e. NEGATIVE: wrong argument type is rejected by input-schema validation
+                Case("McpWrongArgType", "MCP negative: wrong argument type", async ct =>
+                {
+                    JsonRpcResponse response = await CallToolRawAsync("tenant/read", new { bearerToken = ApiKey, tenantId = 12345 }).ConfigureAwait(false);
+                    AssertRpcError(response, -32602, "tenantId", "a numeric tenantId should fail validation");
+                }),
+
+                // 16f. Transport auth: an invalid Authorization header is rejected with 401, a valid one is accepted,
+                // and the protocol ping still bypasses authentication.
+                Case("McpTransportAuthHeader", "MCP: Authorization header gates tools/call, not ping", async ct =>
+                {
+                    using (McpHttpClient bad = new McpHttpClient())
+                    {
+                        bad.SetRequestHeader("Authorization", "Bearer not-a-real-token");
+                        bool connected = await bad.ConnectStreamableAsync(McpEndpoint, "/mcp", ct).ConfigureAwait(false);
+                        AssertTrue(connected, "ping-based connect should bypass authentication");
+                        await bad.PingAsync(0, ct).ConfigureAwait(false);
+
+                        bool rejected = false;
+                        try
+                        {
+                            await bad.CallAsync("tools/call", new { name = "server/info", arguments = new { } }, 0, ct).ConfigureAwait(false);
+                        }
+                        catch (HttpRequestException e)
+                        {
+                            rejected = e.StatusCode == HttpStatusCode.Unauthorized;
+                        }
+                        AssertTrue(rejected, "tools/call with an invalid Authorization header should be rejected with 401");
+                    }
+
+                    using (McpHttpClient good = new McpHttpClient())
+                    {
+                        good.SetRequestHeader("Authorization", "Bearer " + ApiKey);
+                        await good.ConnectStreamableAsync(McpEndpoint, "/mcp", ct).ConfigureAwait(false);
+                        JsonRpcResponse response = await good.CallAsync("tools/call", new { name = "tenant/read", arguments = new { bearerToken = ApiKey, tenantId = "default" } }, 0, ct).ConfigureAwait(false);
+                        AssertTrue(response.Error == null, "tools/call with a valid Authorization header should succeed");
+                    }
                 }),
 
                 // 17. NEGATIVE: unknown tenant returns not-found
@@ -283,15 +414,17 @@ namespace Test.Shared
                     await AssertMcpThrows(
                         () => CallAsync("tenant/read", new { bearerToken = ApiKey, tenantId = "ten_does_not_exist_xyz" }),
                         "tenant/read for a missing tenant should fail");
+
+                    JsonRpcResponse response = await CallToolRawAsync("tenant/read", new { bearerToken = ApiKey, tenantId = "ten_does_not_exist_xyz" }).ConfigureAwait(false);
+                    AssertToolFailure(response, 404, "tenant/read for a missing tenant");
                 }),
 
                 // 18. NEGATIVE: unknown document returns not-found
                 Case("McpUnknownDocument", "MCP negative: unknown document not found", async ct =>
                 {
                     if (string.IsNullOrEmpty(_McpCollectionId)) return;
-                    await AssertMcpThrows(
-                        () => CallAsync("document/read", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, documentKey = "does-not-exist" }),
-                        "document/read for a missing document should fail");
+                    JsonRpcResponse response = await CallToolRawAsync("document/read", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, documentKey = "does-not-exist" }).ConfigureAwait(false);
+                    AssertToolFailure(response, 404, "document/read for a missing document");
                 }),
 
                 // 19. document cleanup via MCP delete
@@ -308,9 +441,36 @@ namespace Test.Shared
 
         #region Helpers
 
+        private static readonly string[] DemoToolNames = new[] { "ping", "echo", "getTime", "getSessions", "getClients" };
+
+        /// <summary>
+        /// Invoke a tool through tools/call and return the raw JSON-RPC response without throwing on an RPC error.
+        /// </summary>
+        private static async Task<JsonRpcResponse> CallToolRawAsync(string tool, object args)
+        {
+            return await _Mcp.CallAsync("tools/call", new { name = tool, arguments = args }).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Invoke a tool through tools/call and return its payload, parsed from the single text content block.
+        /// Throws when the server answers with a JSON-RPC error or a tool result flagged isError.
+        /// </summary>
         private static async Task<JsonElement> CallAsync(string tool, object args)
         {
-            return await _Mcp.CallAsync<JsonElement>(tool, args).ConfigureAwait(false);
+            JsonRpcResponse response = await CallToolRawAsync(tool, args).ConfigureAwait(false);
+            if (response.Error != null)
+                throw new InvalidOperationException("RPC Error " + response.Error.Code + ": " + ErrorText(response.Error));
+
+            JsonElement result = ToElement(response.Result);
+            JsonElement content = GetProperty(result, "content");
+            if (content.ValueKind != JsonValueKind.Array || content.GetArrayLength() < 1)
+                throw new InvalidOperationException(tool + " returned no content: " + Truncate(result.GetRawText()));
+
+            string text = GetString(content[0], "text");
+            if (GetBool(result, "isError"))
+                throw new InvalidOperationException(tool + " returned a tool error: " + text);
+
+            return JsonDocument.Parse(text).RootElement.Clone();
         }
 
         private static async Task AssertMcpThrows(Func<Task> action, string message)
@@ -329,13 +489,54 @@ namespace Test.Shared
             }
             catch (Exception ex)
             {
-                string text = ex.ToString();
+                string text = ex.Message;
                 AssertTrue(
                     text.Contains("403") || text.Contains("401") || text.Contains("Forbidden") || text.Contains("Denied") || text.Contains("Access denied"),
                     message + " (denial detail: " + Truncate(text) + ")");
                 return;
             }
             throw new InvalidOperationException(message + " should have been denied.");
+        }
+
+        private static void AssertRpcError(JsonRpcResponse response, int expectedCode, string expectedText, string message)
+        {
+            AssertTrue(response.Error != null, message + " (expected RPC error " + expectedCode + ", got a result)");
+            AssertEqual(expectedCode, response.Error.Code, message + " (error code)");
+            if (!string.IsNullOrEmpty(expectedText))
+            {
+                string text = ErrorText(response.Error);
+                AssertTrue(text.Contains(expectedText, StringComparison.OrdinalIgnoreCase), message + " (error text: " + Truncate(text) + ")");
+            }
+        }
+
+        /// <summary>
+        /// Assert a tool failure is a -32603 JSON-RPC error whose message starts with the HTTP-equivalent status
+        /// (the text MCP clients show to the model) and whose data carries the same statusCode.
+        /// </summary>
+        private static void AssertToolFailure(JsonRpcResponse response, int expectedStatus, string message)
+        {
+            AssertTrue(response.Error != null, message + " should return an RPC error");
+            AssertEqual(-32603, response.Error.Code, message + " (error code)");
+            AssertTrue(
+                response.Error.Message != null && response.Error.Message.StartsWith(expectedStatus + " ", StringComparison.Ordinal),
+                message + " should put the status in the error message, got: " + Truncate(response.Error.Message));
+            JsonElement data = ToElement(response.Error.Data);
+            JsonElement status = GetProperty(data, "statusCode");
+            AssertTrue(status.ValueKind == JsonValueKind.Number && status.GetInt32() == expectedStatus, message + " should carry data.statusCode " + expectedStatus + ", got: " + Truncate(data.GetRawText()));
+        }
+
+        private static string ErrorText(JsonRpcError error)
+        {
+            if (error == null) return null;
+            string text = error.Message ?? string.Empty;
+            if (error.Data != null) text += " | " + JsonSerializer.Serialize(error.Data);
+            return text;
+        }
+
+        private static JsonElement ToElement(object value)
+        {
+            if (value is JsonElement element) return element;
+            return JsonDocument.Parse(JsonSerializer.Serialize(value)).RootElement.Clone();
         }
 
         private static JsonElement GetProperty(JsonElement element, string name)
