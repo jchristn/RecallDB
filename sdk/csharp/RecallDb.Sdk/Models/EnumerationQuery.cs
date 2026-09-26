@@ -14,7 +14,7 @@ namespace RecallDb.Sdk.Models
         /// <summary>
         /// Continuation token for retrieving the next page of results.
         /// </summary>
-        public string ContinuationToken { get; set; }
+        public string? ContinuationToken { get; set; }
 
         /// <summary>
         /// Ordering for enumeration results.

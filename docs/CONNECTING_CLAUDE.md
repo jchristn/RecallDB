@@ -1,10 +1,10 @@
 # Connecting Claude Code to RecallDB (MCP)
 
-RecallDB exposes an in-process MCP server over **Streamable HTTP** at `http://localhost:8620/mcp`. This guide connects [Claude Code](https://code.claude.com) to it.
+RecallDB exposes an in-process MCP server over **Streamable HTTP** at `http://127.0.0.1:8620/mcp`. This guide connects [Claude Code](https://code.claude.com) to it.
 
 ## Prerequisites
 
-- A running RecallDB server (`http://localhost:8620/mcp` reachable — confirm with `curl http://localhost:8620/`).
+- A running RecallDB server (`http://127.0.0.1:8620/mcp` reachable — confirm with `curl http://127.0.0.1:8620/`).
 - A bearer token: your **admin API key** (default `recalldbadmin`) or a **credential bearer token**. RecallDB MCP tools authorize per call — see [Authentication](#authentication).
 
 ## Automatic setup (recommended)
@@ -28,7 +28,7 @@ Preview without writing: add `--dry-run`. Use a specific token with `--token <to
 ### Option A — `claude mcp add`
 
 ```bash
-claude mcp add --transport http recalldb http://localhost:8620/mcp \
+claude mcp add --transport http recalldb http://127.0.0.1:8620/mcp \
   --header "Authorization: Bearer recalldbadmin"
 ```
 
@@ -43,7 +43,7 @@ Add to `~/.claude.json` (user/local scope) or a project-root `.mcp.json` (shared
   "mcpServers": {
     "recalldb": {
       "type": "http",
-      "url": "http://localhost:8620/mcp",
+      "url": "http://127.0.0.1:8620/mcp",
       "headers": {
         "Authorization": "Bearer recalldbadmin"
       }

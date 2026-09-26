@@ -1,10 +1,10 @@
 # Connecting OpenAI Codex CLI to RecallDB (MCP)
 
-RecallDB exposes an in-process MCP server over **Streamable HTTP** at `http://localhost:8620/mcp`. This guide connects the [OpenAI Codex CLI](https://developers.openai.com/codex/cli) to it.
+RecallDB exposes an in-process MCP server over **Streamable HTTP** at `http://127.0.0.1:8620/mcp`. This guide connects the [OpenAI Codex CLI](https://developers.openai.com/codex/cli) to it.
 
 ## Prerequisites
 
-- A running RecallDB server (`curl http://localhost:8620/` returns 200).
+- A running RecallDB server (`curl http://127.0.0.1:8620/` returns 200).
 - A bearer token: your admin API key (default `recalldbadmin`) or a credential bearer token.
 
 ## Automatic setup (recommended)
@@ -23,7 +23,7 @@ Add to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.recalldb]
-url = "http://localhost:8620/mcp"
+url = "http://127.0.0.1:8620/mcp"
 http_headers = { "Authorization" = "Bearer recalldbadmin" }
 ```
 
@@ -31,7 +31,7 @@ Prefer keeping the token out of the file by using an env var Codex reads and sen
 
 ```toml
 [mcp_servers.recalldb]
-url = "http://localhost:8620/mcp"
+url = "http://127.0.0.1:8620/mcp"
 bearer_token_env_var = "RECALLDB_TOKEN"
 ```
 
@@ -45,7 +45,7 @@ experimental_use_rmcp_client = true
 Or via the CLI:
 
 ```bash
-codex mcp add recalldb --url http://localhost:8620/mcp --bearer-token-env-var RECALLDB_TOKEN
+codex mcp add recalldb --url http://127.0.0.1:8620/mcp --bearer-token-env-var RECALLDB_TOKEN
 ```
 
 ### stdio bridge fallback (older Codex without HTTP MCP)
@@ -53,7 +53,7 @@ codex mcp add recalldb --url http://localhost:8620/mcp --bearer-token-env-var RE
 ```toml
 [mcp_servers.recalldb]
 command = "npx"
-args = ["-y", "mcp-remote", "http://localhost:8620/mcp", "--header", "Authorization: Bearer ${RECALLDB_TOKEN}"]
+args = ["-y", "mcp-remote", "http://127.0.0.1:8620/mcp", "--header", "Authorization: Bearer ${RECALLDB_TOKEN}"]
 ```
 
 ## Authentication

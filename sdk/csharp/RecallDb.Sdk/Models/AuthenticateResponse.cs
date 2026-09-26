@@ -13,22 +13,22 @@ namespace RecallDb.Sdk.Models
         /// <summary>
         /// Tenant metadata.
         /// </summary>
-        public TenantMetadata Tenant { get; set; }
+        public TenantMetadata? Tenant { get; set; }
 
         /// <summary>
         /// User master (password redacted).
         /// </summary>
-        public UserMaster User { get; set; }
+        public UserMaster? User { get; set; }
 
         /// <summary>
         /// Credential.
         /// </summary>
-        public Credential Credential { get; set; }
+        public Credential? Credential { get; set; }
 
         /// <summary>
         /// Error message if authentication failed.
         /// </summary>
-        public string ErrorMessage { get; set; }
+        public string? ErrorMessage { get; set; }
 
         /// <summary>
         /// Instantiate.

@@ -75,6 +75,10 @@ namespace RecallDb.Server.Observability
         public const string TagSearchMatchMode = "recalldb.search.match_mode";
         /// <summary>Tag key: hybrid strategy (rrf, linear, filter, or none when the search is not hybrid).</summary>
         public const string TagSearchHybridStrategy = "recalldb.search.hybrid_strategy";
+        /// <summary>Tag key: collapse field (documentid, tag, or none when the search is not collapsed).</summary>
+        public const string TagSearchCollapse = "recalldb.search.collapse";
+        /// <summary>Tag key: whether the hybrid recency signal is on (on or off).</summary>
+        public const string TagSearchRecency = "recalldb.search.recency";
 
         // ----- HTTP transport instruments -----
 
@@ -296,7 +300,9 @@ namespace RecallDb.Server.Observability
         /// <param name="resultCount">Number of documents returned.</param>
         /// <param name="matchMode">Full-text match mode (any, all, phrase, websearch, or none).</param>
         /// <param name="hybridStrategy">Hybrid strategy (rrf, linear, filter, or none).</param>
-        public static void RecordSearch(string origin, string mode, bool success, int statusCode, double seconds, int resultCount, string matchMode = "none", string hybridStrategy = "none")
+        /// <param name="collapse">Collapse field (documentid, tag, or none).</param>
+        /// <param name="recency">Hybrid recency signal (on or off).</param>
+        public static void RecordSearch(string origin, string mode, bool success, int statusCode, double seconds, int resultCount, string matchMode = "none", string hybridStrategy = "none", string collapse = "none", string recency = "off")
         {
             string outcome = ClassifyOutcome(success, statusCode);
             TagList tags = new TagList
@@ -305,6 +311,8 @@ namespace RecallDb.Server.Observability
                 { TagSearchMode, mode ?? "unknown" },
                 { TagSearchMatchMode, matchMode ?? "none" },
                 { TagSearchHybridStrategy, hybridStrategy ?? "none" },
+                { TagSearchCollapse, collapse ?? "none" },
+                { TagSearchRecency, recency ?? "off" },
                 { TagOutcome, outcome }
             };
             SearchDuration.Record(seconds, tags);
@@ -316,7 +324,9 @@ namespace RecallDb.Server.Observability
                     { TagOrigin, origin },
                     { TagSearchMode, mode ?? "unknown" },
                     { TagSearchMatchMode, matchMode ?? "none" },
-                    { TagSearchHybridStrategy, hybridStrategy ?? "none" }
+                    { TagSearchHybridStrategy, hybridStrategy ?? "none" },
+                    { TagSearchCollapse, collapse ?? "none" },
+                    { TagSearchRecency, recency ?? "off" }
                 });
             }
         }

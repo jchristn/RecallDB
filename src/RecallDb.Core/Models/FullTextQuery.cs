@@ -148,10 +148,34 @@ namespace RecallDb.Core.Models
             }
         }
 
+        /// <summary>
+        /// Minimum number of distinct query terms a document must contain to match, for MatchMode Any.
+        /// 1 (default) is plain Any matching. With 2 or 3, only documents containing at least that many of the
+        /// query's terms match, which cuts ranking work on large collections. A query with fewer distinct terms
+        /// than the value requires all of its terms. Only the first 16 distinct terms of the query are considered
+        /// when the value is above 1. Rejected with 400 for other match modes when above 1.
+        /// Default: 1. Minimum: 1. Maximum: 3.
+        /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the value is outside 1-3.</exception>
+        public int MinimumShouldMatch
+        {
+            get
+            {
+                return _MinimumShouldMatch;
+            }
+            set
+            {
+                if (value < 1 || value > 3)
+                    throw new ArgumentOutOfRangeException(nameof(MinimumShouldMatch), "MinimumShouldMatch must be between 1 and 3.");
+                _MinimumShouldMatch = value;
+            }
+        }
+
         #endregion
 
         #region Private-Members
 
+        private int _MinimumShouldMatch = 1;
         private string _Query = null;
         private TextMatchModeEnum _MatchMode = TextMatchModeEnum.Any;
         private TextSearchTypeEnum _SearchType = TextSearchTypeEnum.TsRank;

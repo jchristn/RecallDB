@@ -35,8 +35,12 @@ namespace RecallDb.Server.Mcp.Registrations
                     + "scores in [0, 1]), Linear (normalized score blend), or Filter (legacy; text match required). Hybrid.RrfK (default 60) and "
                     + "Hybrid.CandidatePool (default max(MaxResults x 4, 100), capped at 1000) tune fusion; FullText.TextWeight is the text leg's share. "
                     + "Results include VectorScore, VectorRank, TextRank, and an optional Notice. "
+                    + "Hybrid.RecencyWeight (0.0-1.0, default 0, Rrf only) adds a recency signal (newest CreatedUtc per group); hits carry RecencyRank. "
+                    + "Collapse {\"Field\":\"DocumentId\"|\"Tag\",\"TagKey\":\"...\",\"CandidatePool\":n} returns one hit per group (best chunk) with GroupKey and GroupHits; "
+                    + "MaxResults and TotalRecords then count groups. FullText.MinimumShouldMatch (1-3, Any only) requires that many distinct terms. "
                     + "Hybrid example: {\"Vector\":{\"SearchType\":\"CosineSimilarity\",\"Embeddings\":[0.1,0.2,0.3]},"
-                    + "\"FullText\":{\"Query\":\"run the test suite\",\"TextWeight\":0.5},\"Hybrid\":{\"Strategy\":\"Rrf\"},\"MaxResults\":10}",
+                    + "\"FullText\":{\"Query\":\"run the test suite\",\"TextWeight\":0.5},\"Hybrid\":{\"Strategy\":\"Rrf\",\"RecencyWeight\":0.1},"
+                    + "\"Collapse\":{\"Field\":\"Tag\",\"TagKey\":\"parentKey\"},\"MaxResults\":10}",
                 new
                 {
                     type = "object",
@@ -45,7 +49,7 @@ namespace RecallDb.Server.Mcp.Registrations
                         bearerToken = new { type = "string", description = "Caller bearer token." },
                         tenantId = new { type = "string", description = "Tenant ID." },
                         collectionId = new { type = "string", description = "Collection ID." },
-                        search = new { type = "string", description = "SearchQuery serialized as a JSON string (Vector, FullText with MatchMode, Hybrid with Strategy/RrfK/CandidatePool, filters, MaxResults, ContinuationToken)." }
+                        search = new { type = "string", description = "SearchQuery serialized as a JSON string (Vector, FullText with MatchMode/MinimumShouldMatch, Hybrid with Strategy/RrfK/CandidatePool/RecencyWeight, Collapse, filters, MaxResults, ContinuationToken)." }
                     },
                     required = new[] { "bearerToken", "tenantId", "collectionId", "search" }
                 },

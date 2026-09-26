@@ -10,17 +10,17 @@ namespace RecallDb.Sdk.Models
         /// <summary>
         /// Tag ID.
         /// </summary>
-        public string Id { get; set; }
+        public string? Id { get; set; }
 
         /// <summary>
         /// Document key.
         /// </summary>
-        public string DocumentKey { get; set; }
+        public string? DocumentKey { get; set; }
 
         /// <summary>
         /// Document ID (nullable, for grouping chunks).
         /// </summary>
-        public string DocumentId { get; set; }
+        public string? DocumentId { get; set; }
 
         /// <summary>
         /// Position (nullable, for chunk-level tags).
@@ -30,12 +30,12 @@ namespace RecallDb.Sdk.Models
         /// <summary>
         /// Tag key.
         /// </summary>
-        public string Key { get; set; }
+        public string? Key { get; set; }
 
         /// <summary>
         /// Tag value.
         /// </summary>
-        public string Value { get; set; }
+        public string? Value { get; set; }
 
         /// <summary>
         /// Creation timestamp in UTC.

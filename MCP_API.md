@@ -152,7 +152,9 @@ All authenticated tools take `bearerToken`. Listed below are the additional argu
 
 | Tool | Arguments | Purpose |
 |------|-----------|---------|
-| `server/info` | _(none, no auth)_ | Server name, version, uptime, and the MCP endpoint. |
+| `server/info` | _(none, no auth)_ | Server name, version, uptime, `Capabilities`, and the MCP endpoint. |
+
+`Capabilities` is the same list of search feature strings that `GET /` returns (`search.hybrid.rrf`, `search.hybrid.recency`, `search.collapse`, `search.include-embeddings`, `search.fulltext.minimum-should-match`; see [REST_API.md, Health](REST_API.md#health)). Servers that report the same version can differ, so check this list before relying on a feature; older servers ignore unknown `search` fields silently.
 
 ### auth
 
@@ -258,8 +260,13 @@ Fields that shape full-text and hybrid results:
 | `Hybrid.Strategy` | string | `Rrf` | `Rrf` (rank fusion over the union of both legs), `Linear` (normalized score blend over the union), `Filter` (legacy: text query required, raw score blend) |
 | `Hybrid.RrfK` | int | `60` | RRF constant, 1-100000 |
 | `Hybrid.CandidatePool` | int or null | null | Candidates per leg before fusion, 1-10000. Null means `max(MaxResults * 4, 100)` capped at 1000 |
+| `Hybrid.RecencyWeight` | double | `0` | Weight of the recency signal, 0.0-1.0 (0 is off). `Rrf` only; `Linear` and `Filter` ignore it with a `Notice`. Rank-based, so a small weight breaks near-ties in favor of newer content rather than reordering strong matches |
+| `FullText.MinimumShouldMatch` | int | `1` | Minimum number of distinct query terms a document must contain, 1-3. Only with `MatchMode` `Any`; only the first 16 distinct terms count |
+| `Collapse.Field` | string | `DocumentId` | Return one hit per group: `DocumentId` (the `DocumentId` column) or `Tag` (the value of the tag named `Collapse.TagKey`). Ungrouped documents are their own group, keyed by `DocumentKey` |
+| `Collapse.TagKey` | string | null | Required when `Collapse.Field` is `Tag`; at most 256 characters |
+| `Collapse.CandidatePool` | int or null | null | Candidates retrieved before collapsing, 1-10000, for vector-only and full-text-only searches. Hybrid uses `Hybrid.CandidatePool` when set, else this |
 
-The result is a `SearchResult`. In a hybrid `Rrf` or `Linear` search each document carries a fused `Score` in [0, 1], the raw `VectorScore` and `TextScore`, and its 1-based `VectorRank` and `TextRank` (omitted when the document is absent from that leg). `TotalRecords` is the size of the fused candidate set, at most `2 * CandidatePool`. When the server wants to explain something about the run (a query of only stop words, a language with no index, or `Hybrid` sent without both legs) the result includes a `Notice` string. Out-of-range values produce a 400.
+The result is a `SearchResult`. In a hybrid `Rrf` or `Linear` search each document carries a fused `Score` in [0, 1], the raw `VectorScore` and `TextScore`, and its 1-based `VectorRank` and `TextRank` (omitted when the document is absent from that leg). `TotalRecords` is the size of the fused candidate set, at most `2 * CandidatePool`. With `Hybrid.RecencyWeight` above 0, each `Rrf` hit also carries `RecencyRank` (1 = newest). With `Collapse`, each hit is the best-scoring candidate of its group and carries `GroupKey` and `GroupHits` (candidates in the group), and `MaxResults`, `TotalRecords`, `RecordsRemaining` and continuation tokens count groups. Collapse works with vector-only, full-text-only, and hybrid `Rrf` and `Linear`; hybrid `Filter` is a 400. When the server wants to explain something about the run (a query of only stop words, a language with no index, `Hybrid` sent without both legs, `RecencyWeight` on a non-`Rrf` strategy, or a collapse pool too small for the page) the result includes a `Notice` string. Out-of-range values produce a 400.
 
 Hybrid example (arguments for `tools/call`):
 
@@ -269,6 +276,17 @@ Hybrid example (arguments for `tools/call`):
   "tenantId": "default",
   "collectionId": "docs",
   "search": "{\"Vector\":{\"SearchType\":\"CosineSimilarity\",\"Embeddings\":[0.1,0.2,0.3]},\"FullText\":{\"Query\":\"how do I run the test suite\",\"MatchMode\":\"Any\",\"TextWeight\":0.5},\"Hybrid\":{\"Strategy\":\"Rrf\",\"RrfK\":60},\"MaxResults\":10}"
+}
+```
+
+Collapse and recency example (one hit per `parentKey` tag value, newer groups favored on near-ties):
+
+```json
+{
+  "bearerToken": "default",
+  "tenantId": "default",
+  "collectionId": "docs",
+  "search": "{\"Vector\":{\"SearchType\":\"CosineSimilarity\",\"Embeddings\":[0.1,0.2,0.3]},\"FullText\":{\"Query\":\"how do I rotate the signing key\",\"MatchMode\":\"Any\",\"TextWeight\":0.5},\"Hybrid\":{\"Strategy\":\"Rrf\",\"RrfK\":60,\"CandidatePool\":40,\"RecencyWeight\":0.1},\"Collapse\":{\"Field\":\"Tag\",\"TagKey\":\"parentKey\"},\"MaxResults\":10}"
 }
 ```
 

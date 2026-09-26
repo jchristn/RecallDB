@@ -12,6 +12,7 @@ namespace RecallDb.Sdk.TestHarness
     using System.Text.Json.Serialization;
     using System.Threading.Tasks;
     using RecallDb.Sdk;
+    using RecallDb.Sdk.Constants;
     using RecallDb.Sdk.Models;
 
     /// <summary>
@@ -22,7 +23,7 @@ namespace RecallDb.Sdk.TestHarness
     {
         #region Private-Members
 
-        private static string _Endpoint = "http://localhost:8600";
+        private static string _Endpoint = "http://127.0.0.1:8600";
         private static string _ApiKey = "recalldbadmin";
         private static RecallDbClient _AdminClient = null;
         private static RecallDbClient _UserClient = null;
@@ -280,6 +281,25 @@ namespace RecallDb.Sdk.TestHarness
             await RunTest("Batch delete: delete by filter", TestDeleteByFilter);
 
             // 26. Cleanup
+            // 23. SDK 0.2.2: server info, hybrid fields, collapse, recency, transport, errors, encoding
+            await RunTest("SDK 0.2.2: seed grouping collection", TestSdkGroupingSetup);
+            await RunTest("SDK 0.2.2: server info and capabilities", TestSdkServerInfo);
+            await RunTest("SDK 0.2.2: hybrid round trip fields", TestSdkHybridRoundTrip);
+            await RunTest("SDK 0.2.2: search notice", TestSdkNotice);
+            await RunTest("SDK 0.2.2: include embeddings", TestSdkIncludeEmbeddings);
+            await RunTest("SDK 0.2.2: collapse by tag with recency", TestSdkCollapseRecency);
+            await RunTest("SDK 0.2.2: vector-only collapse", TestSdkVectorCollapse);
+            await RunTest("SDK 0.2.2: minimum should match", TestSdkMinimumShouldMatch);
+            await RunTest("SDK 0.2.2: recency weight out of range", TestSdkRecencyWeightRejected);
+            await RunTest("SDK 0.2.2: structured errors", TestSdkStructuredError);
+            await RunTest("SDK 0.2.2: injected HttpClient", TestSdkInjectedHttpClient);
+            await RunTest("SDK 0.2.2: handler and compact JSON", TestSdkHandlerAndCompactJson);
+            await RunTest("SDK 0.2.2: timeout", TestSdkTimeout);
+            await RunTest("SDK 0.2.2: cancellation", TestSdkCancellation);
+            await RunTest("SDK 0.2.2: reserved characters in keys", TestSdkReservedCharacters);
+            await RunTest("SDK 0.2.2: exists reports failures", TestSdkExistsOnFailure);
+            await RunTest("SDK 0.2.2: delete grouping collection", TestSdkGroupingCleanup);
+
             await RunTest("Cleanup: delete search labels", TestCleanupSearchLabels);
             await RunTest("Cleanup: delete search tags", TestCleanupSearchTags);
             await RunTest("Cleanup: delete search documents", TestCleanupSearchDocuments);
@@ -1790,6 +1810,360 @@ namespace RecallDb.Sdk.TestHarness
             string path = "/v1.0/tenants/" + _TestTenantId + "/collections/" + _TestCollectionId + "/search";
             using HttpResponseMessage response = await RawPostAsync(_RawAdminClient, path, query).ConfigureAwait(false);
             AssertStatusCode(response, HttpStatusCode.BadRequest);
+        }
+
+        #endregion
+
+        #region Test-23-SDK-0.2.2
+
+        // A dedicated collection with two chunked parents (p-old, p-new) tagged parentKey, written at fixed times, plus
+        // two documents that share two and one terms of "alpha beta" for MinimumShouldMatch.
+        private static string _GroupCollectionId = null;
+
+        private static DocumentRecord GroupChunk(string key, string parent, int position, string content, float x, float y, float z, DateTime createdUtc)
+        {
+            DocumentRecord doc = new DocumentRecord();
+            doc.DocumentKey = key;
+            doc.DocumentId = parent;
+            doc.Position = position;
+            doc.Content = content;
+            doc.Embeddings = new List<float> { x, y, z };
+            doc.CreatedUtc = createdUtc;
+            doc.Tags = new Dictionary<string, string> { { "parentKey", parent } };
+            return doc;
+        }
+
+        private static SearchQuery GroupHybridQuery(string text)
+        {
+            SearchQuery query = new SearchQuery();
+            query.Vector = new VectorQuery();
+            query.Vector.SearchType = VectorSearchTypes.CosineSimilarity;
+            query.Vector.Embeddings = new List<float> { 1.0f, 0.0f, 0.0f };
+            query.FullText = new FullTextQuery();
+            query.FullText.Query = text;
+            query.MaxResults = 50;
+            return query;
+        }
+
+        private static async Task<SearchResult> GroupSearch(SearchQuery query)
+        {
+            return await _AdminClient.SearchAsync(_TestTenantId, _GroupCollectionId, query).ConfigureAwait(false);
+        }
+
+        private static async Task TestSdkGroupingSetup()
+        {
+            CollectionMetadata col = new CollectionMetadata();
+            col.Name = "SdkGroupingCollection";
+            col.Dimensionality = 3;
+            CollectionMetadata created = await _AdminClient.CreateCollectionAsync(_TestTenantId, col).ConfigureAwait(false);
+            AssertNotNullOrEmpty(created.Id, "Grouping collection Id");
+            _GroupCollectionId = created.Id;
+
+            DateTime older = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            DateTime newer = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+            List<DocumentRecord> docs = new List<DocumentRecord>
+            {
+                GroupChunk("p-old-c0", "p-old", 0, "Rotate the signing key every quarter", 0.9f, 0.1f, 0.0f, older),
+                GroupChunk("p-old-c1", "p-old", 1, "Signing key storage lives in the vault", 0.8f, 0.3f, 0.0f, older),
+                GroupChunk("p-new-c0", "p-new", 0, "Rotate the signing key every quarter", 0.9f, 0.1f, 0.0f, newer),
+                GroupChunk("p-new-c1", "p-new", 1, "Signing key storage lives in the vault", 0.8f, 0.3f, 0.0f, newer),
+                GroupChunk("p-new-c2", "p-new", 2, "Key rotation checklist for operators", 0.7f, 0.4f, 0.1f, newer),
+                GroupChunk("m-two", "m-two", 0, "Alpha and beta release notes", 0.0f, 0.0f, 1.0f, older),
+                GroupChunk("m-one", "m-one", 0, "Alpha only draft", 0.0f, 0.1f, 1.0f, older)
+            };
+            List<DocumentRecord> result = await _AdminClient.CreateDocumentBatchAsync(_TestTenantId, _GroupCollectionId, docs).ConfigureAwait(false);
+            AssertEqual(7, result.Count, "Seeded documents");
+        }
+
+        private static async Task TestSdkServerInfo()
+        {
+            ServerInfo info = await _AdminClient.GetServerInfoAsync().ConfigureAwait(false);
+            AssertNotNullOrEmpty(info.Version, "ServerInfo.Version");
+            AssertTrue(info.Capabilities.Contains(Capabilities.Collapse), "Capabilities should list search.collapse");
+            AssertTrue(await _AdminClient.SupportsAsync(Capabilities.HybridRecency).ConfigureAwait(false), "SupportsAsync(search.hybrid.recency)");
+            AssertTrue(await _AdminClient.SupportsAsync(Capabilities.IncludeEmbeddings).ConfigureAwait(false), "SupportsAsync(search.include-embeddings)");
+            AssertTrue(!await _AdminClient.SupportsAsync("search.nope").ConfigureAwait(false), "SupportsAsync of an unknown capability is false");
+            AssertTrue(!await _AdminClient.SupportsAsync("search.nope", true).ConfigureAwait(false), "SupportsAsync with refresh");
+        }
+
+        private static async Task TestSdkHybridRoundTrip()
+        {
+            SearchQuery query = GroupHybridQuery("signing key rotation");
+            query.FullText.MatchMode = FullTextMatchModes.Any;
+            query.FullText.TextWeight = 0.4;
+            query.Hybrid = new HybridQuery();
+            query.Hybrid.Strategy = HybridStrategies.Rrf;
+            query.Hybrid.RrfK = 20;
+            query.Hybrid.CandidatePool = 50;
+            SearchResult result = await GroupSearch(query).ConfigureAwait(false);
+            AssertTrue(result.Documents.Count > 0, "Hybrid returns results");
+            foreach (DocumentRecord doc in result.Documents)
+            {
+                AssertTrue(doc.VectorScore.HasValue, "VectorScore on every fused hit");
+                AssertTrue(doc.VectorRank.HasValue || doc.TextRank.HasValue, "Each hit has a leg rank");
+                AssertTrue(!doc.RecencyRank.HasValue && doc.GroupKey == null && !doc.GroupHits.HasValue, "No recency or group fields unless asked");
+                AssertTrue(doc.Embeddings == null, "No vectors unless asked");
+            }
+            AssertTrue(result.Documents.Any(d => d.TextRank.HasValue && d.TextScore.HasValue), "Text matches carry TextRank and TextScore");
+            AssertTrue(result.Documents.Any(d => !d.TextRank.HasValue && !d.TextScore.HasValue), "Vector-only candidates have no TextRank or TextScore");
+        }
+
+        private static async Task TestSdkNotice()
+        {
+            SearchQuery query = GroupHybridQuery("unused");
+            query.FullText = null;
+            query.Hybrid = new HybridQuery();
+            SearchResult result = await GroupSearch(query).ConfigureAwait(false);
+            AssertTrue(result.Notice != null && result.Notice.Contains("Hybrid options were ignored"), "Notice explains ignored Hybrid options");
+        }
+
+        private static async Task TestSdkIncludeEmbeddings()
+        {
+            SearchQuery query = GroupHybridQuery("signing key rotation");
+            query.IncludeEmbeddings = true;
+            SearchResult result = await GroupSearch(query).ConfigureAwait(false);
+            AssertTrue(result.Documents.Count > 0, "Results");
+            foreach (DocumentRecord doc in result.Documents)
+                AssertTrue(doc.Embeddings != null && doc.Embeddings.Count == 3, "Every hit carries a 3-dimension vector");
+        }
+
+        private static async Task TestSdkCollapseRecency()
+        {
+            SearchQuery query = GroupHybridQuery("signing key rotation");
+            query.Hybrid = new HybridQuery();
+            query.Hybrid.RecencyWeight = 0.1;
+            query.Collapse = new CollapseQuery();
+            query.Collapse.Field = CollapseFields.Tag;
+            query.Collapse.TagKey = "parentKey";
+            SearchResult result = await GroupSearch(query).ConfigureAwait(false);
+            List<string> groups = result.Documents.Select(d => d.GroupKey ?? "").ToList();
+            AssertEqual(groups.Count, groups.Distinct(StringComparer.Ordinal).Count(), "One hit per GroupKey");
+            DocumentRecord pNew = result.Documents.First(d => d.GroupKey == "p-new");
+            AssertEqual(3, pNew.GroupHits ?? -1, "p-new GroupHits");
+            AssertEqual(1, pNew.RecencyRank ?? -1, "p-new is the newest group");
+            AssertTrue((result.Documents.First(d => d.GroupKey == "p-old").RecencyRank ?? -1) > 1, "p-old ranks after the newest group");
+            AssertEqual((long)groups.Count, result.TotalRecords, "TotalRecords counts groups");
+        }
+
+        private static async Task TestSdkVectorCollapse()
+        {
+            SearchQuery query = GroupHybridQuery("unused");
+            query.FullText = null;
+            query.Collapse = new CollapseQuery();
+            SearchResult result = await GroupSearch(query).ConfigureAwait(false);
+            List<string> groups = result.Documents.Select(d => d.GroupKey ?? "").ToList();
+            AssertEqual(groups.Count, groups.Distinct(StringComparer.Ordinal).Count(), "One hit per DocumentId");
+            AssertEqual("p-old-c0", result.Documents[0].DocumentKey ?? "", "Nearest chunk represents the top group");
+        }
+
+        private static async Task TestSdkMinimumShouldMatch()
+        {
+            SearchQuery query = new SearchQuery();
+            query.FullText = new FullTextQuery();
+            query.FullText.Query = "alpha beta";
+            query.FullText.MinimumShouldMatch = 2;
+            query.MaxResults = 50;
+            SearchResult result = await GroupSearch(query).ConfigureAwait(false);
+            List<string> keys = result.Documents.Select(d => d.DocumentKey ?? "").ToList();
+            AssertTrue(keys.Contains("m-two"), "Two-term match kept");
+            AssertTrue(!keys.Contains("m-one"), "One-term match excluded");
+        }
+
+        private static async Task TestSdkRecencyWeightRejected()
+        {
+            SearchQuery query = GroupHybridQuery("signing key");
+            query.Hybrid = new HybridQuery();
+            query.Hybrid.RecencyWeight = 1.5;
+            try
+            {
+                await GroupSearch(query).ConfigureAwait(false);
+                AssertTrue(false, "RecencyWeight 1.5 should be rejected");
+            }
+            catch (RecallDbException e)
+            {
+                AssertEqual(400, (int)e.StatusCode, "StatusCode");
+                AssertTrue(e.ErrorMessage != null && e.ErrorMessage.Contains("RecencyWeight"), "ErrorMessage names RecencyWeight, got " + e.ErrorMessage);
+                AssertTrue(e.ResponseBody.Contains("RecencyWeight"), "ResponseBody is the raw body");
+                AssertTrue(e.Message.StartsWith("RecallDB API returned 400 (", StringComparison.Ordinal), "Message uses the parsed form, got " + e.Message);
+            }
+        }
+
+        private static async Task TestSdkStructuredError()
+        {
+            SearchQuery query = GroupHybridQuery("signing key");
+            query.Hybrid = new HybridQuery();
+            query.Hybrid.RrfK = 0;
+            try
+            {
+                await GroupSearch(query).ConfigureAwait(false);
+                AssertTrue(false, "RrfK 0 should be rejected");
+            }
+            catch (RecallDbException e)
+            {
+                AssertEqual("BadRequest", e.ErrorCode ?? "", "ErrorCode");
+                AssertTrue(e.ErrorMessage != null && e.ErrorMessage.Contains("RrfK"), "ErrorMessage names RrfK");
+            }
+
+            query = GroupHybridQuery("signing key");
+            query.Collapse = new CollapseQuery();
+            query.Collapse.Field = CollapseFields.Tag;
+            try
+            {
+                await GroupSearch(query).ConfigureAwait(false);
+                AssertTrue(false, "Collapse by tag without TagKey should be rejected");
+            }
+            catch (RecallDbException e)
+            {
+                AssertEqual("Collapse.TagKey is required when Collapse.Field is Tag.", e.ErrorMessage ?? "", "ErrorMessage from the service error shape");
+            }
+        }
+
+        private static async Task TestSdkInjectedHttpClient()
+        {
+            using HttpClient shared = new HttpClient();
+            using (RecallDbClient client = new RecallDbClient(_Endpoint, _ApiKey, shared))
+            {
+                ServerInfo info = await client.GetServerInfoAsync().ConfigureAwait(false);
+                AssertNotNullOrEmpty(info.Version, "Version through an injected HttpClient");
+            }
+
+            AssertTrue(shared.DefaultRequestHeaders.Authorization == null, "The injected HttpClient's headers are untouched");
+            using HttpResponseMessage response = await shared.GetAsync(_Endpoint + "/").ConfigureAwait(false);
+            AssertStatusCode(response, HttpStatusCode.OK);
+        }
+
+        private static async Task TestSdkHandlerAndCompactJson()
+        {
+            CapturingHandler handler = new CapturingHandler(new HttpClientHandler());
+            using (RecallDbClient client = new RecallDbClient(_Endpoint, _ApiKey, handler))
+            {
+                SearchQuery query = GroupHybridQuery("signing key");
+                await client.SearchAsync(_TestTenantId, _GroupCollectionId, query).ConfigureAwait(false);
+            }
+
+            AssertTrue(handler.LastBody != null && handler.LastBody.Length > 0, "The handler saw the request body");
+            AssertTrue(!handler.LastBody.Contains("\n"), "Request JSON is compact");
+            AssertEqual("Bearer", handler.LastAuthorizationScheme ?? "", "Authorization sent per request");
+            handler.Dispose();
+        }
+
+        private static async Task TestSdkTimeout()
+        {
+            DelayHandler handler = new DelayHandler(TimeSpan.FromSeconds(5));
+            using RecallDbClient client = new RecallDbClient(_Endpoint, _ApiKey, handler);
+            client.Timeout = TimeSpan.FromMilliseconds(200);
+            Stopwatch sw = Stopwatch.StartNew();
+            try
+            {
+                await client.GetServerInfoAsync().ConfigureAwait(false);
+                AssertTrue(false, "A delayed response should time out");
+            }
+            catch (TimeoutException)
+            {
+            }
+            AssertTrue(sw.Elapsed < TimeSpan.FromSeconds(3), "The timeout fires promptly");
+            handler.Dispose();
+        }
+
+        private static async Task TestSdkCancellation()
+        {
+            DelayHandler handler = new DelayHandler(TimeSpan.FromSeconds(5));
+            using RecallDbClient client = new RecallDbClient(_Endpoint, _ApiKey, handler);
+            using System.Threading.CancellationTokenSource cts = new System.Threading.CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+            try
+            {
+                await client.GetServerInfoAsync(cts.Token).ConfigureAwait(false);
+                AssertTrue(false, "A cancelled request should throw");
+            }
+            catch (TimeoutException)
+            {
+                AssertTrue(false, "Caller cancellation must not be reported as a timeout");
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            handler.Dispose();
+        }
+
+        private static async Task TestSdkReservedCharacters()
+        {
+            string key = "k #?%/x";
+            DocumentRecord doc = new DocumentRecord();
+            doc.DocumentKey = key;
+            doc.DocumentId = "d #?%/x";
+            doc.Content = "Reserved characters in keys";
+            doc.Embeddings = new List<float> { 0.5f, 0.5f, 0.5f };
+            await _AdminClient.CreateDocumentAsync(_TestTenantId, _GroupCollectionId, doc).ConfigureAwait(false);
+
+            DocumentRecord read = await _AdminClient.GetDocumentAsync(_TestTenantId, _GroupCollectionId, key).ConfigureAwait(false);
+            AssertEqual(key, read.DocumentKey ?? "", "Read back by key");
+            AssertTrue(await _AdminClient.DocumentExistsAsync(_TestTenantId, _GroupCollectionId, key).ConfigureAwait(false), "Exists by key");
+
+            SearchQuery query = new SearchQuery();
+            query.Vector = new VectorQuery();
+            query.Vector.Embeddings = new List<float> { 0.5f, 0.5f, 0.5f };
+            query.DocumentIds = new List<string> { "d #?%/x" };
+            SearchResult result = await GroupSearch(query).ConfigureAwait(false);
+            AssertEqual(1, result.Documents.Count, "Search by DocumentId");
+
+            await _AdminClient.DeleteDocumentAsync(_TestTenantId, _GroupCollectionId, key).ConfigureAwait(false);
+            AssertTrue(!await _AdminClient.DocumentExistsAsync(_TestTenantId, _GroupCollectionId, key).ConfigureAwait(false), "Gone after delete");
+        }
+
+        private static async Task TestSdkExistsOnFailure()
+        {
+            AssertTrue(!await _AdminClient.DocumentExistsAsync(_TestTenantId, _GroupCollectionId, "no-such-document").ConfigureAwait(false), "404 is false");
+
+            using RecallDbClient bad = new RecallDbClient(_Endpoint, "not-a-valid-token");
+            try
+            {
+                await bad.CollectionExistsAsync(_TestTenantId, _GroupCollectionId).ConfigureAwait(false);
+                AssertTrue(false, "An unauthorized Exists should throw, not return false");
+            }
+            catch (RecallDbException e)
+            {
+                AssertEqual(401, (int)e.StatusCode, "StatusCode");
+            }
+        }
+
+        private static async Task TestSdkGroupingCleanup()
+        {
+            if (string.IsNullOrEmpty(_GroupCollectionId)) return;
+            await _AdminClient.DeleteCollectionAsync(_TestTenantId, _GroupCollectionId).ConfigureAwait(false);
+            _GroupCollectionId = null;
+        }
+
+        private sealed class CapturingHandler : DelegatingHandler
+        {
+            public string LastBody { get; private set; }
+            public string LastAuthorizationScheme { get; private set; }
+
+            public CapturingHandler(HttpMessageHandler inner) : base(inner)
+            {
+            }
+
+            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, System.Threading.CancellationToken cancellationToken)
+            {
+                LastAuthorizationScheme = request.Headers.Authorization != null ? request.Headers.Authorization.Scheme : null;
+                if (request.Content != null) LastBody = await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        private sealed class DelayHandler : HttpMessageHandler
+        {
+            private readonly TimeSpan _Delay;
+
+            public DelayHandler(TimeSpan delay)
+            {
+                _Delay = delay;
+            }
+
+            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, System.Threading.CancellationToken cancellationToken)
+            {
+                await Task.Delay(_Delay, cancellationToken).ConfigureAwait(false);
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
+            }
         }
 
         #endregion

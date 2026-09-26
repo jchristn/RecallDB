@@ -21,7 +21,8 @@
               "path": [
                 ""
               ]
-            }
+            },
+            "description": "Health check, no authentication required. Returns `Name`, `Version`, `UptimeMs`, and `Capabilities`, the list of search features this server honors (`search.hybrid.rrf`, `search.hybrid.recency`, `search.collapse`, `search.include-embeddings`, `search.fulltext.minimum-should-match`). Servers that report the same version can differ, so check `Capabilities` before relying on a feature; older servers ignore unknown request fields silently."
           },
           "response": []
         },
@@ -2201,6 +2202,135 @@
               }
             },
             "description": "Restores the hybrid behavior from before the search fix. With `Strategy` `Filter`, the text query is a required filter, so only documents matching it are returned, ranked by `(1 - w) * vectorScore + w * textScore` on raw scales. Combined with `MatchMode` `All` it reproduces the old results exactly. Use it only if you depend on that behavior; `Rrf` is the recommended default."
+          },
+          "response": []
+        },
+        {
+          "name": "Hybrid: collapse by tag with recency",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1.0/tenants/{{tenant_id}}/collections/{{collection_id}}/search",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1.0",
+                "tenants",
+                "{{tenant_id}}",
+                "collections",
+                "{{collection_id}}",
+                "search"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"MaxResults\": 10,\n  \"Vector\": {\n    \"SearchType\": \"CosineSimilarity\",\n    \"Embeddings\": [\n      0.1,\n      0.2,\n      0.3\n    ]\n  },\n  \"FullText\": {\n    \"Query\": \"how do I rotate the signing key\",\n    \"MatchMode\": \"Any\",\n    \"TextWeight\": 0.5\n  },\n  \"Hybrid\": {\n    \"Strategy\": \"Rrf\",\n    \"RrfK\": 60,\n    \"CandidatePool\": 40,\n    \"RecencyWeight\": 0.1\n  },\n  \"Collapse\": {\n    \"Field\": \"Tag\",\n    \"TagKey\": \"parentKey\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Hybrid `Rrf` search that returns one hit per value of the `parentKey` tag (the group's best-scoring chunk, with `GroupKey` and `GroupHits`) and adds a recency signal. `MaxResults`, `TotalRecords`, `RecordsRemaining` and continuation tokens count groups. `Hybrid.RecencyWeight` (0.0-1.0, 0 is off) ranks groups by their newest `CreatedUtc` and each hit reports `RecencyRank`; because fusion is rank-based, a small weight breaks near-ties in favor of newer content rather than reordering strong matches. `Linear` and `Filter` ignore `RecencyWeight` with a `Notice`, and `Collapse` with `Filter` is a 400. A document without the tag is its own group, keyed by its `DocumentKey`."
+          },
+          "response": []
+        },
+        {
+          "name": "Vector: collapse by document id",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1.0/tenants/{{tenant_id}}/collections/{{collection_id}}/search",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1.0",
+                "tenants",
+                "{{tenant_id}}",
+                "collections",
+                "{{collection_id}}",
+                "search"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"MaxResults\": 10,\n  \"Vector\": {\n    \"SearchType\": \"CosineSimilarity\",\n    \"Embeddings\": [\n      0.1,\n      0.2,\n      0.3\n    ]\n  },\n  \"Collapse\": {\n    \"Field\": \"DocumentId\",\n    \"CandidatePool\": 200\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Vector-only search that returns one hit per `DocumentId` (the document's best-scoring chunk) instead of one per chunk. `Collapse.CandidatePool` (1-10000; default `max(MaxResults * 4, 100)` capped at 1000) is how many chunks are retrieved before grouping. If the pool fills before enough groups are found, the response carries a `Notice` asking for a larger pool. Documents without a `DocumentId` are their own group, keyed by `DocumentKey`."
+          },
+          "response": []
+        },
+        {
+          "name": "Full-text: minimum should match",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearer_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1.0/tenants/{{tenant_id}}/collections/{{collection_id}}/search",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1.0",
+                "tenants",
+                "{{tenant_id}}",
+                "collections",
+                "{{collection_id}}",
+                "search"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"MaxResults\": 10,\n  \"FullText\": {\n    \"Query\": \"rotate signing key\",\n    \"MatchMode\": \"Any\",\n    \"MinimumShouldMatch\": 2\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Full-text search in `Any` mode that only matches documents containing at least 2 distinct terms of the query. `FullText.MinimumShouldMatch` is 1-3 (default 1, plain `Any`), is a 400 above 1 with any other `MatchMode`, and also applies to the text leg of a hybrid search. A query with fewer distinct terms than the value requires all of them; only the first 16 distinct terms are considered."
           },
           "response": []
         },

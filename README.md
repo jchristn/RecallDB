@@ -47,7 +47,7 @@ This isn't a thin wrapper around pgvector. It's an **opinionated persistence sch
 - **Multi-tenant isolation** &mdash; tenants, users, credentials, and collections are fully scoped. One deployment serves many clients.
 - **Per-collection vector tables** &mdash; each collection gets its own Postgres table with dedicated HNSW indexes (`m=16`, `ef_construction=64`). No noisy-neighbor problems.
 - **5 distance metrics** &mdash; cosine similarity, cosine distance, Euclidean similarity, Euclidean distance, inner product. Pick what fits your embedding model.
-- **Three search modes**: vector similarity (nearest-neighbor), full-text relevance (any-term, all-terms, phrase, or web-search syntax, ranked with ts_rank/ts_rank_cd), and hybrid (the vector and text results fused by weighted Reciprocal Rank Fusion, with a tunable text weight). Mix and match in a single request.
+- **Three search modes**: vector similarity (nearest-neighbor), full-text relevance (any-term, all-terms, phrase, or web-search syntax, ranked with ts_rank/ts_rank_cd), and hybrid (the vector and text results fused by weighted Reciprocal Rank Fusion, with a tunable text weight and an optional recency signal). Collapse results to one hit per document or per tag value, so chunked documents come back once. Mix and match in a single request.
 - **Compound search queries** &mdash; combine any search mode with label filters, tag conditions, content term matching, and date ranges in a single request.
 - **Bring your own embeddings** &mdash; no vendor lock-in to any embedding provider. Use OpenAI, Cohere, Ollama, or anything that outputs a float array.
 - **40+ REST endpoints** &mdash; full CRUD for tenants, users, credentials, collections, documents, labels, and tags. Includes batch delete by keys and filter-based delete for bulk operations.
@@ -64,7 +64,7 @@ cd docker
 docker compose up
 ```
 
-API at `http://localhost:8600`, dashboard at `http://localhost:8601`, and Grafana at `http://localhost:3000` (`admin` / `admin`). See [Observability](#observability) for the full stack.
+API at `http://127.0.0.1:8600`, dashboard at `http://127.0.0.1:8601`, and Grafana at `http://127.0.0.1:3000` (`admin` / `admin`). See [Observability](#observability) for the full stack.
 
 ### Default Credentials
 
@@ -77,7 +77,7 @@ API at `http://localhost:8600`, dashboard at `http://localhost:8601`, and Grafan
 ### Store a Document
 
 ```bash
-curl -X PUT http://localhost:8600/v1.0/tenants/ten_default/collections/col_default/documents \
+curl -X PUT http://127.0.0.1:8600/v1.0/tenants/default/collections/default/documents \
   -H "Authorization: Bearer recalldbadmin" \
   -H "Content-Type: application/json" \
   -d '{
@@ -87,17 +87,17 @@ curl -X PUT http://localhost:8600/v1.0/tenants/ten_default/collections/col_defau
     "Content": "RecallDB stores embeddings alongside rich metadata.",
     "Embeddings": [0.1, 0.2, 0.3],
     "Labels": ["documentation", "guide"],
-    "Tags": [
-      { "Key": "source", "Value": "readme" },
-      { "Key": "version", "Value": "1.0" }
-    ]
+    "Tags": {
+      "source": "readme",
+      "version": "1.0"
+    }
   }'
 ```
 
 ### Search
 
 ```bash
-curl -X POST http://localhost:8600/v1.0/tenants/ten_default/collections/col_default/search \
+curl -X POST http://127.0.0.1:8600/v1.0/tenants/default/collections/default/search \
   -H "Authorization: Bearer recalldbadmin" \
   -H "Content-Type: application/json" \
   -d '{
@@ -119,7 +119,7 @@ curl -X POST http://localhost:8600/v1.0/tenants/ten_default/collections/col_defa
 ### Full-Text Search
 
 ```bash
-curl -X POST http://localhost:8600/v1.0/tenants/default/collections/default/search \
+curl -X POST http://127.0.0.1:8600/v1.0/tenants/default/collections/default/search \
   -H "Authorization: Bearer default" \
   -H "Content-Type: application/json" \
   -d '{
@@ -136,7 +136,7 @@ curl -X POST http://localhost:8600/v1.0/tenants/default/collections/default/sear
 ### Hybrid Search
 
 ```bash
-curl -X POST http://localhost:8600/v1.0/tenants/default/collections/default/search \
+curl -X POST http://127.0.0.1:8600/v1.0/tenants/default/collections/default/search \
   -H "Authorization: Bearer default" \
   -H "Content-Type: application/json" \
   -d '{
@@ -155,6 +155,20 @@ curl -X POST http://localhost:8600/v1.0/tenants/default/collections/default/sear
     "MaxResults": 10
   }'
 ```
+
+When a document is stored as several chunks, add `Collapse` to get one hit per document (grouped by `DocumentId`, or by a tag value with `"Field": "Tag"`), each the document's best-scoring chunk with `GroupKey` and `GroupHits`; `MaxResults`, `TotalRecords` and pagination then count documents, not chunks. `Hybrid.RecencyWeight` (0.0-1.0, off by default, `Rrf` only) adds a rank for how recently each group was written. Fusion is rank-based, so a small weight breaks near-ties in favor of newer content rather than reordering strong matches:
+
+```json
+{
+  "Vector": { "Embeddings": [0.1, 0.2, 0.3] },
+  "FullText": { "Query": "how do I rotate the signing key" },
+  "Hybrid": { "Strategy": "Rrf", "RecencyWeight": 0.1 },
+  "Collapse": { "Field": "Tag", "TagKey": "parentKey" },
+  "MaxResults": 10
+}
+```
+
+Servers that report the same version can differ in which search features they support, so check the `Capabilities` list returned by `GET /` (for example `search.collapse` and `search.hybrid.recency`) before relying on one.
 
 ## Search
 
@@ -185,10 +199,10 @@ RecallDB search goes well beyond nearest-neighbor. A single query can combine an
 ### C\#
 
 ```csharp
-var client = new RecallDbClient("http://localhost:8600", "recalldbadmin");
+var client = new RecallDbClient("http://127.0.0.1:8600", "recalldbadmin");
 
 // Vector search
-var results = await client.SearchAsync("ten_default", "col_default", new SearchQuery
+var results = await client.SearchAsync("default", "default", new SearchQuery
 {
     Vector = new VectorQuery
     {
@@ -200,7 +214,7 @@ var results = await client.SearchAsync("ten_default", "col_default", new SearchQ
 });
 
 // Vector search with neighbor retrieval
-var neighborResults = await client.SearchAsync("ten_default", "col_default", new SearchQuery
+var neighborResults = await client.SearchAsync("default", "default", new SearchQuery
 {
     Vector = new VectorQuery
     {
@@ -212,7 +226,7 @@ var neighborResults = await client.SearchAsync("ten_default", "col_default", new
 });
 
 // Full-text search
-var ftResults = await client.SearchAsync("ten_default", "col_default", new SearchQuery
+var ftResults = await client.SearchAsync("default", "default", new SearchQuery
 {
     FullText = new FullTextQuery
     {
@@ -225,7 +239,7 @@ var ftResults = await client.SearchAsync("ten_default", "col_default", new Searc
 });
 
 // Hybrid search (vector and text fused with RRF)
-var hybridResults = await client.SearchAsync("ten_default", "col_default", new SearchQuery
+var hybridResults = await client.SearchAsync("default", "default", new SearchQuery
 {
     Vector = new VectorQuery
     {
@@ -245,15 +259,17 @@ var hybridResults = await client.SearchAsync("ten_default", "col_default", new S
 });
 ```
 
-The C# SDK models take enum values as strings (`SearchType`, `MatchMode`, `Strategy`), matching what goes over the wire. The server-side enums are `SearchTypeEnum`, `TextSearchTypeEnum`, `TextMatchModeEnum` and `HybridStrategyEnum`; see [REST_API.md](REST_API.md#enumerations).
+The C# SDK models take enum values as strings (`SearchType`, `MatchMode`, `Strategy`), matching what goes over the wire. The server-side enums are `SearchTypeEnum`, `TextSearchTypeEnum`, `TextMatchModeEnum` and `HybridStrategyEnum`; see [REST_API.md](REST_API.md#enumerations) Named constants for those strings are in `RecallDb.Sdk.Constants` (`VectorSearchTypes`, `FullTextMatchModes`, `HybridStrategies`, `CollapseFields`, `SortOrders`, `Capabilities`); the JavaScript and Python SDKs export the same holders.
+
+All three SDKs are version 0.2.2. Each can read the server's capability list (`SupportsAsync`, `supports`) before using newer search options such as `Collapse` or `Hybrid.RecencyWeight`, which older servers ignore silently; accept an injected transport and a request timeout; and throw an exception carrying the server's error code and message. The `Exists` calls return false only for 404 and throw for any other failure. See each SDK's README under [sdk/](sdk/) for details.
 
 ### Python
 
 ```python
 from recalldb_sdk import RecallDbClient
 
-client = RecallDbClient("http://localhost:8600", "recalldbadmin")
-results = client.search("ten_default", "col_default", {
+client = RecallDbClient("http://127.0.0.1:8600", "recalldbadmin")
+results = client.search("default", "default", {
     "Vector": {
         "SearchType": "CosineSimilarity",
         "Embeddings": [0.1, 0.2, 0.3],
@@ -263,7 +279,7 @@ results = client.search("ten_default", "col_default", {
 })
 
 # Vector search with neighbor retrieval
-neighbor_results = client.search("ten_default", "col_default", {
+neighbor_results = client.search("default", "default", {
     "Vector": {
         "SearchType": "CosineSimilarity",
         "Embeddings": [0.1, 0.2, 0.3]
@@ -278,8 +294,8 @@ neighbor_results = client.search("ten_default", "col_default", {
 ```javascript
 import { RecallDbClient } from 'recalldb-sdk';
 
-const client = new RecallDbClient('http://localhost:8600', 'recalldbadmin');
-const results = await client.search('ten_default', 'col_default', {
+const client = new RecallDbClient('http://127.0.0.1:8600', 'recalldbadmin');
+const results = await client.search('default', 'default', {
   Vector: {
     SearchType: 'CosineSimilarity',
     Embeddings: [0.1, 0.2, 0.3],
@@ -289,7 +305,7 @@ const results = await client.search('ten_default', 'col_default', {
 });
 
 // Vector search with neighbor retrieval
-const neighborResults = await client.search('ten_default', 'col_default', {
+const neighborResults = await client.search('default', 'default', {
   Vector: {
     SearchType: 'CosineSimilarity',
     Embeddings: [0.1, 0.2, 0.3],
@@ -353,7 +369,7 @@ dotnet build src/RecallDb.sln
 
 ## MCP Server
 
-RecallDB ships an in-process **Model Context Protocol (MCP)** server so agents can drive the database directly. It is hosted inside `RecallDB.Server` (no separate container) over Streamable HTTP at `http://localhost:8620/mcp` (POST for JSON-RPC, GET for the SSE stream).
+RecallDB ships an in-process **Model Context Protocol (MCP)** server so agents can drive the database directly. It is hosted inside `RecallDB.Server` (no separate container) over Streamable HTTP at `http://127.0.0.1:8620/mcp` (POST for JSON-RPC, GET for the SSE stream).
 
 - The full REST operation set is exposed as MCP tools (`tenant/*`, `user/*`, `credential/*`, `collection/*`, `document/*`, `label/*`, `tag/*`, `search/query`, `requestHistory/*`, `auth/authenticate`, `server/info`).
 - Listing is always paginated (`*/enumerate`) — there are no "get all" tools.
@@ -379,7 +395,7 @@ RecallDB is instrumented end-to-end with [OpenTelemetry](https://opentelemetry.i
 - **HTTP (REST)** &mdash; request rate, duration, in-flight count, and status classes for every inbound request.
 - **MCP** &mdash; per-tool invocation rate, duration, in-flight count, and outcome.
 - **Application** &mdash; a unified operation family across both transports (labeled `origin=rest|mcp`, resource, and operation).
-- **Search**: latency and result counts by mode (vector, full-text, hybrid), text match mode, and hybrid strategy.
+- **Search**: latency and result counts by mode (vector, full-text, hybrid), text match mode, hybrid strategy, collapse field (`recalldb_search_collapse`: none, documentid, tag), and recency (`recalldb_search_recency`: on, off). Search spans carry the same values as `recalldb.search.collapse` and `recalldb.search.recency`.
 - **Database** &mdash; query rate, duration, in-flight count, and rows returned for the PostgreSQL layer.
 - **Runtime / process** &mdash; .NET GC, threads, exceptions, working-set memory, and uptime.
 
@@ -389,11 +405,11 @@ Distributed traces nest naturally (a REST operation or MCP tool span parents its
 
 | Service | URL | Default credentials | Role |
 |---|---|---|---|
-| **Grafana** | `http://localhost:3000` | `admin` / `admin` | Dashboards (HTTP, MCP, Application, Search, Database, Runtime sections) |
-| **Prometheus** | `http://localhost:9090` | none | Metrics store; scrapes the server at `:9464/metrics` |
-| **Tempo** | `http://localhost:3200` | none | Trace backend (OTLP receiver on `4317`/`4318`) |
-| **Loki** | `http://localhost:3100` | none | Log aggregation |
-| **Alloy** | `http://localhost:12345` | none | Ships container logs to Loki |
+| **Grafana** | `http://127.0.0.1:3000` | `admin` / `admin` | Dashboards (HTTP, MCP, Application, Search, Database, Runtime sections) |
+| **Prometheus** | `http://127.0.0.1:9090` | none | Metrics store; scrapes the server at `:9464/metrics` |
+| **Tempo** | `http://127.0.0.1:3200` | none | Trace backend (OTLP receiver on `4317`/`4318`) |
+| **Loki** | `http://127.0.0.1:3100` | none | Log aggregation |
+| **Alloy** | `http://127.0.0.1:12345` | none | Ships container logs to Loki |
 
 The dashboards are pre-provisioned and grouped into folders (sections) by area, and the product dashboard's landing page links out to each service. Configure observability in the `Observability` section of `recalldb.json` or via environment variables (see [Configuration](#configuration)); set `Enabled` to `false` to disable it entirely.
 

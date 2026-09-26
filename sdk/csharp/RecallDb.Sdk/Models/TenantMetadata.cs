@@ -11,12 +11,12 @@ namespace RecallDb.Sdk.Models
         /// <summary>
         /// Tenant ID.
         /// </summary>
-        public string Id { get; set; }
+        public string? Id { get; set; }
 
         /// <summary>
         /// Tenant name.
         /// </summary>
-        public string Name { get; set; }
+        public string? Name { get; set; }
 
         /// <summary>
         /// Whether the tenant is active.

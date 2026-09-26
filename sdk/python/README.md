@@ -31,16 +31,18 @@ pip install -r requirements.txt
 ## Quick Start
 
 ```python
-from recalldb_sdk import RecallDbClient
+from recalldb_sdk import RecallDbClient, __version__
 
-client = RecallDbClient("http://localhost:8600", "your-bearer-token")
+print(__version__)  # 0.2.2
+
+client = RecallDbClient("http://127.0.0.1:8600", "your-bearer-token")
 
 # Check server health
 health = client.health()
 print(health["Name"])  # RecallDB
 
 # Authenticate
-auth = client.authenticate(bearer_token="your-bearer-token")
+auth = client.authenticate({"BearerToken": "your-bearer-token"})
 print(auth["Success"])  # True
 
 # Create a collection
@@ -103,6 +105,133 @@ Full-text matching notes:
 - To restore the previous hybrid behavior (the text query is a required filter and raw scores are blended), set `Hybrid.Strategy` to `Filter` and `FullText.MatchMode` to `All`.
 - `FullText.TextWeight` must be between 0.0 and 1.0, `FullText.Normalization` between 0 and 63, and `FullText.Language` must be a text search configuration installed on the server. Out-of-range values are rejected with HTTP 400.
 - The search result may include a `Notice` explaining how the search was evaluated, for example when the text query contained only stop words or hybrid options were ignored.
+
+### Server capabilities
+
+Servers that predate a search field silently ignore it: the request succeeds and the result is computed without it. Check the server's capability list before relying on a newer field.
+
+```python
+from recalldb_sdk import Capabilities
+
+info = client.get_server_info()
+print(info["Version"], info["Capabilities"])  # Capabilities is [] on older servers
+
+if client.supports(Capabilities.COLLAPSE):  # cached per client; supports(name, refresh=True) refetches
+    ...
+```
+
+| Constant | Capability | Enables |
+|----------|------------|---------|
+| `Capabilities.HYBRID_RRF` | `search.hybrid.rrf` | `Hybrid.Strategy` `Rrf`, `VectorRank`, `TextRank` |
+| `Capabilities.HYBRID_RECENCY` | `search.hybrid.recency` | `Hybrid.RecencyWeight`, `RecencyRank` |
+| `Capabilities.COLLAPSE` | `search.collapse` | `Collapse`, `GroupKey`, `GroupHits` |
+| `Capabilities.INCLUDE_EMBEDDINGS` | `search.include-embeddings` | `IncludeEmbeddings`, `Embeddings` on hits |
+| `Capabilities.FULLTEXT_MINIMUM_SHOULD_MATCH` | `search.fulltext.minimum-should-match` | `FullText.MinimumShouldMatch` |
+
+The module also defines named constants for the other string values: `HybridStrategies`, `FullTextMatchModes`, `FullTextSearchTypes`, `VectorSearchTypes`, `SortOrders`, and `CollapseFields`.
+
+### Single-call hybrid search with collapse and recency
+
+One request runs the vector and text legs, fuses them, adds a recency signal, and returns one hit per parent (here, chunks tagged with a `parentKey` tag).
+
+```python
+from recalldb_sdk import Capabilities, CollapseFields, HybridStrategies, VectorSearchTypes
+
+query = {
+    "Vector": {"SearchType": VectorSearchTypes.COSINE_SIMILARITY, "Embeddings": [0.1, 0.2, 0.3, ...]},
+    "FullText": {"Query": "quarterly planning notes"},
+    "Hybrid": {"Strategy": HybridStrategies.RRF},
+    "MaxResults": 10,
+}
+
+if client.supports(Capabilities.COLLAPSE):
+    # One hit per parentKey value; MaxResults, TotalRecords, and continuation count groups.
+    query["Collapse"] = {"Field": CollapseFields.TAG, "TagKey": "parentKey"}
+
+if client.supports(Capabilities.HYBRID_RECENCY):
+    # 0.0 to 1.0; Rrf only. Newer groups (by their newest chunk) rank higher.
+    query["Hybrid"]["RecencyWeight"] = 0.3
+
+results = client.search("tenant-id", collection["Id"], query)
+if results.get("Notice"):
+    print("Notice:", results["Notice"])
+
+for d in results["Documents"]:
+    print(d.get("GroupKey"), d.get("GroupHits"), d["Score"],
+          d.get("VectorRank"), d.get("TextRank"), d.get("RecencyRank"))
+```
+
+Notes:
+
+- `Collapse.Field` is `DocumentId` (default) or `Tag` (requires `TagKey`). `Collapse` is rejected with HTTP 400 with `Hybrid.Strategy` `Filter` and when the request has neither a vector nor a text query. `Collapse.CandidatePool` (1 to 10000) sets how many candidates are grouped for vector-only and full-text-only searches; a pool with fewer groups than `MaxResults` returns fewer hits and a `Notice`.
+- `Hybrid.RecencyWeight` is used only by `Rrf`; `Linear` and `Filter` ignore it and return a `Notice`.
+- `FullText.MinimumShouldMatch` (1 to 3, default 1) requires at least that many distinct query terms per document, with `MatchMode` `Any` only; other match modes return HTTP 400 when it is above 1.
+
+### Stored vectors (IncludeEmbeddings)
+
+Search results do not include stored vectors unless you set `"IncludeEmbeddings": True`, which adds `Embeddings` to each hit. Vectors are sent as JSON numbers, which costs about 4 KB per hit at 384 dimensions and about 8 KB per hit at 768 dimensions, so request them only when you need them (for example for client-side reranking or deduplication).
+
+### Timeouts and a caller-supplied session
+
+Every request uses a timeout, 100 seconds by default. Pass `timeout` in seconds, or `None` to disable it; any other value must be positive or `ValueError` is raised. When the timeout elapses the call raises `requests.exceptions.Timeout` instead of hanging.
+
+To add retries or connection pooling settings, pass your own `requests.Session`. The client does not modify a supplied session: its headers are left alone, and the client sends its `Authorization` and `Content-Type` headers on each request instead. `client.close()` closes only a session the client created, never yours.
+
+```python
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+from recalldb_sdk import RecallDbClient
+
+retry = Retry(
+    total=5,
+    backoff_factor=0.5,                 # 0.5 s, 1 s, 2 s, ...
+    status_forcelist=[429, 502, 503],
+    allowed_methods=None,               # retry every method; limit this if writes must not repeat
+    respect_retry_after_header=True,
+)
+session = requests.Session()
+session.mount("http://", HTTPAdapter(max_retries=retry))
+session.mount("https://", HTTPAdapter(max_retries=retry))
+
+client = RecallDbClient("http://127.0.0.1:8600", "your-bearer-token", timeout=30, session=session)
+
+try:
+    client.health()
+except requests.exceptions.Timeout:
+    print("RecallDB did not respond within 30 seconds")
+```
+
+### Errors
+
+A failed call raises `RecallDbException` with these attributes:
+
+| Attribute | Description |
+|-----------|-------------|
+| `status_code` | HTTP status code |
+| `response_body` | The raw response body text, unchanged (empty for HEAD requests) |
+| `error_code` | The body's `Error` field, for example `BadRequest` or `NotAuthorized`; `None` when the body is not a JSON object |
+| `error_message` | The first non-empty of the body's `Context`, `Message`, and `Description` fields; `None` when the body is not a JSON object |
+
+When the body parses, the exception message reads `RecallDB API returned 400 (BadRequest): RrfK must be between 1 and 100000. (Parameter 'RrfK')`. Otherwise it is `RecallDB API returned <status>: <body>` as before.
+
+```python
+from recalldb_sdk import RecallDbException
+
+try:
+    client.search("tenant-id", collection["Id"], {"FullText": {"Query": "x", "TextWeight": 1.5}})
+except RecallDbException as e:
+    print(e.status_code, e.error_code, e.error_message)
+```
+
+### Exists calls (behavior change)
+
+`tenant_exists`, `user_exists`, `credential_exists`, `collection_exists`, and `document_exists` return `True` for HTTP 200 and `False` for HTTP 404, and now raise `RecallDbException` for any other status (for example 401, 403, 429, or 5xx). Previously every non-200 status returned `False`, so an expired token or an overloaded server looked like a missing record. Callers that relied on `False` for those cases must catch the exception.
+
+### Path encoding
+
+Every caller-supplied path segment (tenant, user, credential, collection, document key, document ID, label, and tag IDs) is URL-encoded, so keys such as `a/b#1?x=50% off` round-trip correctly.
 
 ## Files
 

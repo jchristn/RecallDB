@@ -1,5 +1,20 @@
 # Changelog
 
+## SDKs v0.2.2 (C#, JavaScript, Python)
+
+The three SDKs now share one version, 0.2.2 (C# `RecallDb.Sdk` was 0.2.1, JavaScript was 0.2.0, Python had none). They target the v0.2.1 server described below.
+
+- Single-call hybrid search options and per-leg ranks and scores (`Hybrid.Strategy`, `RrfK`, `CandidatePool`; `VectorScore`, `TextScore`, `VectorRank`, `TextRank`), stored vectors on request (`IncludeEmbeddings`), search notices, and the new recency, collapse, and minimum-should-match options (`Hybrid.RecencyWeight`, `Collapse`, `FullText.MinimumShouldMatch`; `RecencyRank`, `GroupKey`, `GroupHits` on hits). New request fields are omitted when unset, so the SDKs still work against older servers
+- Typed server info with a capabilities list (`GetServerInfoAsync`/`SupportsAsync`, `getServerInfo`/`supports`, `get_server_info`/`supports`), cached per client, so clients can detect features on servers that report the same version
+- C# SDK: constructors that accept an `HttpClient` (caller-owned, never modified, not disposed) or an `HttpMessageHandler`; a per-request `Timeout` (default 100 s, throws `TimeoutException`); the bearer token is sent per request; cancellation reaches response reads; compact request JSON (was indented). JavaScript SDK: `timeoutMs` (default 100 s, `RecallDbTimeoutError`), a custom `fetch`, and a per-call `signal`. Python SDK: `timeout` (default 100 s; previously none, so a stalled server blocked forever) and a caller-supplied `session`, which the client never modifies
+- Every caller-supplied path segment is URL-encoded (previously only document reads, updates, deletes, and exists)
+- `RecallDbException` exposes the server's error code and message (`ErrorCode`/`ErrorMessage`, `errorCode`/`errorMessage`, `error_code`/`error_message`) for both error body shapes, and keeps the raw body
+- Named constants for capabilities, hybrid strategies, match modes, full-text and vector search types, sort orders, and collapse fields
+- C# SDK: nullable annotations on the public surface and complete XML documentation (the build no longer suppresses CS1591); typed calls throw `InvalidOperationException` on a success response with an empty body instead of returning null
+- Docs and harnesses use `127.0.0.1`; each harness gains cases for all of the above
+- **Behavior change:** `...ExistsAsync` / `exists` / `..._exists` now return false only for 404 and throw `RecallDbException` for any status other than 200 or 404, instead of returning false when the server is unreachable, unauthorized, or failing
+- **Behavior change (JavaScript, Python):** requests now time out after 100 seconds by default; pass `timeoutMs: 0` or `timeout=None` for the previous unlimited behavior
+
 ## v0.2.1
 
 Added end-to-end observability (metrics and distributed tracing) across the entire server.
@@ -39,6 +54,14 @@ Added end-to-end observability (metrics and distributed tracing) across the enti
 - Fixed: a failed MCP tool call now reports its status in the JSON-RPC error message (`403 Forbidden: Access denied.`, `404 Not found: ...`) with `data.statusCode`, as MCP_API.md describes. Previously the message was a bare `Internal error` with the detail only in `data`, which clients such as Claude Code do not show
 - Dependencies: OpenTelemetry 1.19.1 (Runtime instrumentation 1.19.0, Prometheus exporter 1.19.1-beta.1), Microsoft.NET.Test.Sdk 18.10.1, Microsoft.Extensions.DependencyModel 10.0.12, Microsoft.SourceLink.GitHub 10.0.401
 - Tests: the MCP suite calls tools through `tools/call` and adds cases for the v2 surface: no demo tools in `tools/list`, `ping` returns `{}`, the `tools/call` result envelope, bare tool calls and demo tools rejected, unknown tool and missing name, schema-rejected argument types, status-bearing error messages, and the `Authorization` header gating `tools/call` but not `ping`
+- Hybrid `Rrf` search can fuse a third, recency signal: new `Hybrid.RecencyWeight` (0.0-1.0, default 0, off) ranks candidates by newest `created_utc` per collapse group (or per document) and the fused score stays normalized to [0, 1]; hits carry `RecencyRank`. Ignored with a `Notice` for `Linear` and `Filter`. With the weight at 0 the generated SQL and scores are unchanged
+- New `SearchQuery.Collapse` (`Field` = `DocumentId` or `Tag` with `TagKey`; `CandidatePool` for single-leg searches) returns one hit per group, its best-scoring chunk, with `GroupKey` and `GroupHits`; `MaxResults`, `TotalRecords`, and continuation tokens count groups, and score thresholds apply to the representative. Works with vector-only, full-text-only, and hybrid `Rrf` and `Linear` (400 with `Filter`). A `Notice` reports when a full candidate pool held fewer groups than the page asked for
+- New opt-in `FullText.MinimumShouldMatch` (1-3, default 1) for `MatchMode = Any`: only documents containing at least that many distinct query terms match (the first 16 terms of the query are considered), which cuts ranking work on large collections
+- `GET /` (now typed as `HealthInfo`) and MCP `server/info` report `Capabilities` (`search.hybrid.rrf`, `search.hybrid.recency`, `search.collapse`, `search.include-embeddings`, `search.fulltext.minimum-should-match`), so clients can detect these features on servers that share the same version
+- Search metrics and traces gain `recalldb_search_collapse` (`none`, `documentid`, `tag`) and `recalldb_search_recency` (`on`, `off`) labels
+- Fixed: document create (`PUT .../documents`) and batch create responses now carry each document's generated `Id` (previously `0`) and its stored `CreatedUtc`, so they match a later read. Batch create is now a single multi-row `INSERT ... RETURNING`
+- Docs: the README's document example sends `Tags` as an object (the array form it showed is rejected with 400), and uses the seeded `default` tenant and collection ids
+- Tests: a new `RecallDbSearchGrouping` suite (recency, collapse, minimum-should-match, and their validation, in its own collection), `HealthReportsCapabilities`, and MCP cases for capabilities and a collapsed, recency-weighted `search/query`
 
 ## v0.2.0
 

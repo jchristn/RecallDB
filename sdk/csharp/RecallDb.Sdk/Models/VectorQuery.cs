@@ -17,7 +17,7 @@ namespace RecallDb.Sdk.Models
         /// <summary>
         /// Vector embeddings to search with.
         /// </summary>
-        public List<float> Embeddings { get; set; }
+        public List<float>? Embeddings { get; set; }
 
         /// <summary>
         /// Minimum score threshold for results.

@@ -1,10 +1,10 @@
 # Connecting Gemini CLI to RecallDB (MCP)
 
-RecallDB exposes an in-process MCP server over **Streamable HTTP** at `http://localhost:8620/mcp`. This guide connects the [Gemini CLI](https://github.com/google-gemini/gemini-cli) to it.
+RecallDB exposes an in-process MCP server over **Streamable HTTP** at `http://127.0.0.1:8620/mcp`. This guide connects the [Gemini CLI](https://github.com/google-gemini/gemini-cli) to it.
 
 ## Prerequisites
 
-- A running RecallDB server (`curl http://localhost:8620/` returns 200).
+- A running RecallDB server (`curl http://127.0.0.1:8620/` returns 200).
 - A bearer token: your admin API key (default `recalldbadmin`) or a credential bearer token.
 
 ## Automatic setup (recommended)
@@ -23,7 +23,7 @@ Edit `~/.gemini/settings.json` (user scope) or `.gemini/settings.json` in your p
 {
   "mcpServers": {
     "recalldb": {
-      "httpUrl": "http://localhost:8620/mcp",
+      "httpUrl": "http://127.0.0.1:8620/mcp",
       "headers": {
         "Authorization": "Bearer recalldbadmin"
       },

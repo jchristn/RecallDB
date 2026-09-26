@@ -174,6 +174,17 @@ namespace Test.Shared
                     AssertNotNullOrEmpty(GetString(info, "Version"), "server/info Version");
                 }),
 
+                // 2b. server/info reports search capabilities
+                Case("McpServerInfoCapabilities", "MCP: server/info reports search capabilities", async ct =>
+                {
+                    JsonElement info = await CallAsync("server/info", new { }).ConfigureAwait(false);
+                    JsonElement caps = GetProperty(info, "Capabilities");
+                    AssertTrue(caps.ValueKind == JsonValueKind.Array, "server/info Capabilities should be an array");
+                    List<string> names = caps.EnumerateArray().Select(c => c.GetString()).ToList();
+                    foreach (string expected in RecallDb.Core.SearchCapabilities.All)
+                        AssertTrue(names.Contains(expected), "server/info Capabilities should contain " + expected);
+                }),
+
                 // 3. auth/authenticate with a valid bearer token
                 Case("McpAuthenticate", "MCP: auth/authenticate", async ct =>
                 {
@@ -277,6 +288,27 @@ namespace Test.Shared
                     }, JsonOptions);
                     JsonElement result = await CallAsync("search/query", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, search = searchJson }).ConfigureAwait(false);
                     AssertTrue(result.ValueKind == JsonValueKind.Object, "search should return an object");
+                }),
+
+                // 12a. search/query hybrid with collapse and recency: hits carry GroupKey, GroupHits, and RecencyRank
+                Case("McpSearchHybridCollapseRecency", "MCP: search/query hybrid with collapse and recency", async ct =>
+                {
+                    if (string.IsNullOrEmpty(_McpCollectionId)) return;
+                    string searchJson = JsonSerializer.Serialize(new
+                    {
+                        Vector = new { SearchType = "CosineSimilarity", Embeddings = new List<float> { 0.1f, 0.2f, 0.3f } },
+                        FullText = new { Query = "hello", MatchMode = "Any" },
+                        Hybrid = new { Strategy = "Rrf", RecencyWeight = 0.1 },
+                        Collapse = new { Field = "DocumentId" },
+                        MaxResults = 5
+                    }, JsonOptions);
+                    JsonElement result = await CallAsync("search/query", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, search = searchJson }).ConfigureAwait(false);
+                    JsonElement docs = GetProperty(result, "Documents");
+                    AssertTrue(docs.ValueKind == JsonValueKind.Array && docs.GetArrayLength() > 0, "Collapsed hybrid search should return the MCP document");
+                    JsonElement top = docs[0];
+                    AssertNotNullOrEmpty(GetProperty(top, "GroupKey").GetString(), "GroupKey");
+                    AssertTrue(GetProperty(top, "GroupHits").GetInt32() >= 1, "GroupHits");
+                    AssertEqual(1, GetProperty(top, "RecencyRank").GetInt32(), "RecencyRank");
                 }),
 
                 // 12b. search/query hybrid (Rrf): fused results carry ranks and a normalized score

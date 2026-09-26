@@ -8,7 +8,7 @@ namespace RecallDb.Sdk.Models
         /// <summary>
         /// Tag key.
         /// </summary>
-        public string Key { get; set; }
+        public string? Key { get; set; }
 
         /// <summary>
         /// Condition to evaluate against the tag value.
@@ -20,7 +20,7 @@ namespace RecallDb.Sdk.Models
         /// <summary>
         /// Value to compare against.
         /// </summary>
-        public string Value { get; set; }
+        public string? Value { get; set; }
 
         /// <summary>
         /// Instantiate.

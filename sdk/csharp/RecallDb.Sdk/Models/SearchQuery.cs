@@ -33,24 +33,24 @@ namespace RecallDb.Sdk.Models
         /// <summary>
         /// Label filter for including or excluding documents by label.
         /// </summary>
-        public LabelFilter LabelFilter { get; set; }
+        public LabelFilter? LabelFilter { get; set; }
 
         /// <summary>
         /// Tag filter set for including or excluding documents by tag conditions.
         /// </summary>
-        public TagFilterSet TagFilter { get; set; }
+        public TagFilterSet? TagFilter { get; set; }
 
         /// <summary>
         /// Vector query parameters for similarity or distance search.
         /// </summary>
-        public VectorQuery Vector { get; set; }
+        public VectorQuery? Vector { get; set; }
 
         /// <summary>
         /// Full-text search query parameters for content relevance scoring.
         /// When provided without Vector, performs a standalone full-text search.
         /// When provided with Vector, performs a hybrid search combining both scores.
         /// </summary>
-        public FullTextQuery FullText { get; set; }
+        public FullTextQuery? FullText { get; set; }
 
         /// <summary>
         /// Hybrid search options controlling how the vector and full-text legs are combined.
@@ -58,12 +58,20 @@ namespace RecallDb.Sdk.Models
         /// otherwise ignored and the result Notice says so.
         /// Default: null (the server uses reciprocal rank fusion with its default settings).
         /// </summary>
-        public HybridQuery Hybrid { get; set; }
+        public HybridQuery? Hybrid { get; set; }
+
+        /// <summary>
+        /// Collapse options: return one hit per group (its best-scoring chunk) instead of one hit per chunk.
+        /// When set, MaxResults, TotalRecords, and continuation tokens count groups, and hits carry GroupKey and GroupHits.
+        /// Not supported with the hybrid Filter strategy. Default: null (no collapse).
+        /// Requires the server capability search.collapse; older servers ignore it silently.
+        /// </summary>
+        public CollapseQuery? Collapse { get; set; }
 
         /// <summary>
         /// Terms filter for including or excluding documents by content terms.
         /// </summary>
-        public TermsFilter Terms { get; set; }
+        public TermsFilter? Terms { get; set; }
 
         /// <summary>
         /// Number of neighboring chunks before and after each matched chunk to include in results.
@@ -81,7 +89,7 @@ namespace RecallDb.Sdk.Models
         /// <summary>
         /// Continuation token for retrieving the next page of results.
         /// </summary>
-        public string ContinuationToken { get; set; }
+        public string? ContinuationToken { get; set; }
 
         /// <summary>
         /// Whether to include each matched document's stored embedding vector in the results.

@@ -1,5 +1,7 @@
 namespace RecallDb.Core.Models
 {
+    using System.Collections.Generic;
+
     /// <summary>
     /// MCP server information returned by the server/info tool: product identity plus the enabled MCP endpoint.
     /// </summary>
@@ -21,6 +23,22 @@ namespace RecallDb.Core.Models
         /// Server uptime in milliseconds.
         /// </summary>
         public double UptimeMs { get; set; } = 0;
+
+        /// <summary>
+        /// Search capabilities this server supports (see RecallDb.Core.SearchCapabilities), so clients can
+        /// detect features on servers that report the same version. Never null; empty on servers that predate it.
+        /// </summary>
+        public List<string> Capabilities
+        {
+            get
+            {
+                return _Capabilities;
+            }
+            set
+            {
+                _Capabilities = value ?? new List<string>();
+            }
+        }
 
         /// <summary>
         /// Whether the MCP server is enabled.
@@ -46,6 +64,12 @@ namespace RecallDb.Core.Models
         /// Relative path for the Streamable HTTP endpoint (POST for JSON-RPC, GET for the SSE stream).
         /// </summary>
         public string Endpoint { get; set; } = "/mcp";
+
+        #endregion
+
+        #region Private-Members
+
+        private List<string> _Capabilities = SearchCapabilities.All;
 
         #endregion
 

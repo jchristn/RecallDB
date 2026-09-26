@@ -10,27 +10,27 @@ namespace RecallDb.Sdk.Models
         /// <summary>
         /// Credential ID.
         /// </summary>
-        public string Id { get; set; }
+        public string? Id { get; set; }
 
         /// <summary>
         /// Tenant ID.
         /// </summary>
-        public string TenantId { get; set; }
+        public string? TenantId { get; set; }
 
         /// <summary>
         /// User ID.
         /// </summary>
-        public string UserId { get; set; }
+        public string? UserId { get; set; }
 
         /// <summary>
         /// Bearer token.
         /// </summary>
-        public string BearerToken { get; set; }
+        public string? BearerToken { get; set; }
 
         /// <summary>
         /// Credential name.
         /// </summary>
-        public string Name { get; set; }
+        public string? Name { get; set; }
 
         /// <summary>
         /// Whether the credential is active.

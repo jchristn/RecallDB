@@ -9,22 +9,22 @@ namespace RecallDb.Sdk.Models
         /// <summary>
         /// Bearer token to validate.
         /// </summary>
-        public string BearerToken { get; set; }
+        public string? BearerToken { get; set; }
 
         /// <summary>
         /// Tenant ID for email+password login.
         /// </summary>
-        public string TenantId { get; set; }
+        public string? TenantId { get; set; }
 
         /// <summary>
         /// Email address for login.
         /// </summary>
-        public string Email { get; set; }
+        public string? Email { get; set; }
 
         /// <summary>
         /// Password for login.
         /// </summary>
-        public string Password { get; set; }
+        public string? Password { get; set; }
 
         /// <summary>
         /// Instantiate.

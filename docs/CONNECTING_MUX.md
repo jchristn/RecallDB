@@ -1,6 +1,6 @@
 # Connecting Mux to RecallDB (MCP)
 
-RecallDB exposes an in-process MCP server over **Streamable HTTP** at `http://localhost:8620/mcp`. This guide connects [Mux](https://github.com/joelchristner/mux) to it.
+RecallDB exposes an in-process MCP server over **Streamable HTTP** at `http://127.0.0.1:8620/mcp`. This guide connects [Mux](https://github.com/joelchristner/mux) to it.
 
 Mux splits the endpoint into a base `url` plus an `mcpPath`, so the values you enter are:
 
@@ -8,7 +8,7 @@ Mux splits the endpoint into a base `url` plus an `mcpPath`, so the values you e
 |-------|-------|
 | Name | `recalldb` |
 | Transport | `http` |
-| URL (base) | `http://localhost:8620` |
+| URL (base) | `http://127.0.0.1:8620` |
 | MCP path | `/mcp` |
 | Auth type | `bearer` |
 | Bearer token | your admin API key (default `recalldbadmin`) or a credential bearer token |
@@ -21,7 +21,7 @@ Inside the Mux REPL, run the `/mcp` slash command to manage MCP servers:
 2. Type **`/mcp add`** and press Enter to open the add-server wizard.
 3. **Name**: enter `recalldb`.
 4. **Transport**: choose **`http`**.
-5. **URL**: enter `http://localhost:8620`.
+5. **URL**: enter `http://127.0.0.1:8620`.
 6. **MCP path**: enter `/mcp` (this is usually the default — accept it).
 7. **Auth**: choose **`bearer`**, then enter the token (e.g. `recalldbadmin`). The token field is masked.
 8. Confirm. Mux saves the server to `~/.mux/mcp-servers.json` and connects it for the current session.
@@ -46,7 +46,7 @@ This writes the `recalldb` entry into `~/.mux/mcp-servers.json` (honoring `MUX_C
     {
       "name": "recalldb",
       "transport": "http",
-      "url": "http://localhost:8620",
+      "url": "http://127.0.0.1:8620",
       "mcpPath": "/mcp",
       "auth": {
         "type": "bearer",

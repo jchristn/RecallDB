@@ -19,7 +19,7 @@ command-line flags. The defaults are `http://127.0.0.1:8600` and `recalldbadmin`
 
 ## Suites
 
-`RecallDbSuites.All` runs three suites in order:
+`RecallDbSuites.All` runs these suites in order:
 
 - **RecallDb**: the main REST suite. Its search cases run against a 10-document
   seed set (`SearchDataSetup`) whose vector-test baselines stay fixed.
@@ -27,7 +27,18 @@ command-line flags. The defaults are `http://127.0.0.1:8600` and `recalldbadmin`
   hybrid strategies (`Rrf`, `Linear`, `Filter`), search input validation, and
   the stored `content_tsv` schema. It creates its own collection in the
   `default` tenant and deletes it at the end.
-- **RecallDbMcp**: the MCP tool surface, including a hybrid `search/query` case.
+- **RecallDbSearchGrouping** (`SearchGroupingSuites`): the hybrid recency signal
+  (`Hybrid.RecencyWeight`), result collapse (`SearchQuery.Collapse`),
+  `FullText.MinimumShouldMatch`, and their validation. It creates its own
+  collection in the `default` tenant, so the fixed baselines of the other suites
+  are unaffected, and deletes it at the end.
+- **RecallDbCollectionIntegrity** (`CollectionIntegritySuites`): collection
+  creation, index naming, and the startup schema repair.
+- **RecallDbMcp**: the MCP tool surface, including hybrid and collapsed,
+  recency-weighted `search/query` cases and the `server/info` capability list.
+
+The main suite also checks that `GET /` reports every capability in
+`RecallDb.Core.SearchCapabilities` (`HealthReportsCapabilities`).
 
 The hybrid suite's 11 seed documents exist to make the new semantics
 observable, so each has a job. `hy-guide` is the best semantic match for the
@@ -52,6 +63,18 @@ and the second leaves it untouched (same `relfilenode`, same indexes).
 RECALLDB_TEST_DB="Host=127.0.0.1;Port=5432;Username=recalldb;Password=recalldb;Database=recalldb" \
   dotnet run --project src/Test.Automated
 ```
+
+The grouping suite's seed is two chunked parents with explicit `CreatedUtc`
+values: `p-old` (2 chunks, January) and `p-new` (3 chunks, June), tagged
+`parentKey` and with `DocumentId` equal to the parent. The first two `p-new`
+chunks duplicate `p-old`'s in vector and text, and `p-old` is written first, so
+without recency `p-old` wins every tie on id, and recency can be shown to flip
+it. Because fusion is rank-based, the duplicate trails by one rank in each leg,
+so the tie-break case uses `RrfK = 1` and `RecencyWeight = 1.0`; the formula case
+checks every score against `((1-w)/(k+vr) + w/(k+tr) + r/(k+rr)) * (k+1)/(1+r)`.
+`p-loose` has neither a `DocumentId` nor the tag, to exercise the
+`DocumentKey` fallback, and `m-two` / `m-one` share two and one terms of
+"alpha beta" for `MinimumShouldMatch`.
 
 ## Retrieval-quality and performance verification
 
@@ -107,10 +130,27 @@ dotnet test src/Test.Nunit
 RECALLDB_ENDPOINT=http://127.0.0.1:8600 RECALLDB_APIKEY=recalldbadmin dotnet test src/Test.Nunit
 ```
 
-## RecallDb.Sdk.TestHarness
+## SDK harnesses
 
-SDK integration tests (standalone console app).
+Each SDK has a standalone integration harness. All three take the endpoint and
+bearer token as positional arguments (defaults `http://127.0.0.1:8600` and
+`recalldbadmin`), create their own tenant or collections, and clean up.
 
 ```bash
-dotnet run --project sdk/csharp/RecallDb.Sdk.TestHarness
+dotnet run --project sdk/csharp/RecallDb.Sdk.TestHarness -- http://127.0.0.1:8600 recalldbadmin
+node sdk/js/test-harness.js http://127.0.0.1:8600 recalldbadmin
+PYTHONDONTWRITEBYTECODE=1 python sdk/python/test_harness.py http://127.0.0.1:8600 recalldbadmin
 ```
+
+Besides the CRUD, enumeration, and search cases that mirror Test.Automated, each
+harness covers the 0.2.2 SDK surface: server info and `supports`, the hybrid
+round trip fields, a search `Notice`, `IncludeEmbeddings`, collapse by tag with
+recency, vector-only collapse, `MinimumShouldMatch`, structured errors for both
+server error shapes, a request timeout (a delaying test handler in C#, a local
+stub server in JavaScript and Python), cancellation, a document key and id
+containing `#`, `?`, `/`, `%`, and a space, and `exists` throwing on 401 while
+returning false on 404. The C# harness also checks that an injected
+`HttpClient` is left usable and unmodified, and that a `DelegatingHandler` sees
+compact JSON and a per-request `Authorization` header. These cases need a server
+that reports the `search.collapse`, `search.hybrid.recency`, and
+`search.fulltext.minimum-should-match` capabilities.

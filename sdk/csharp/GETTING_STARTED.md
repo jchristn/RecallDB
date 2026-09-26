@@ -20,7 +20,7 @@ dotnet run -- <endpoint> <api_key>
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `endpoint` | `http://localhost:8600` | RecallDB server URL |
+| `endpoint` | `http://127.0.0.1:8600` | RecallDB server URL |
 | `api_key` | `recalldbadmin` | Bearer token for authentication |
 
 ### Examples
@@ -56,16 +56,30 @@ A minimal hybrid RRF request body:
 }
 ```
 
+## SDK 0.2.2 Coverage
+
+A group of cases prefixed `SDK 0.2.2:` creates its own collection in the test tenant (two chunked parents tagged `parentKey` with fixed write times, and two documents for minimum-should-match) and deletes it at the end. They cover:
+
+- `GetServerInfoAsync` and `SupportsAsync` (capabilities, caching, refresh)
+- The hybrid round trip (`Strategy`, `RrfK`, `CandidatePool`, `MatchMode`, `TextWeight`; `VectorScore`, `VectorRank`, `TextRank`, `TextScore` on hits), a search `Notice`, and `IncludeEmbeddings`
+- Collapse by tag with recency (one hit per `GroupKey`, `GroupHits`, `RecencyRank`), vector-only collapse, and `MinimumShouldMatch`
+- `RecallDbException.ErrorCode` and `ErrorMessage` for both server error shapes, and a 400 for `RecencyWeight` 1.5
+- An injected `HttpClient` (left usable and unmodified after `Dispose`), a `DelegatingHandler` that sees compact JSON and a per-request `Authorization` header, `Timeout` (`TimeoutException`), and caller cancellation (`OperationCanceledException`)
+- A document key and id containing `#`, `?`, `/`, `%`, and a space (create, read, exists, search by id, delete)
+- `...ExistsAsync` returning `false` for 404 and throwing for 401
+
+These cases need a server that reports the `search.collapse`, `search.hybrid.recency`, and `search.fulltext.minimum-should-match` capabilities.
+
 ## Output
 
-The test harness runs 100+ integration tests and outputs results in this format:
+The test harness runs 160+ integration tests and outputs results in this format:
 
 ```
 =========================================
   RecallDB Integration Test Harness
   (C# SDK)
 =========================================
-  Endpoint : http://localhost:8600
+  Endpoint : http://127.0.0.1:8600
   API Key  : recalldbadmin
 =========================================
 

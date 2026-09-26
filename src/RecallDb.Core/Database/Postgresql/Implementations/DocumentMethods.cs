@@ -12,6 +12,7 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
     using RecallDb.Core.Database.Interfaces;
     using RecallDb.Core.Database.Postgresql.Queries;
     using RecallDb.Core.Enums;
+    using RecallDb.Core.Helpers;
     using RecallDb.Core.Models;
 
     /// <summary>
@@ -82,9 +83,11 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                 FormatBinaryData(document.BinaryData) + ", " +
                 FormatEmbeddings(document.Embeddings) + ", " +
                 "'" + _Driver.FormatDateTime(document.CreatedUtc) + "'" +
-                ")";
+                ") RETURNING id, created_utc";
 
-            await _Driver.ExecuteQueryAsync(query, true, token).ConfigureAwait(false);
+            // Read back the generated id and the stored timestamp, so the response matches a later read.
+            DataTable result = await _Driver.ExecuteQueryAsync(query, true, token).ConfigureAwait(false);
+            if (result != null && result.Rows.Count > 0) ApplyInsertedRow(document, result.Rows[0]);
 
             if (_Logging != null) _Logging.Debug(_Header + "created document " + document.DocumentKey + " in " + collectionId);
             return document;
@@ -105,16 +108,15 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
 
             string tableName = "collection_" + SanitizeTableName(collectionId);
 
-            List<string> queries = new List<string>();
+            // One multi-row INSERT, so the batch is atomic and RETURNING gives every row's generated id.
+            List<string> rows = new List<string>();
 
             foreach (DocumentRecord document in documents)
             {
                 CalculateContentLength(document);
 
-                string query =
-                    "INSERT INTO " + tableName + " " +
-                    "(document_key, document_id, content_length, etag, sha256, position, content_type, content, binary_data, embeddings, created_utc) " +
-                    "VALUES (" +
+                string row =
+                    "(" +
                     "'" + _Driver.Sanitize(document.DocumentKey) + "', " +
                     _Driver.FormatNullableString(document.DocumentId) + ", " +
                     document.ContentLength.ToString(CultureInfo.InvariantCulture) + ", " +
@@ -128,10 +130,29 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                     "'" + _Driver.FormatDateTime(document.CreatedUtc) + "'" +
                     ")";
 
-                queries.Add(query);
+                rows.Add(row);
             }
 
-            await _Driver.ExecuteQueriesAsync(queries, true, token).ConfigureAwait(false);
+            string query =
+                "INSERT INTO " + tableName + " " +
+                "(document_key, document_id, content_length, etag, sha256, position, content_type, content, binary_data, embeddings, created_utc) " +
+                "VALUES " + string.Join(", ", rows) + " RETURNING id, document_key, created_utc";
+
+            DataTable result = await _Driver.ExecuteQueryAsync(query, true, token).ConfigureAwait(false);
+            if (result != null)
+            {
+                Dictionary<string, DataRow> byKey = new Dictionary<string, DataRow>(StringComparer.Ordinal);
+                foreach (DataRow row in result.Rows)
+                {
+                    string key = DataTableHelper.GetStringValue(row, "document_key");
+                    if (key != null) byKey[key] = row;
+                }
+
+                foreach (DocumentRecord document in documents)
+                {
+                    if (byKey.TryGetValue(document.DocumentKey, out DataRow inserted)) ApplyInsertedRow(document, inserted);
+                }
+            }
 
             if (_Logging != null) _Logging.Debug(_Header + "created batch of " + documents.Count + " documents in " + collectionId);
             return documents;
@@ -535,6 +556,12 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
         #endregion
 
         #region Private-Methods
+
+        private static void ApplyInsertedRow(DocumentRecord document, DataRow row)
+        {
+            document.Id = DataTableHelper.GetLongValue(row, "id");
+            document.CreatedUtc = DataTableHelper.GetDateTimeValue(row, "created_utc");
+        }
 
         private void CalculateContentLength(DocumentRecord document)
         {

@@ -587,7 +587,7 @@ namespace RecallDb.Server
                 openApi => openApi
                     .WithTag("Health")
                     .WithSummary("Health check")
-                    .WithDescription("Returns server name, version, and uptime in milliseconds.")
+                    .WithDescription("Returns server name, version, uptime in milliseconds, and Capabilities: the search features this server supports (search.hybrid.rrf, search.hybrid.recency, search.collapse, search.include-embeddings, search.fulltext.minimum-should-match). Servers that report the same version can differ in capabilities, so clients should check this list before relying on a feature.")
                     .WithOperationId("healthGet")
                     .WithResponse(200, OpenApiResponseMetadata.Create("Server health information")));
 
@@ -1302,6 +1302,11 @@ namespace RecallDb.Server
                         + "Linear (normalized score blend over the union), or Filter (legacy; the text query is a required filter and scores are the raw blend). "
                         + "FullText.TextWeight is the text leg's share in every strategy. Fused results carry VectorScore, VectorRank, and TextRank; "
                         + "TotalRecords for a fused search is at most 2 x Hybrid.CandidatePool. "
+                        + "Hybrid.RecencyWeight (0.0-1.0, default 0, Rrf only) fuses a third signal that ranks candidates by newest CreatedUtc per collapse group; hits carry RecencyRank. "
+                        + "Collapse (Field DocumentId or Tag with TagKey; CandidatePool for single-leg searches) returns one hit per group, its best-scoring chunk, with GroupKey and GroupHits, "
+                        + "and MaxResults, TotalRecords, and continuation tokens count groups; not supported with Hybrid.Strategy Filter. "
+                        + "FullText.MinimumShouldMatch (1-3, default 1, MatchMode Any only) requires that many distinct query terms. "
+                        + "Check GET / Capabilities before relying on these options. "
                         + "Filter results by labels, tags, date ranges, terms, and document IDs.")
                     .WithOperationId("search")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
@@ -1455,13 +1460,10 @@ namespace RecallDb.Server
 
         private static async Task<object> HealthGetRoute(ApiRequest req)
         {
-            double uptimeMs = (DateTime.UtcNow - _StartTimeUtc).TotalMilliseconds;
-            return new
-            {
-                Name = "RecallDB",
-                Version = _Version,
-                UptimeMs = uptimeMs
-            };
+            HealthInfo info = new HealthInfo();
+            info.Version = _Version;
+            info.UptimeMs = (DateTime.UtcNow - _StartTimeUtc).TotalMilliseconds;
+            return info;
         }
 
         private static async Task<object> HealthHeadRoute(ApiRequest req)

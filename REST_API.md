@@ -65,10 +65,27 @@ Health check. No authentication required.
 ```json
 {
   "Name": "RecallDB",
-  "Version": "0.2.0",
-  "UptimeMs": 123456.78
+  "Version": "0.2.1",
+  "UptimeMs": 123456.78,
+  "Capabilities": [
+    "search.hybrid.rrf",
+    "search.hybrid.recency",
+    "search.collapse",
+    "search.include-embeddings",
+    "search.fulltext.minimum-should-match"
+  ]
 }
 ```
+
+`Capabilities` lists the search features this server honors. Servers that report the same `Version` can differ, so check this list before relying on a feature. Older servers omit the field and silently ignore request fields they do not know, so a missing capability means the field will have no effect rather than produce an error.
+
+| Capability | Meaning |
+|------------|---------|
+| `search.hybrid.rrf` | Hybrid search is the rank-fused union of the vector and text legs (not the legacy text filter) |
+| `search.hybrid.recency` | `Hybrid.RecencyWeight` is honored |
+| `search.collapse` | `SearchQuery.Collapse` is honored |
+| `search.include-embeddings` | `SearchQuery.IncludeEmbeddings` is honored |
+| `search.fulltext.minimum-should-match` | `FullText.MinimumShouldMatch` is honored |
 
 ### `HEAD /`
 
@@ -1407,6 +1424,39 @@ Perform vector similarity, full-text, or hybrid search within a collection. Supp
 
 The example above is a hybrid search because it supplies both `Vector.Embeddings` and a non-blank `FullText.Query`. Drop `FullText` for a vector-only search, drop `Vector` for a full-text-only search, and leave out `Hybrid` to take the RRF defaults. [Search Modes](#search-modes) explains how each mode scores documents.
 
+**Request with collapse and recency**
+
+A hybrid search over chunked documents that returns one hit per parent (grouped by the `parentKey` tag) and gives newer parents a small boost:
+
+```json
+{
+  "Vector": {
+    "SearchType": "CosineSimilarity",
+    "Embeddings": [0.0123, -0.0456, 0.0789]
+  },
+  "FullText": {
+    "Query": "how do I rotate the signing key",
+    "MatchMode": "Any",
+    "TextWeight": 0.5
+  },
+  "Hybrid": {
+    "Strategy": "Rrf",
+    "RrfK": 60,
+    "CandidatePool": 40,
+    "RecencyWeight": 0.1
+  },
+  "Collapse": {
+    "Field": "Tag",
+    "TagKey": "parentKey"
+  },
+  "LabelFilter": { "Required": ["cat_4kQ9mZ2x"] },
+  "IncludeEmbeddings": false,
+  "MaxResults": 10
+}
+```
+
+For a vector-only or full-text-only search, send one leg plus `Collapse` (optionally with `Collapse.CandidatePool`) and no `Hybrid`.
+
 **Response `200`**
 
 ```json
@@ -1464,6 +1514,45 @@ The example above is a hybrid search because it supplies both `Vector.Embeddings
 }
 ```
 
+**Response `200` (collapse and recency)**
+
+`TotalRecords`, `RecordsRemaining` and the continuation token count groups, and each hit is the best-scoring chunk of its group:
+
+```json
+{
+  "Success": true,
+  "MaxResults": 10,
+  "TotalRecords": 23,
+  "RecordsRemaining": 13,
+  "EndOfResults": false,
+  "ContinuationToken": "10",
+  "TotalMs": 31.4,
+  "Documents": [
+    {
+      "Id": 4182,
+      "DocumentKey": "mem_7Tn2QwX-c2",
+      "DocumentId": "signing-key-rotation",
+      "Position": 2,
+      "ContentType": "Text",
+      "Content": "Rotate the signing key with ...",
+      "CreatedUtc": "2026-09-20T14:02:11.482113Z",
+      "Score": 0.98,
+      "VectorScore": 0.7856,
+      "TextScore": 0.0613,
+      "VectorRank": 1,
+      "TextRank": 3,
+      "RecencyRank": 5,
+      "GroupKey": "mem_7Tn2QwX",
+      "GroupHits": 3,
+      "Labels": ["cat_4kQ9mZ2x"],
+      "Tags": { "parentKey": "mem_7Tn2QwX", "ordinal": "2", "title": "Signing key rotation" }
+    }
+  ]
+}
+```
+
+The `Score` follows the [Recency](#recency) formula: `0.5/61 + 0.5/63 + 0.1/65 = 0.017672`, the best achievable raw score is `1.1/61 = 0.018033`, and their ratio is `0.98`.
+
 ---
 
 ## Search Modes
@@ -1510,6 +1599,8 @@ In `Rrf` and `Linear` results, `Score` is the fused score, `VectorScore` is the 
 
 A `Hybrid` object on a search that lacks one of the legs is ignored, and the response's `Notice` says so.
 
+**Minimum should match.** With `FullText.MatchMode = Any`, `FullText.MinimumShouldMatch` (1-3, default 1) sets how many distinct query terms a document must contain to match. At `1` it is plain `Any` matching. At `2` or `3` a document must contain at least that many of the query's terms (the text query becomes the OR of every conjunction of that many terms), which trims weak single-term matches and cuts ranking work on large collections. A query with fewer distinct terms than the value requires all of them, and only the first 16 distinct terms, in query order, are considered. It applies to full-text-only searches and to the text leg of a hybrid search. A value above 1 with any other match mode is rejected with a 400.
+
 **Notices.** `SearchResult.Notice` is omitted unless the server has something to say about how the search ran:
 
 | Notice | When |
@@ -1518,8 +1609,42 @@ A `Hybrid` object on a search that lacks one of the legs is ignored, and the res
 | `The text query contained no searchable terms; results are ranked by the vector leg only.` | The same situation in a hybrid search. |
 | `Full-text language '<name>' is not served by the full-text index; the text match was evaluated without an index.` | `FullText.Language` is something other than `english`. Results are correct, but the text match cannot use the GIN index. |
 | `Hybrid options were ignored because the search does not include both a vector query and a text query.` | `Hybrid` was sent with only one leg. |
+| `Hybrid.RecencyWeight applies only to the Rrf strategy and was ignored.` | `Hybrid.RecencyWeight` above 0 on a hybrid `Linear` or `Filter` search. |
+| `Collapse found N groups in a candidate pool of P; raise the candidate pool for more.` | A collapsed search whose pool filled up before it found enough groups for the page. |
 
 Notices are informational and their wording may change, so don't branch on the text.
+
+### Recency
+
+`Hybrid.RecencyWeight` (call it `r`, 0.0-1.0, default `0` meaning off) adds a third ranked list to `Rrf` fusion: how recently each candidate was written. Candidates are grouped by a recency key, which is the collapse group when `Collapse` is set and the document itself otherwise. Keys are ranked newest `CreatedUtc` first (the newest chunk in a group counts), with ties broken by the key in byte order, and every candidate in a key shares that `RecencyRank`. The score becomes:
+
+```
+raw   = (1 - w) / (k + VectorRank) + w / (k + TextRank) + r / (k + RecencyRank)
+Score = raw * (k + 1) / ((1 - w) + w + r)
+```
+
+A missing rank contributes 0, and the divisor keeps `Score` in `[0, 1]`. With `r = 0` the recency term and divisor are not emitted, so the SQL and scores are exactly what they are without the field. Hits carry `RecencyRank` (1 = newest) when `r > 0`.
+
+Because fusion is rank-based, recency competes on ranks, not on raw relevance. A small weight such as `0.1` mostly breaks near-ties in favor of newer content rather than lifting a weak, recent match over a strong, older one. Larger weights push harder, and at `1.0` recency counts as much as both legs together.
+
+`RecencyWeight` is used only by `Rrf`. `Linear` and `Filter` ignore it and the response carries a `Notice`. Vector-only and full-text-only searches ignore `Hybrid` entirely.
+
+### Collapse
+
+`SearchQuery.Collapse` returns one hit per group instead of one hit per chunk, which is what you want when a long document is stored as several chunks and each document should appear once. `Collapse.Field` picks the group key:
+
+- `DocumentId` (default): the `DocumentId` column. A document with a null or empty `DocumentId` is its own group, keyed by its `DocumentKey`.
+- `Tag`: the value of the tag named `Collapse.TagKey` (required). If a document carries that tag more than once, the smallest value is used. A document without the tag, or with an empty value, is its own group, keyed by its `DocumentKey`.
+
+The server retrieves a candidate pool, forms groups within it, and keeps each group's best-scoring candidate (ties broken by `Id`) as the representative. The representative's own fields are returned (content, position, per-leg scores and ranks), plus `GroupKey` and `GroupHits` (the number of candidates in the group, including the representative). Groups are ordered by `SortOrder` applied to their representatives.
+
+- `MaxResults`, `TotalRecords`, `RecordsRemaining` and continuation tokens all count groups, not chunks.
+- `SearchQuery.MinimumScore` and `MaximumScore` apply to the representative, after collapse. In vector-only searches the vector score and distance thresholds are applied in SQL. `FullText.MinimumScore` keeps its meaning (it gates the text leg before fusion).
+- `IncludeNeighbors` and `IncludeEmbeddings` work on the representative.
+- The pool size is `Collapse.CandidatePool` for vector-only and full-text-only searches. Hybrid searches use `Hybrid.CandidatePool` when it is set and `Collapse.CandidatePool` otherwise. Either way the default is `max(MaxResults * 4, 100)`, capped at 1000.
+- When a leg filled the pool and the pool held fewer groups than the page needs (offset plus `MaxResults`), the response carries a `Notice` asking for a larger pool. It is not an error.
+
+Collapse works with vector-only, full-text-only, and hybrid `Rrf` and `Linear` searches. Hybrid `Filter` is rejected with a 400, and so is a collapse request with neither a vector nor a text query.
 
 ### Search Validation Errors
 
@@ -1538,6 +1663,12 @@ The search endpoint answers `400 Bad Request` with a message naming the field wh
 | `Hybrid.Strategy` | One of `Rrf`, `Linear`, `Filter` |
 | `Hybrid.RrfK` | 1-100000 |
 | `Hybrid.CandidatePool` | 1-10000, or null for the default |
+| `Hybrid.RecencyWeight` | 0.0-1.0 |
+| `FullText.MinimumShouldMatch` | 1-3. Above 1 only with `MatchMode` `Any` (`FullText.MinimumShouldMatch applies only to MatchMode Any.`) |
+| `Collapse.Field` | One of `DocumentId`, `Tag` |
+| `Collapse.TagKey` | Required when `Field` is `Tag` (`Collapse.TagKey is required when Collapse.Field is Tag.`); at most 256 characters |
+| `Collapse.CandidatePool` | 1-10000, or null for the default |
+| `Collapse` | Needs a vector or a text query (`Collapse requires a vector or a full-text query.`) and cannot be combined with hybrid `Filter` (`Collapse is not supported with Hybrid.Strategy Filter.`) |
 
 ---
 
@@ -1620,6 +1751,7 @@ When `IncludeNeighbors` is set to `N` in the search query, each matched document
 | `MaxResults` | int | 10 | Results per page (1-1000) |
 | `IncludeNeighbors` | int (nullable) | null | Number of neighboring chunks before and after each matched chunk to include (0-10). When set, each document includes a Neighbors array. |
 | `IncludeEmbeddings` | bool | false | Return each hit's stored embedding vector in `Embeddings`. Off by default to keep responses small |
+| `Collapse` | CollapseQuery | null | Return one hit per group (by `DocumentId` or by a tag value) instead of one per chunk. Counts and pagination then count groups (see [Collapse](#collapse)) |
 | `ContinuationToken` | string | null | Token for next page of results |
 
 ### FullTextQuery Fields
@@ -1633,6 +1765,7 @@ When `IncludeNeighbors` is set to `N` in the search query, each matched document
 | `Normalization` | int | `32` | ts_rank normalization bitmask (0-63; common values 0, 1, 2, 32) |
 | `MinimumScore` | double | null | Minimum text relevance score. Excludes documents in full-text and `Filter` searches; gates only the text leg in `Rrf` and `Linear` |
 | `TextWeight` | double | `0.5` | The text leg's share in hybrid search (0.0-1.0); the vector leg gets `1 - TextWeight`. Out-of-range values are rejected |
+| `MinimumShouldMatch` | int | `1` | Minimum number of distinct query terms a document must contain (1-3). Only with `MatchMode` `Any`; applies to full-text-only searches and the hybrid text leg. Only the first 16 distinct terms are considered |
 
 ### HybridQuery Fields
 
@@ -1643,6 +1776,17 @@ Used only when the search has both a vector query and a text query. Otherwise it
 | `Strategy` | string | `Rrf` | How the legs are combined (see HybridStrategyEnum) |
 | `RrfK` | int | `60` | RRF constant k (1-100000). Larger values flatten the gap between adjacent ranks. Only used by `Rrf` |
 | `CandidatePool` | int (nullable) | null | Candidates each leg retrieves before fusion (1-10000). Null means `max(MaxResults * 4, 100)`, capped at 1000. `TotalRecords` is at most `2 * CandidatePool` for `Rrf` and `Linear` |
+| `RecencyWeight` | double | `0` | Weight of the recency signal (0.0-1.0; 0 is off). Only used by `Rrf`; `Linear` and `Filter` ignore it with a `Notice` (see [Recency](#recency)) |
+
+### CollapseQuery Fields
+
+Used when `SearchQuery.Collapse` is set (see [Collapse](#collapse)).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `Field` | string | `DocumentId` | What to group by (see CollapseFieldEnum) |
+| `TagKey` | string | null | Name of the tag whose value is the group key. Required when `Field` is `Tag`, ignored otherwise. At most 256 characters |
+| `CandidatePool` | int (nullable) | null | Candidates retrieved before collapsing (1-10000). Used by vector-only and full-text-only searches; hybrid searches use `Hybrid.CandidatePool` when set and this value otherwise. Null means `max(MaxResults * 4, 100)`, capped at 1000 |
 
 ### SearchResult Fields
 
@@ -1652,7 +1796,7 @@ Used only when the search has both a vector query and a text query. Otherwise it
 | `MaxResults` | int | Page size that was applied |
 | `ContinuationToken` | string | Token for the next page, or null at the end |
 | `EndOfResults` | bool | True when there are no more pages |
-| `TotalRecords` | long | Total matching records. For hybrid `Rrf` and `Linear`, the size of the fused candidate set (at most `2 * CandidatePool`) |
+| `TotalRecords` | long | Total matching records. For hybrid `Rrf` and `Linear`, the size of the fused candidate set (at most `2 * CandidatePool`). With `Collapse`, the number of groups |
 | `RecordsRemaining` | long | Records left after this page |
 | `Documents` | DocumentRecord[] | The hits for this page |
 | `Notice` | string | Informational message about how the search ran (see [Search Modes](#search-modes)). Omitted when null |
@@ -1669,6 +1813,9 @@ Each entry in `SearchResult.Documents` is a `DocumentRecord` with these search-s
 | `VectorRank` | int (nullable) | hybrid `Rrf`, `Linear` | 1-based rank in the vector leg; null when outside the leg's candidates |
 | `TextScore` | double (nullable) | full-text, hybrid | Raw `ts_rank` / `ts_rank_cd` value. In hybrid `Rrf` and `Linear` it is null for documents that did not match the text query |
 | `TextRank` | int (nullable) | hybrid `Rrf`, `Linear` | 1-based rank in the text leg; null when the document is not a text match |
+| `RecencyRank` | int (nullable) | hybrid `Rrf` with `RecencyWeight` above 0 | 1-based rank of the hit's recency key among the candidates, 1 = newest. Every candidate in one collapse group shares it |
+| `GroupKey` | string | when `Collapse` is set | The group this hit represents: the `DocumentId` or tag value, or the hit's `DocumentKey` when it has none |
+| `GroupHits` | int (nullable) | when `Collapse` is set | Number of candidates in the group, including this hit |
 | `Embeddings` | float[] | when `IncludeEmbeddings` is true | The stored vector. Null by default |
 | `Neighbors` | array | when `IncludeNeighbors` is set | Surrounding chunks (see [Neighbor Retrieval](#neighbor-retrieval)) |
 
@@ -1760,6 +1907,13 @@ Each entry in `SearchResult.Documents` is a `DocumentRecord` with these search-s
 | `Rrf` | Default. Weighted Reciprocal Rank Fusion over the union of both legs. Scores normalized to [0, 1] |
 | `Linear` | Normalized score blend over the union of both legs. Scores in [0, 1] |
 | `Filter` | Legacy. The text query is a required filter and the score is the raw `(1 - w) * vector + w * text` blend |
+
+**CollapseFieldEnum** (used in `CollapseQuery.Field`):
+
+| Value | Description |
+|-------|-------------|
+| `DocumentId` | Default. Group by `DocumentId`; a document without one is its own group, keyed by `DocumentKey` |
+| `Tag` | Group by the value of the tag named `Collapse.TagKey`; a document without that tag (or with an empty value) is its own group, keyed by `DocumentKey` |
 
 **ContentTypeEnum** — used in `DocumentRecord.ContentType`:
 

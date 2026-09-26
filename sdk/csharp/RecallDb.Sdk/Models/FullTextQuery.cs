@@ -9,7 +9,7 @@ namespace RecallDb.Sdk.Models
         /// The search text to match against document content.
         /// Processed by PostgreSQL's text search parser (stemming, stop word removal).
         /// </summary>
-        public string Query { get; set; }
+        public string? Query { get; set; }
 
         /// <summary>
         /// Text search ranking function to use.
@@ -56,6 +56,16 @@ namespace RecallDb.Sdk.Models
         /// Default: 0.5 (equal weighting).
         /// </summary>
         public double TextWeight { get; set; }
+
+        /// <summary>
+        /// Minimum number of distinct query terms a document must contain to match, for MatchMode Any.
+        /// With 2 or 3, only documents containing at least that many of the query's terms match, which cuts ranking
+        /// work on large collections; a query with fewer terms requires all of them. Only the first 16 distinct terms
+        /// are considered. Rejected by the server for other match modes.
+        /// Default: null (omitted; the server default 1 is plain Any matching). Minimum: 1. Maximum: 3.
+        /// Requires the server capability search.fulltext.minimum-should-match; older servers ignore it silently.
+        /// </summary>
+        public int? MinimumShouldMatch { get; set; }
 
         /// <summary>
         /// Instantiate.

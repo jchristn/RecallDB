@@ -293,6 +293,55 @@ namespace RecallDb.Core.Models
         }
 
         /// <summary>
+        /// 1-based rank of this document's recency key among the candidates, 1 = newest (transient, populated
+        /// during hybrid Rrf search with Hybrid.RecencyWeight above 0). Every candidate of one collapse group
+        /// shares a rank. Null otherwise.
+        /// </summary>
+        public int? RecencyRank
+        {
+            get
+            {
+                return _RecencyRank;
+            }
+            set
+            {
+                _RecencyRank = value;
+            }
+        }
+
+        /// <summary>
+        /// The group this hit represents (transient, populated when SearchQuery.Collapse is set): the DocumentId
+        /// or tag value it was grouped by, or its DocumentKey when it has none. Null otherwise.
+        /// </summary>
+        public string GroupKey
+        {
+            get
+            {
+                return _GroupKey;
+            }
+            set
+            {
+                _GroupKey = value;
+            }
+        }
+
+        /// <summary>
+        /// Number of candidates in this hit's group, including this hit (transient, populated when
+        /// SearchQuery.Collapse is set). Null otherwise.
+        /// </summary>
+        public int? GroupHits
+        {
+            get
+            {
+                return _GroupHits;
+            }
+            set
+            {
+                _GroupHits = value;
+            }
+        }
+
+        /// <summary>
         /// Labels associated with this document (populated by the server layer, not stored in the documents table).
         /// </summary>
         public List<string> Labels
@@ -360,6 +409,9 @@ namespace RecallDb.Core.Models
         private double? _VectorScore = null;
         private int? _VectorRank = null;
         private int? _TextRank = null;
+        private int? _RecencyRank = null;
+        private string _GroupKey = null;
+        private int? _GroupHits = null;
         private List<DocumentRecord> _Neighbors = null;
         private List<string> _Labels = new List<string>();
         private Dictionary<string, string> _Tags = new Dictionary<string, string>();
@@ -425,6 +477,11 @@ namespace RecallDb.Core.Models
             doc.VectorScore = DataTableHelper.GetNullableDoubleValue(row, "vector_score");
             doc.VectorRank = DataTableHelper.GetNullableIntValue(row, "vector_rank");
             doc.TextRank = DataTableHelper.GetNullableIntValue(row, "text_rank");
+
+            // Recency and collapse columns; absent (null) unless the search asked for them
+            doc.RecencyRank = DataTableHelper.GetNullableIntValue(row, "recency_rank");
+            doc.GroupKey = DataTableHelper.GetStringValue(row, "group_key");
+            doc.GroupHits = DataTableHelper.GetNullableIntValue(row, "group_hits");
 
             return doc;
         }

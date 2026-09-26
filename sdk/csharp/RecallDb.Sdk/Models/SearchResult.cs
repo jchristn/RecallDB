@@ -21,7 +21,7 @@ namespace RecallDb.Sdk.Models
         /// Continuation token for retrieving the next page of results.
         /// Null when no more results are available.
         /// </summary>
-        public string ContinuationToken { get; set; }
+        public string? ContinuationToken { get; set; }
 
         /// <summary>
         /// Indicates whether the end of results has been reached.
@@ -52,7 +52,7 @@ namespace RecallDb.Sdk.Models
         /// Informational message from the server about how the search was evaluated, for example when the
         /// text query contained no searchable terms or hybrid options were ignored. Null when there is nothing to report.
         /// </summary>
-        public string Notice { get; set; }
+        public string? Notice { get; set; }
 
         /// <summary>
         /// Instantiate.

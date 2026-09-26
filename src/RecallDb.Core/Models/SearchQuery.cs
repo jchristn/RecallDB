@@ -155,6 +155,23 @@ namespace RecallDb.Core.Models
         }
 
         /// <summary>
+        /// Collapse options: return one hit per group (by DocumentId or by a tag value) instead of one per chunk.
+        /// When set, MaxResults, TotalRecords, and continuation tokens count groups.
+        /// Default: null (no collapse).
+        /// </summary>
+        public CollapseQuery Collapse
+        {
+            get
+            {
+                return _Collapse;
+            }
+            set
+            {
+                _Collapse = value;
+            }
+        }
+
+        /// <summary>
         /// Terms filter for including or excluding documents by content terms.
         /// </summary>
         public TermsFilter Terms
@@ -317,6 +334,7 @@ namespace RecallDb.Core.Models
         private VectorQuery _Vector = null;
         private FullTextQuery _FullText = null;
         private HybridQuery _Hybrid = null;
+        private CollapseQuery _Collapse = null;
         private TermsFilter _Terms = null;
         private int? _IncludeNeighbors = null;
         private double? _MinimumScore = null;

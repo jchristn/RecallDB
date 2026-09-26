@@ -1,10 +1,10 @@
 # Connecting Cursor to RecallDB (MCP)
 
-RecallDB exposes an in-process MCP server over **Streamable HTTP** at `http://localhost:8620/mcp`. This guide connects [Cursor](https://cursor.com) to it.
+RecallDB exposes an in-process MCP server over **Streamable HTTP** at `http://127.0.0.1:8620/mcp`. This guide connects [Cursor](https://cursor.com) to it.
 
 ## Prerequisites
 
-- A running RecallDB server (`curl http://localhost:8620/` returns 200).
+- A running RecallDB server (`curl http://127.0.0.1:8620/` returns 200).
 - A bearer token: your admin API key (default `recalldbadmin`) or a credential bearer token.
 
 ## Automatic setup (recommended)
@@ -23,7 +23,7 @@ Create `.cursor/mcp.json` in your project root (project scope) or `~/.cursor/mcp
 {
   "mcpServers": {
     "recalldb": {
-      "url": "http://localhost:8620/mcp",
+      "url": "http://127.0.0.1:8620/mcp",
       "headers": {
         "Authorization": "Bearer recalldbadmin"
       }

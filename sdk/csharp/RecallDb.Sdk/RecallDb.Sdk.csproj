@@ -3,10 +3,9 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>disable</ImplicitUsings>
-    <Nullable>disable</Nullable>
+    <Nullable>enable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>1591</NoWarn>
-    <Version>0.2.1</Version>
+    <Version>0.2.2</Version>
 
     <!-- NuGet package metadata -->
     <PackageId>RecallDb.Sdk</PackageId>
@@ -22,7 +21,7 @@
     <RepositoryType>git</RepositoryType>
     <PackageTags>recalldb;vector-database;pgvector;postgresql;embeddings;vector-search;semantic-search;rag;sdk;client</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>Aligns the SDK to server v0.2.1, which adds end-to-end OpenTelemetry metrics and distributed tracing across the HTTP, MCP, application, search, and storage layers. See CHANGELOG.md for details.</PackageReleaseNotes>
+    <PackageReleaseNotes>SDK 0.2.2: single-call hybrid search options (Hybrid Strategy, RrfK, CandidatePool, RecencyWeight), result collapse (Collapse), FullText MatchMode and MinimumShouldMatch, stored vectors on request (IncludeEmbeddings), per-hit VectorScore, VectorRank, TextRank, RecencyRank, GroupKey, and GroupHits, search Notices, typed server info with capabilities (GetServerInfoAsync, SupportsAsync), constructors that accept an HttpClient or HttpMessageHandler, a per-request Timeout, cancellation of response reads, compact request JSON, URL-encoding of every path segment, structured errors (ErrorCode, ErrorMessage), string constants, and nullable annotations. Behavior change: Exists methods now throw on any status other than 200 or 404. See CHANGELOG.md for details.</PackageReleaseNotes>
 
     <!-- Symbol package + source link for a first-class debugging experience -->
     <IncludeSymbols>true</IncludeSymbols>

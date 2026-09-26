@@ -10,32 +10,32 @@ namespace RecallDb.Sdk.Models
         /// <summary>
         /// User ID.
         /// </summary>
-        public string Id { get; set; }
+        public string? Id { get; set; }
 
         /// <summary>
         /// Tenant ID.
         /// </summary>
-        public string TenantId { get; set; }
+        public string? TenantId { get; set; }
 
         /// <summary>
         /// Email address.
         /// </summary>
-        public string Email { get; set; }
+        public string? Email { get; set; }
 
         /// <summary>
         /// SHA256 hash of the password.
         /// </summary>
-        public string PasswordSha256 { get; set; }
+        public string? PasswordSha256 { get; set; }
 
         /// <summary>
         /// First name.
         /// </summary>
-        public string FirstName { get; set; }
+        public string? FirstName { get; set; }
 
         /// <summary>
         /// Last name.
         /// </summary>
-        public string LastName { get; set; }
+        public string? LastName { get; set; }
 
         /// <summary>
         /// Whether the user is a global administrator.

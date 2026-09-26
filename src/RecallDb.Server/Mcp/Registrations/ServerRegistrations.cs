@@ -26,7 +26,7 @@ namespace RecallDb.Server.Mcp.Registrations
 
             server.RegisterInstrumentedTool(
                 "server/info",
-                "Returns the RecallDB server name, version, uptime, and the MCP Streamable HTTP endpoint. No authentication required.",
+                "Returns the RecallDB server name, version, uptime, search Capabilities (for example search.collapse, search.hybrid.recency), and the MCP Streamable HTTP endpoint. No authentication required.",
                 new
                 {
                     type = "object",

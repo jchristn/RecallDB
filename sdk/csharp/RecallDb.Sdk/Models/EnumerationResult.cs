@@ -22,7 +22,7 @@ namespace RecallDb.Sdk.Models
         /// Continuation token for retrieving the next page of results.
         /// Null when no more results are available.
         /// </summary>
-        public string ContinuationToken { get; set; }
+        public string? ContinuationToken { get; set; }
 
         /// <summary>
         /// Indicates whether the end of results has been reached.

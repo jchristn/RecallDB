@@ -2,6 +2,7 @@ namespace Test.Shared
 {
     using System;
     using System.Collections.Generic;
+    using System.Linq;
     using System.Net;
     using System.Net.Http;
     using System.Text.Json;
@@ -20,6 +21,7 @@ namespace Test.Shared
         {
             List<TestSuiteDescriptor> suites = new List<TestSuiteDescriptor>(BuildSuites());
             suites.Add(HybridSearchSuites.Suite);
+            suites.Add(SearchGroupingSuites.Suite);
             suites.Add(CollectionIntegritySuites.Suite);
             suites.Add(RecallDbMcpSuites.Suite);
             return suites;
@@ -54,6 +56,19 @@ namespace Test.Shared
                             JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
                             AssertTrue(json.TryGetProperty("Name", out JsonElement nameElem), "Response should contain Name");
                             AssertEqual("RecallDB", nameElem.GetString(), "Name");
+                        }),
+
+                        // 1b. Capabilities
+                        Case("HealthReportsCapabilities", "Connectivity: GET / reports every search capability", async ct =>
+                        {
+                            using HttpResponseMessage response = await GetAsync(AdminClient, "/").ConfigureAwait(false);
+                            AssertStatusCode(response, HttpStatusCode.OK);
+
+                            JsonElement json = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
+                            AssertTrue(json.TryGetProperty("Capabilities", out JsonElement caps) && caps.ValueKind == JsonValueKind.Array, "Response should contain a Capabilities array");
+                            List<string> names = caps.EnumerateArray().Select(c => c.GetString()).ToList();
+                            foreach (string expected in RecallDb.Core.SearchCapabilities.All)
+                                AssertTrue(names.Contains(expected), "Capabilities should contain " + expected);
                         }),
 
                         // 2. Connectivity HEAD
@@ -363,6 +378,14 @@ namespace Test.Shared
                             AssertTrue(json.TryGetProperty("DocumentKey", out JsonElement keyElem), "Response should contain DocumentKey");
                             TestDocumentKey = keyElem.GetString();
                             AssertNotNullOrEmpty(TestDocumentKey, "DocumentKey");
+
+                            // The create response carries the generated Id and stored CreatedUtc, matching a later read.
+                            long createdId = json.GetProperty("Id").GetInt64();
+                            AssertTrue(createdId > 0, "Create response should carry the generated Id, got " + createdId);
+                            using HttpResponseMessage readResp = await GetAsync(AdminClient, path + "/" + TestDocumentKey).ConfigureAwait(false);
+                            JsonElement read = await ReadResponse<JsonElement>(readResp).ConfigureAwait(false);
+                            AssertEqual(read.GetProperty("Id").GetInt64(), createdId, "Create and read Id");
+                            AssertEqual(read.GetProperty("CreatedUtc").GetString(), json.GetProperty("CreatedUtc").GetString(), "Create and read CreatedUtc");
                         }),
 
                         // 25. Document Read
@@ -432,12 +455,20 @@ namespace Test.Shared
                             AssertTrue(json.ValueKind == JsonValueKind.Array, "Response should be an array");
                             AssertEqual(3, json.GetArrayLength(), "Batch should create 3 documents");
 
-                            // Verify all documents were created by reading each one
+                            // Verify all documents were created by reading each one, and that the batch response
+                            // carries each document's generated Id
+                            Dictionary<string, long> createdIds = new Dictionary<string, long>();
+                            foreach (JsonElement created in json.EnumerateArray())
+                                createdIds[created.GetProperty("DocumentKey").GetString()] = created.GetProperty("Id").GetInt64();
+
                             foreach (string batchKey in TestBatchDocumentKeys)
                             {
                                 string readPath = "/v1.0/tenants/" + TestTenantId + "/collections/" + TestCollectionId + "/documents/" + batchKey;
                                 using HttpResponseMessage readResp = await GetAsync(AdminClient, readPath).ConfigureAwait(false);
                                 AssertStatusCode(readResp, HttpStatusCode.OK);
+                                JsonElement read = await ReadResponse<JsonElement>(readResp).ConfigureAwait(false);
+                                AssertTrue(createdIds[batchKey] > 0, "Batch response should carry the generated Id");
+                                AssertEqual(read.GetProperty("Id").GetInt64(), createdIds[batchKey], "Batch create and read Id");
                             }
                         }),
 

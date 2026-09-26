@@ -6,17 +6,21 @@
  *
  * Usage:
  *   node test-harness.js [endpoint] [api_key]
- *   node test-harness.js http://localhost:8600 recalldbadmin
+ *   node test-harness.js http://127.0.0.1:8600 recalldbadmin
  */
 
-const { RecallDbClient, RecallDbException } = require("./recalldb-sdk");
+const {
+    RecallDbClient, RecallDbException, RecallDbTimeoutError, VERSION,
+    Capabilities, HybridStrategies, FullTextMatchModes, VectorSearchTypes, SortOrders, CollapseFields
+} = require("./recalldb-sdk");
 const crypto = require("crypto");
+const http = require("http");
 
 // ---------------------------------------------------------------------------
 // Globals
 // ---------------------------------------------------------------------------
 
-let _endpoint = "http://localhost:8600";
+let _endpoint = "http://127.0.0.1:8600";
 let _apiKey = "recalldbadmin";
 let _adminClient = null;
 let _userClient = null;
@@ -838,6 +842,366 @@ async function testSearchFullTextValidationLanguage() {
 }
 
 // ---------------------------------------------------------------------------
+// Test-21c: Hybrid fields, notices, stored vectors, minimum-should-match, structured errors
+// ---------------------------------------------------------------------------
+
+async function testSearchHybridRoundTrip() {
+    const r = await doSearch({
+        Vector: { SearchType: VectorSearchTypes.CosineSimilarity, Embeddings: VECTOR_EMBEDDINGS },
+        FullText: { Query: "machine learning", MatchMode: FullTextMatchModes.Any, TextWeight: 0.5 },
+        Hybrid: { Strategy: HybridStrategies.Rrf, RrfK: 60, CandidatePool: 50, RecencyWeight: 0 },
+        MaxResults: 10
+    });
+    const docs = r.Documents || [];
+    assertTrue(docs.length > 0, "Hybrid round trip should return results");
+    const both = docs.find(d => d.VectorRank != null && d.TextRank != null);
+    assertNotNull(both, "A hit present in both legs");
+    assertTrue(typeof both.VectorScore === "number", "VectorScore should be a number");
+    assertTrue(typeof both.TextScore === "number" && both.TextScore > 0, "TextScore should be > 0");
+    assertGte(both.VectorRank, 1, "VectorRank");
+    assertGte(both.TextRank, 1, "TextRank");
+    for (const d of docs) assertTrue(d.RecencyRank == null, "RecencyRank should be absent when RecencyWeight is 0");
+}
+
+async function testSearchHybridTextOnlyHit() {
+    // CandidatePool 1: the vector leg keeps only its nearest chunk (a river chunk), the text leg only its best
+    // "zebra" chunk, so the zebra hit is text-only and has no VectorRank.
+    const r = await _adminClient.search(_testTenantId, _featureCollectionId, {
+        Vector: { SearchType: "CosineSimilarity", Embeddings: [1, 0, 0] },
+        FullText: { Query: "zebra" },
+        Hybrid: { Strategy: "Rrf", CandidatePool: 1 },
+        MaxResults: 10
+    });
+    const docs = r.Documents || [];
+    const textOnly = docs.find(d => d.TextRank != null && d.VectorRank == null);
+    assertNotNull(textOnly, "A text-only hit");
+    assertTrue(textOnly.Content.includes("zebra"), "Text-only hit should be a zebra chunk");
+    assertTrue(textOnly.TextScore != null && textOnly.TextScore > 0, "Text-only hit should have a TextScore");
+    assertTrue(docs.some(d => d.VectorRank != null && d.TextRank == null), "A vector-only hit");
+}
+
+async function testSearchNoticeOnIgnoredHybrid() {
+    const r = await doSearch({
+        Vector: { SearchType: "CosineSimilarity", Embeddings: VECTOR_EMBEDDINGS },
+        Hybrid: { Strategy: "Rrf", RrfK: 60 },
+        MaxResults: 5
+    });
+    assertTrue(typeof r.Notice === "string" && r.Notice.length > 0, "Notice should explain the ignored Hybrid options");
+}
+
+async function testSearchIncludeEmbeddingsDefaultOff() {
+    const r = await doSearch({ Vector: { SearchType: "CosineSimilarity", Embeddings: VECTOR_EMBEDDINGS }, MaxResults: 5 });
+    const docs = r.Documents || [];
+    assertTrue(docs.length > 0, "Should return results");
+    for (const d of docs) assertTrue(d.Embeddings == null || d.Embeddings.length === 0, "Embeddings should be absent by default");
+}
+
+async function testSearchIncludeEmbeddingsOn() {
+    const r = await doSearch({ Vector: { SearchType: "CosineSimilarity", Embeddings: VECTOR_EMBEDDINGS }, IncludeEmbeddings: true, MaxResults: 5 });
+    const docs = r.Documents || [];
+    assertTrue(docs.length > 0, "Should return results");
+    for (const d of docs) {
+        assertTrue(Array.isArray(d.Embeddings), "Embeddings should be an array");
+        assertEqual(3, d.Embeddings.length, "Embeddings length (collection dimension)");
+    }
+}
+
+async function testSearchMinimumShouldMatch() {
+    const one = await doSearch({ FullText: { Query: "machine learning", MatchMode: "Any" }, MaxResults: 20 });
+    assertTrue((one.Documents || []).some(d => d.DocumentKey === "srch-doc-1"), "MinimumShouldMatch 1 should include a one-term match");
+    const two = await doSearch({ FullText: { Query: "machine learning", MatchMode: "Any", MinimumShouldMatch: 2 }, MaxResults: 20 });
+    const keys = (two.Documents || []).map(d => d.DocumentKey);
+    assertTrue(keys.includes("srch-doc-0"), "MinimumShouldMatch 2 should include the two-term match");
+    assertTrue(!keys.includes("srch-doc-1"), "MinimumShouldMatch 2 should exclude the one-term match");
+}
+
+async function testSearchMinimumShouldMatchRequiresAny() {
+    await assertSearchBadRequest({ FullText: { Query: "machine learning", MatchMode: "All", MinimumShouldMatch: 2 }, MaxResults: 10 });
+}
+
+async function testSearchRecencyWeightValidation() {
+    try {
+        await _adminClient.search(_testTenantId, _testCollectionId, {
+            Vector: { SearchType: "CosineSimilarity", Embeddings: VECTOR_EMBEDDINGS },
+            FullText: { Query: "learning" },
+            Hybrid: { Strategy: "Rrf", RecencyWeight: 1.5 },
+            MaxResults: 10
+        });
+        throw new Error("Expected 400 Bad Request but call succeeded");
+    } catch (e) {
+        if (!(e instanceof RecallDbException)) throw e;
+        assertEqual(400, e.statusCode, "Status code");
+        assertNotNull(e.errorMessage, "errorMessage");
+        assertTrue(e.errorMessage.includes("RecencyWeight"), "errorMessage should mention RecencyWeight: " + e.errorMessage);
+    }
+}
+
+async function testStructuredErrorRrfK() {
+    try {
+        await _adminClient.search(_testTenantId, _testCollectionId, {
+            Vector: { SearchType: "CosineSimilarity", Embeddings: VECTOR_EMBEDDINGS },
+            FullText: { Query: "learning" },
+            Hybrid: { Strategy: "Rrf", RrfK: 0 },
+            MaxResults: 10
+        });
+        throw new Error("Expected 400 Bad Request but call succeeded");
+    } catch (e) {
+        if (!(e instanceof RecallDbException)) throw e;
+        assertEqual(400, e.statusCode, "Status code");
+        assertEqual("BadRequest", e.errorCode, "errorCode");
+        assertTrue(e.errorMessage && e.errorMessage.includes("RrfK"), "errorMessage should name RrfK: " + e.errorMessage);
+        assertEqual("RecallDB API returned 400 (BadRequest): " + e.errorMessage, e.message, "message");
+        // responseBody is the raw, unmodified body
+        const body = JSON.parse(e.responseBody);
+        assertEqual(400, body.StatusCode, "responseBody StatusCode");
+        assertEqual("BadRequest", body.Error, "responseBody Error");
+        assertTrue(e.responseBody.includes("RrfK"), "responseBody should contain RrfK");
+    }
+}
+
+async function testStructuredErrorContextShape() {
+    try {
+        await _adminClient.search(_testTenantId, _testCollectionId, {
+            Vector: { SearchType: "CosineSimilarity", Embeddings: VECTOR_EMBEDDINGS },
+            Collapse: { Field: CollapseFields.Tag },
+            MaxResults: 10
+        });
+        throw new Error("Expected 400 Bad Request but call succeeded");
+    } catch (e) {
+        if (!(e instanceof RecallDbException)) throw e;
+        assertEqual(400, e.statusCode, "Status code");
+        assertNotNull(e.errorCode, "errorCode");
+        assertTrue(e.errorMessage && e.errorMessage.includes("TagKey"), "errorMessage should mention TagKey: " + e.errorMessage);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test-21d: Collapse (dedicated collection)
+// ---------------------------------------------------------------------------
+
+let _featureCollectionId = null;
+const COLLAPSE_PARENTS = ["parent-a", "parent-b", "parent-c"];
+
+async function testCollapseDataSetup() {
+    const col = await _adminClient.createCollection(_testTenantId, { Name: "SdkFeatureCollection", Dimensionality: 3 });
+    _featureCollectionId = col.Id;
+    const vectors = { "parent-a": [1, 0, 0], "parent-b": [0.7, 0.7, 0], "parent-c": [0, 0, 1] };
+    const words = { "parent-a": "river bank erosion", "parent-b": "river delta sediment", "parent-c": "zebra savanna migration" };
+    for (const parent of COLLAPSE_PARENTS) {
+        for (let pos = 0; pos < 3; pos++) {
+            const v = vectors[parent].map((x, i) => x + (i === 1 ? 0.01 * pos : 0));
+            const key = parent + "-chunk-" + pos;
+            await _adminClient.createDocument(_testTenantId, _featureCollectionId, {
+                DocumentKey: key,
+                DocumentId: parent,
+                Position: pos,
+                Content: words[parent] + " chunk " + pos,
+                ContentType: "Text",
+                Embeddings: v
+            });
+            await _adminClient.createTag(_testTenantId, _featureCollectionId, { DocumentKey: key, Key: "parentKey", Value: parent });
+        }
+    }
+}
+
+async function testCollapseByTagWithRecency() {
+    if (!(await _adminClient.supports(Capabilities.Collapse))) throw new Error("Server does not report search.collapse");
+    const r = await _adminClient.search(_testTenantId, _featureCollectionId, {
+        Vector: { SearchType: "CosineSimilarity", Embeddings: [1, 0, 0] },
+        FullText: { Query: "river" },
+        Hybrid: { Strategy: "Rrf", RecencyWeight: 0.3 },
+        Collapse: { Field: CollapseFields.Tag, TagKey: "parentKey" },
+        MaxResults: 10
+    });
+    assertTrue(r.Success, "Search should succeed");
+    const docs = r.Documents || [];
+    assertEqual(COLLAPSE_PARENTS.length, docs.length, "One hit per parentKey group");
+    const keys = docs.map(d => d.GroupKey);
+    assertEqual(docs.length, new Set(keys).size, "GroupKeys should be unique");
+    for (const d of docs) {
+        assertTrue(COLLAPSE_PARENTS.includes(d.GroupKey), "GroupKey should be a parentKey value: " + d.GroupKey);
+        assertTrue(typeof d.GroupHits === "number" && d.GroupHits >= 1, "GroupHits should be >= 1");
+        assertTrue(d.RecencyRank != null && d.RecencyRank >= 1, "RecencyRank should be present");
+    }
+    assertTrue(docs.some(d => d.GroupHits > 1), "At least one group should have more than one hit");
+    assertEqual(COLLAPSE_PARENTS.length, r.TotalRecords, "TotalRecords should count groups");
+}
+
+async function testCollapseVectorOnly() {
+    const r = await _adminClient.search(_testTenantId, _featureCollectionId, {
+        Vector: { SearchType: "CosineSimilarity", Embeddings: [1, 0, 0] },
+        Collapse: { Field: CollapseFields.DocumentId },
+        MaxResults: 10
+    });
+    const docs = r.Documents || [];
+    assertEqual(COLLAPSE_PARENTS.length, docs.length, "One hit per DocumentId");
+    assertEqual(docs.length, new Set(docs.map(d => d.GroupKey)).size, "GroupKeys should be unique");
+    for (const d of docs) {
+        assertEqual(d.DocumentId, d.GroupKey, "GroupKey should be the DocumentId");
+        assertEqual(3, d.GroupHits, "GroupHits for a 3-chunk document");
+    }
+    assertEqual("parent-a", docs[0].GroupKey, "Nearest group first");
+}
+
+async function testCollapseRejectsFilterStrategy() {
+    try {
+        await _adminClient.search(_testTenantId, _featureCollectionId, {
+            Vector: { SearchType: "CosineSimilarity", Embeddings: [1, 0, 0] },
+            FullText: { Query: "river" },
+            Hybrid: { Strategy: "Filter" },
+            Collapse: { Field: "DocumentId" },
+            MaxResults: 10
+        });
+        throw new Error("Expected 400 Bad Request but call succeeded");
+    } catch (e) {
+        if (!(e instanceof RecallDbException)) throw e;
+        assertEqual(400, e.statusCode, "Status code");
+    }
+}
+
+async function testCleanupFeatureCollection() {
+    if (!_featureCollectionId) return;
+    await _adminClient.deleteCollection(_testTenantId, _featureCollectionId);
+    assertTrue(!(await _adminClient.collectionExists(_testTenantId, _featureCollectionId)), "Feature collection should be gone");
+}
+
+// ---------------------------------------------------------------------------
+// Test-21e: Reserved characters and Exists semantics
+// ---------------------------------------------------------------------------
+
+async function testReservedCharactersKeyAndId() {
+    const key = "rk #?/% " + shortId();
+    const docId = "rid #?/% " + shortId();
+    const created = await _adminClient.createDocument(_testTenantId, _testCollectionId, {
+        DocumentKey: key, DocumentId: docId, Position: 0, Content: "reserved characters", ContentType: "Text", Embeddings: [0.2, 0.2, 0.2]
+    });
+    assertEqual(key, created.DocumentKey, "Created key");
+    assertEqual(docId, created.DocumentId, "Created DocumentId");
+    const read = await _adminClient.getDocument(_testTenantId, _testCollectionId, key);
+    assertEqual(key, read.DocumentKey, "Read key");
+    assertEqual(docId, read.DocumentId, "Read DocumentId");
+    const byPos = await _adminClient.getDocumentByPosition(_testTenantId, _testCollectionId, docId, 0);
+    assertEqual(key, byPos.DocumentKey, "Read by DocumentId and position");
+    assertTrue(await _adminClient.documentExists(_testTenantId, _testCollectionId, key), "Should exist");
+    await _adminClient.deleteDocument(_testTenantId, _testCollectionId, key);
+    assertTrue(!(await _adminClient.documentExists(_testTenantId, _testCollectionId, key)), "Should be gone after delete");
+}
+
+async function testExistsBadTokenThrows() {
+    const bad = new RecallDbClient(_endpoint, "not-a-valid-token-" + shortId());
+    try {
+        await bad.documentExists(_testTenantId, _testCollectionId, _testDocumentKey);
+        throw new Error("Expected RecallDbException for 401 but call returned");
+    } catch (e) {
+        if (!(e instanceof RecallDbException)) throw e;
+        assertEqual(401, e.statusCode, "Status code");
+    }
+    const missing = await _adminClient.documentExists(_testTenantId, _testCollectionId, "missing-" + shortId());
+    assertEqual(false, missing, "Missing document should return false");
+}
+
+// ---------------------------------------------------------------------------
+// Test-1b: Server info, capabilities, and transport
+// ---------------------------------------------------------------------------
+
+async function testServerInfo() {
+    const info = await _adminClient.getServerInfo();
+    assertEqual("RecallDB", info.Name, "Name");
+    assertNotEmpty(info.Version, "Version");
+    assertTrue(Array.isArray(info.Capabilities), "Capabilities should be an array");
+    for (const name of Object.values(Capabilities)) {
+        assertTrue(info.Capabilities.includes(name), "Server should report " + name);
+    }
+}
+
+async function testSupports() {
+    const c = new RecallDbClient(_endpoint, _apiKey);
+    assertEqual(true, await c.supports("search.collapse"), "supports search.collapse");
+    assertEqual(false, await c.supports("nope"), "supports nope");
+    assertEqual(true, await c.supports(Capabilities.HybridRecency, { refresh: true }), "supports with refresh");
+    assertTrue(Object.isFrozen(Capabilities) && Object.isFrozen(SortOrders), "Constant objects should be frozen");
+    assertEqual("0.2.2", VERSION, "VERSION");
+}
+
+async function withStubServer(delayMs, fn) {
+    const timers = new Set();
+    const server = http.createServer((req, res) => {
+        const t = setTimeout(() => {
+            timers.delete(t);
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end('{"Name":"Stub"}');
+        }, delayMs);
+        timers.add(t);
+    });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    try {
+        return await fn("http://127.0.0.1:" + server.address().port);
+    } finally {
+        for (const t of timers) clearTimeout(t);
+        if (server.closeAllConnections) server.closeAllConnections();
+        await new Promise(resolve => server.close(resolve));
+    }
+}
+
+async function testTransportTimeout() {
+    await withStubServer(3000, async (url) => {
+        const c = new RecallDbClient(url, "token", { timeoutMs: 200 });
+        const start = performance.now();
+        try {
+            await c.health();
+            throw new Error("Expected a timeout but call succeeded");
+        } catch (e) {
+            if (!(e instanceof RecallDbTimeoutError)) throw e;
+            assertEqual("TimeoutError", e.name, "Error name");
+            assertEqual(200, e.timeoutMs, "timeoutMs");
+        }
+        assertLte(performance.now() - start, 2000, "Elapsed ms before timeout rejection");
+    });
+}
+
+async function testTransportAbortSignal() {
+    await withStubServer(3000, async (url) => {
+        const c = new RecallDbClient(url, "token", { timeoutMs: 0 });
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), 100);
+        const start = performance.now();
+        try {
+            await c.health({ signal: controller.signal });
+            throw new Error("Expected an abort but call succeeded");
+        } catch (e) {
+            assertEqual("AbortError", e.name, "Error name");
+        }
+        assertLte(performance.now() - start, 2000, "Elapsed ms before abort rejection");
+    });
+    // An already-aborted signal stops a request against the real server before it is sent.
+    const controller = new AbortController();
+    controller.abort();
+    try {
+        await _adminClient.getServerInfo({ signal: controller.signal });
+        throw new Error("Expected an abort but call succeeded");
+    } catch (e) {
+        assertEqual("AbortError", e.name, "Error name");
+    }
+}
+
+async function testTransportCustomFetchAndOptions() {
+    let calls = 0;
+    const counting = (url, init) => { calls++; return fetch(url, init); };
+    const c = new RecallDbClient(_endpoint, _apiKey, { fetch: counting, timeoutMs: 5000 });
+    const info = await c.health();
+    assertEqual("RecallDB", info.Name, "Name");
+    assertEqual(1, calls, "Custom fetch call count");
+    assertEqual(5000, c.timeoutMs, "timeoutMs");
+    assertEqual(100000, new RecallDbClient(_endpoint, _apiKey).timeoutMs, "Default timeoutMs");
+    assertEqual(0, new RecallDbClient(_endpoint, _apiKey, { timeoutMs: null }).timeoutMs, "null disables timeout");
+    for (const bad of [-1, "100", NaN, Infinity]) {
+        let threw = false;
+        try { new RecallDbClient(_endpoint, _apiKey, { timeoutMs: bad }); } catch (e) { threw = true; }
+        assertTrue(threw, "timeoutMs " + String(bad) + " should be rejected");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Test-22: Search Result Validation
 // ---------------------------------------------------------------------------
 
@@ -1162,7 +1526,7 @@ async function testCleanupPaginationTenants() {
 // ---------------------------------------------------------------------------
 
 async function main() {
-    _endpoint = (process.argv[2] || "http://localhost:8600").replace(/\/+$/, "");
+    _endpoint = (process.argv[2] || "http://127.0.0.1:8600").replace(/\/+$/, "");
     _apiKey = process.argv[3] || "recalldbadmin";
 
     console.log("=========================================");
@@ -1180,6 +1544,11 @@ async function main() {
     // 1. Connectivity
     await runTest("Connectivity: GET /", testConnectivityGet);
     await runTest("Connectivity: HEAD /", testConnectivityHead);
+    await runTest("Server info: version and capabilities", testServerInfo);
+    await runTest("Server info: supports known and unknown capabilities", testSupports);
+    await runTest("Transport: timeout rejects a slow request", testTransportTimeout);
+    await runTest("Transport: abort signal stops a request", testTransportAbortSignal);
+    await runTest("Transport: custom fetch and timeout options", testTransportCustomFetchAndOptions);
 
     // 2. Authentication
     await runTest("Authentication: POST /v1.0/authenticate with bearer token", testAuthenticateBearer);
@@ -1314,6 +1683,29 @@ async function main() {
     await runTest("Search full-text: validation rejects normalization 64", testSearchFullTextValidationNormalization);
     await runTest("Search full-text: validation rejects hybrid rrf k 0", testSearchFullTextValidationRrfK);
     await runTest("Search full-text: validation rejects unknown language", testSearchFullTextValidationLanguage);
+
+    // 21c. Hybrid fields, notices, stored vectors, minimum-should-match, structured errors
+    await runTest("Search hybrid: round trip fields and ranks", testSearchHybridRoundTrip);
+    await runTest("Search hybrid: notice when hybrid options are ignored", testSearchNoticeOnIgnoredHybrid);
+    await runTest("Search embeddings: off by default", testSearchIncludeEmbeddingsDefaultOff);
+    await runTest("Search embeddings: IncludeEmbeddings returns stored vectors", testSearchIncludeEmbeddingsOn);
+    await runTest("Search full-text: minimum should match 2 excludes one-term match", testSearchMinimumShouldMatch);
+    await runTest("Search full-text: minimum should match requires match mode any", testSearchMinimumShouldMatchRequiresAny);
+    await runTest("Search hybrid: recency weight 1.5 rejected with errorMessage", testSearchRecencyWeightValidation);
+    await runTest("Errors: structured error for invalid RrfK", testStructuredErrorRrfK);
+    await runTest("Errors: structured error with Context body shape", testStructuredErrorContextShape);
+
+    // 21d. Collapse (dedicated collection)
+    await runTest("Collapse: setup chunked documents with parentKey tags", testCollapseDataSetup);
+    await runTest("Collapse: hybrid text-only hit has no vector rank", testSearchHybridTextOnlyHit);
+    await runTest("Collapse: by tag with recency", testCollapseByTagWithRecency);
+    await runTest("Collapse: vector-only by document id", testCollapseVectorOnly);
+    await runTest("Collapse: rejected with hybrid filter strategy", testCollapseRejectsFilterStrategy);
+    await runTest("Collapse: cleanup feature collection", testCleanupFeatureCollection);
+
+    // 21e. Reserved characters and Exists semantics
+    await runTest("Document: reserved characters in key and document id", testReservedCharactersKeyAndId);
+    await runTest("Exists: bad token throws 401, missing document returns false", testExistsBadTokenThrows);
 
     // 22. Search Result Validation
     await runTest("Search validation: result fields", testSearchResultFields);

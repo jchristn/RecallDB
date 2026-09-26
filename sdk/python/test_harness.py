@@ -6,23 +6,37 @@ across all SDK test harnesses.
 
 Usage:
     python test_harness.py [endpoint] [api_key]
-    python test_harness.py http://localhost:8600 recalldbadmin
+    python test_harness.py http://127.0.0.1:8600 recalldbadmin
 """
 
 import argparse
+import http.server
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from recalldb_sdk import RecallDbClient, RecallDbException
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+from recalldb_sdk import (
+    Capabilities,
+    CollapseFields,
+    FullTextMatchModes,
+    HybridStrategies,
+    RecallDbClient,
+    RecallDbException,
+    VectorSearchTypes,
+)
 
 
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
 
-_endpoint = "http://localhost:8600"
+_endpoint = "http://127.0.0.1:8600"
 _api_key = "recalldbadmin"
 _admin_client = None
 _user_client = None
@@ -1114,6 +1128,345 @@ def test_neighbor_search_without_neighbors():
 
 
 # ---------------------------------------------------------------------------
+# Test-22c: Hybrid, notice, stored vectors, collapse, recency, minimum should match
+# ---------------------------------------------------------------------------
+
+_group_collection_id = None
+_group_doc_keys = []
+
+
+def do_group_search(query):
+    resp = _admin_client.search(_test_tenant_id, _group_collection_id, query)
+    assert_true(resp.get("Success"), "Search should succeed")
+    return resp
+
+
+def test_search_hybrid_round_trip():
+    resp = do_search({
+        "Vector": {"SearchType": VectorSearchTypes.COSINE_SIMILARITY, "Embeddings": _VECTOR_EMBEDDINGS},
+        "FullText": {"Query": "machine learning", "MatchMode": FullTextMatchModes.ANY, "TextWeight": 0.5},
+        "Hybrid": {"Strategy": HybridStrategies.RRF, "RrfK": 60, "CandidatePool": 50},
+        "MaxResults": 10
+    })
+    docs = resp.get("Documents", [])
+    assert_true(len(docs) > 0, "Hybrid round trip should return results")
+    both = [d for d in docs if d.get("VectorRank") is not None and d.get("TextRank") is not None]
+    assert_true(len(both) > 0, "At least one hit should be in both legs")
+    for d in both:
+        assert_not_none(d.get("VectorScore"), "VectorScore")
+        assert_true(d.get("TextScore") is not None and d["TextScore"] > 0, "TextScore should be > 0")
+        assert_gte(d["VectorRank"], 1, "VectorRank")
+        assert_gte(d["TextRank"], 1, "TextRank")
+
+    # A one-candidate pool per leg: the text leg's only hit ("quantum") is not the vector leg's only hit,
+    # so it is a text-only hit with no vector rank.
+    resp = do_search({
+        "Vector": {"SearchType": VectorSearchTypes.COSINE_SIMILARITY, "Embeddings": _VECTOR_EMBEDDINGS},
+        "FullText": {"Query": "quantum"},
+        "Hybrid": {"Strategy": HybridStrategies.RRF, "CandidatePool": 1},
+        "MaxResults": 10
+    })
+    docs = resp.get("Documents", [])
+    text_only = [d for d in docs if d.get("TextRank") is not None and d.get("VectorRank") is None]
+    assert_true(len(text_only) > 0, "A text-only hit should be present")
+    assert_equal("srch-doc-2", text_only[0].get("DocumentKey"), "Text-only hit")
+    assert_true(text_only[0].get("VectorRank") is None, "Text-only hit should have a null VectorRank")
+
+
+def test_search_notice_hybrid_ignored():
+    resp = do_search({
+        "Vector": {"SearchType": VectorSearchTypes.COSINE_SIMILARITY, "Embeddings": _VECTOR_EMBEDDINGS},
+        "Hybrid": {"Strategy": HybridStrategies.RRF},
+        "MaxResults": 5
+    })
+    assert_not_empty(resp.get("Notice"), "Notice for hybrid options on a vector-only search")
+    assert_true("Hybrid" in resp["Notice"], "Notice should mention hybrid options")
+
+
+def test_search_include_embeddings_default_off():
+    resp = do_search({"Vector": {"SearchType": VectorSearchTypes.COSINE_SIMILARITY, "Embeddings": _VECTOR_EMBEDDINGS}, "MaxResults": 5})
+    docs = resp.get("Documents", [])
+    assert_true(len(docs) > 0, "Should return results")
+    for d in docs:
+        assert_true(not d.get("Embeddings"), "Embeddings should be absent by default")
+
+
+def test_search_include_embeddings_on():
+    resp = do_search({
+        "Vector": {"SearchType": VectorSearchTypes.COSINE_SIMILARITY, "Embeddings": _VECTOR_EMBEDDINGS},
+        "IncludeEmbeddings": True,
+        "MaxResults": 5
+    })
+    docs = resp.get("Documents", [])
+    assert_true(len(docs) > 0, "Should return results")
+    for d in docs:
+        emb = d.get("Embeddings")
+        assert_true(isinstance(emb, list), "Embeddings should be a list")
+        assert_equal(3, len(emb), "Embeddings length (collection dimension)")
+
+
+def test_group_data_setup():
+    """Dedicated collection: 4 documents of 2 chunks each; documents 0-1 share parentKey thread-a, 2-3 thread-b."""
+    global _group_collection_id, _group_doc_keys
+    resp = _admin_client.create_collection(_test_tenant_id, {"Name": "GroupingTestCollection", "Dimensionality": 3})
+    _group_collection_id = resp.get("Id")
+    assert_not_empty(_group_collection_id, "Grouping CollectionId")
+    for d in range(4):
+        docs = []
+        for p in range(2):
+            key = f"grp-{d}-{p}"
+            _group_doc_keys.append(key)
+            docs.append({
+                "DocumentKey": key,
+                "DocumentId": f"gdoc-{d}",
+                "Position": p,
+                "Content": f"orchard apple harvest notes part {p} of {d}" if p == 0 else f"orchard pruning notes part {p} of {d}",
+                "ContentType": "Text",
+                "Embeddings": [0.9 - d * 0.1, 0.1 + p * 0.05, 0.05]
+            })
+        # Separate batches so later documents have later CreatedUtc values.
+        _admin_client.create_document_batch(_test_tenant_id, _group_collection_id, docs)
+        for doc in docs:
+            _admin_client.create_tag(_test_tenant_id, _group_collection_id, {
+                "DocumentKey": doc["DocumentKey"],
+                "Key": "parentKey",
+                "Value": "thread-a" if d < 2 else "thread-b"
+            })
+        time.sleep(0.02)
+
+
+def test_search_collapse_tag_with_recency():
+    resp = do_group_search({
+        "Vector": {"SearchType": VectorSearchTypes.COSINE_SIMILARITY, "Embeddings": [0.9, 0.1, 0.05]},
+        "FullText": {"Query": "orchard"},
+        "Hybrid": {"Strategy": HybridStrategies.RRF, "RecencyWeight": 0.3},
+        "Collapse": {"Field": CollapseFields.TAG, "TagKey": "parentKey"},
+        "MaxResults": 10
+    })
+    docs = resp.get("Documents", [])
+    assert_equal(2, len(docs), "One hit per parentKey group")
+    assert_equal(2, resp.get("TotalRecords"), "TotalRecords counts groups")
+    keys = [d.get("GroupKey") for d in docs]
+    assert_equal(len(keys), len(set(keys)), "GroupKeys should be distinct")
+    assert_equal({"thread-a", "thread-b"}, set(keys), "GroupKeys")
+    for d in docs:
+        assert_equal(4, d.get("GroupHits"), "GroupHits for " + str(d.get("GroupKey")))
+        assert_not_none(d.get("RecencyRank"), "RecencyRank")
+        assert_true(d["RecencyRank"] in (1, 2), "RecencyRank should be 1 or 2")
+    by_key = {d["GroupKey"]: d for d in docs}
+    assert_true(by_key["thread-b"]["RecencyRank"] <= by_key["thread-a"]["RecencyRank"],
+                "The newer group should not rank older on recency")
+
+
+def test_search_collapse_vector_only():
+    resp = do_group_search({
+        "Vector": {"SearchType": VectorSearchTypes.COSINE_SIMILARITY, "Embeddings": [0.9, 0.1, 0.05]},
+        "Collapse": {"Field": CollapseFields.DOCUMENT_ID},
+        "MaxResults": 10
+    })
+    docs = resp.get("Documents", [])
+    assert_equal(4, len(docs), "One hit per DocumentId")
+    assert_equal({"gdoc-0", "gdoc-1", "gdoc-2", "gdoc-3"}, set(d.get("GroupKey") for d in docs), "GroupKeys")
+    for d in docs:
+        assert_equal(2, d.get("GroupHits"), "GroupHits")
+        assert_equal(d.get("GroupKey"), d.get("DocumentId"), "Hit belongs to its group")
+        assert_true(d.get("RecencyRank") is None, "RecencyRank absent without hybrid recency")
+
+
+def test_search_collapse_validation():
+    base = {"Vector": {"SearchType": VectorSearchTypes.COSINE_SIMILARITY, "Embeddings": [0.9, 0.1, 0.05]}, "FullText": {"Query": "orchard"}, "MaxResults": 5}
+    try:
+        _admin_client.search(_test_tenant_id, _group_collection_id, dict(base, Collapse={"Field": CollapseFields.TAG}))
+        raise AssertionError("Expected 400 for Collapse.Field Tag without TagKey")
+    except RecallDbException as e:
+        assert_equal(400, e.status_code, "Status code")
+        assert_true(e.error_message is not None and "TagKey" in e.error_message, "error_message should mention TagKey")
+    try:
+        _admin_client.search(_test_tenant_id, _group_collection_id,
+                             dict(base, Hybrid={"Strategy": HybridStrategies.FILTER}, Collapse={"Field": CollapseFields.DOCUMENT_ID}))
+        raise AssertionError("Expected 400 for Collapse with Hybrid.Strategy Filter")
+    except RecallDbException as e:
+        assert_equal(400, e.status_code, "Status code")
+
+
+def test_search_minimum_should_match():
+    # srch-doc-0 contains "machine" and "learning"; srch-doc-1 contains only "learning".
+    query = {"FullText": {"Query": "machine learning", "MatchMode": FullTextMatchModes.ANY, "MinimumShouldMatch": 1}, "MaxResults": 50}
+    keys = [d["DocumentKey"] for d in do_search(query).get("Documents", [])]
+    assert_true("srch-doc-1" in keys, "MinimumShouldMatch 1 should include a one-term match")
+    query["FullText"]["MinimumShouldMatch"] = 2
+    keys = [d["DocumentKey"] for d in do_search(query).get("Documents", [])]
+    assert_true("srch-doc-0" in keys, "MinimumShouldMatch 2 should include a two-term match")
+    assert_true("srch-doc-1" not in keys, "MinimumShouldMatch 2 should exclude a one-term match")
+    _assert_search_bad_request({"FullText": {"Query": "machine learning", "MatchMode": FullTextMatchModes.ALL, "MinimumShouldMatch": 2}, "MaxResults": 10})
+
+
+def test_search_recency_weight_validation():
+    try:
+        _admin_client.search(_test_tenant_id, _test_collection_id, {
+            "Vector": {"SearchType": VectorSearchTypes.COSINE_SIMILARITY, "Embeddings": _VECTOR_EMBEDDINGS},
+            "FullText": {"Query": "learning"},
+            "Hybrid": {"Strategy": HybridStrategies.RRF, "RecencyWeight": 1.5},
+            "MaxResults": 10
+        })
+        raise AssertionError("Expected 400 for RecencyWeight 1.5")
+    except RecallDbException as e:
+        assert_equal(400, e.status_code, "Status code")
+        assert_true(e.error_message is not None and "RecencyWeight" in e.error_message, "error_message should mention RecencyWeight")
+
+
+def test_group_cleanup():
+    if not _group_collection_id:
+        return
+    _admin_client.delete_collection(_test_tenant_id, _group_collection_id)
+    assert_true(not _admin_client.collection_exists(_test_tenant_id, _group_collection_id), "Grouping collection should be gone")
+
+
+# ---------------------------------------------------------------------------
+# Test-22d: Client behavior (server info, transport, encoding, exists, errors)
+# ---------------------------------------------------------------------------
+
+def test_server_info_capabilities():
+    info = _admin_client.get_server_info()
+    assert_equal("RecallDB", info.get("Name"), "Name")
+    assert_not_empty(info.get("Version"), "Version")
+    assert_true(isinstance(info.get("Capabilities"), list), "Capabilities should be a list")
+    for name in (Capabilities.HYBRID_RRF, Capabilities.HYBRID_RECENCY, Capabilities.COLLAPSE,
+                 Capabilities.INCLUDE_EMBEDDINGS, Capabilities.FULLTEXT_MINIMUM_SHOULD_MATCH):
+        assert_true(name in info["Capabilities"], "Capabilities should list " + name)
+    assert_true(_admin_client.supports("search.collapse"), "supports('search.collapse')")
+    assert_true(not _admin_client.supports("nope"), "supports('nope') should be False")
+    assert_true(_admin_client.supports(Capabilities.COLLAPSE, refresh=True), "supports with refresh")
+
+
+def test_timeout_raises():
+    class SlowHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            time.sleep(2.0)
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b"{}")
+            except OSError:
+                pass
+
+        def log_message(self, fmt, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), SlowHandler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        client = RecallDbClient(f"http://127.0.0.1:{server.server_address[1]}", "token", timeout=0.3)
+        start = time.perf_counter()
+        try:
+            client.get_server_info()
+            raise AssertionError("Expected a timeout")
+        except requests.exceptions.Timeout:
+            pass
+        elapsed = time.perf_counter() - start
+        assert_true(elapsed < 1.5, f"Timeout should fire before the stub responds ({elapsed:.2f} s)")
+        client.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    for bad in (0, -1, "10", True):
+        try:
+            RecallDbClient(_endpoint, _api_key, timeout=bad)
+            raise AssertionError(f"Expected ValueError for timeout {bad!r}")
+        except ValueError:
+            pass
+    assert_true(RecallDbClient(_endpoint, _api_key, timeout=None).timeout is None, "timeout None disables")
+
+
+def test_caller_supplied_session():
+    session = requests.Session()
+    retry = Retry(total=3, backoff_factor=0.1, status_forcelist=[429, 502, 503], allowed_methods=None)
+    session.mount("http://", HTTPAdapter(max_retries=retry))
+    session.headers["X-Caller-Header"] = "kept"
+    client = RecallDbClient(_endpoint, _api_key, session=session)
+    assert_true(client.tenant_exists(_test_tenant_id), "Tenant should exist through a caller-supplied session")
+    assert_true("Authorization" not in session.headers, "Client should not add Authorization to the caller's session")
+    assert_equal("kept", session.headers.get("X-Caller-Header"), "Caller session header")
+    client.close()
+    # The caller's session stays usable after the client is closed.
+    assert_equal(200, session.get(_endpoint + "/", timeout=10).status_code, "Caller session still usable")
+    session.close()
+
+
+def test_reserved_characters_key_and_id():
+    # The server accepts all of these in both DocumentKey and DocumentId.
+    value = "res #1?a=b/c%20d e"
+    created = _admin_client.create_document(_test_tenant_id, _test_collection_id, {
+        "DocumentKey": value,
+        "DocumentId": value,
+        "Content": "reserved characters",
+        "ContentType": "Text",
+        "Position": 0,
+        "Embeddings": [0.1, 0.2, 0.3]
+    })
+    assert_equal(value, created.get("DocumentKey"), "Created key")
+    assert_equal(value, created.get("DocumentId"), "Created id")
+    assert_equal(value, _admin_client.get_document(_test_tenant_id, _test_collection_id, value).get("DocumentKey"), "Read by key")
+    by_pos = _admin_client.get_document_by_position(_test_tenant_id, _test_collection_id, value, 0)
+    assert_equal(value, by_pos.get("DocumentId"), "Read by id and position")
+    assert_equal(value, by_pos.get("DocumentKey"), "Read by id and position key")
+    assert_true(_admin_client.document_exists(_test_tenant_id, _test_collection_id, value), "Should exist")
+    _admin_client.delete_document(_test_tenant_id, _test_collection_id, value)
+    assert_true(not _admin_client.document_exists(_test_tenant_id, _test_collection_id, value), "Should be gone after delete")
+
+
+def test_exists_raises_on_unauthorized():
+    bad_client = RecallDbClient(_endpoint, "not-a-valid-token-" + uuid.uuid4().hex)
+    try:
+        bad_client.document_exists(_test_tenant_id, _test_collection_id, "srch-doc-0")
+        raise AssertionError("Expected RecallDbException for a bad token")
+    except RecallDbException as e:
+        assert_equal(401, e.status_code, "Status code")
+    try:
+        bad_client.tenant_exists(_test_tenant_id)
+        raise AssertionError("Expected RecallDbException for a bad token")
+    except RecallDbException as e:
+        assert_equal(401, e.status_code, "Status code")
+    assert_true(not _admin_client.document_exists(_test_tenant_id, _test_collection_id, "missing-" + uuid.uuid4().hex),
+                "A missing document should still return False")
+
+
+def test_structured_error():
+    query = {
+        "Vector": {"SearchType": VectorSearchTypes.COSINE_SIMILARITY, "Embeddings": _VECTOR_EMBEDDINGS},
+        "FullText": {"Query": "learning"},
+        "Hybrid": {"Strategy": HybridStrategies.RRF, "RrfK": 0},
+        "MaxResults": 10
+    }
+    raw = requests.post(f"{_endpoint}/v1.0/tenants/{_test_tenant_id}/collections/{_test_collection_id}/search",
+                        json=query, headers={"Authorization": f"Bearer {_api_key}"}, timeout=30)
+    try:
+        _admin_client.search(_test_tenant_id, _test_collection_id, query)
+        raise AssertionError("Expected 400 for RrfK 0")
+    except RecallDbException as e:
+        assert_equal(400, e.status_code, "Status code")
+        assert_equal("BadRequest", e.error_code, "error_code")
+        assert_true(e.error_message is not None and "RrfK" in e.error_message, "error_message should name RrfK")
+        assert_equal(raw.text, e.response_body, "response_body unchanged")
+        assert_equal(f"RecallDB API returned 400 (BadRequest): {e.error_message}", str(e), "Exception message")
+
+    try:
+        _user_client.create_tenant({"Name": "UnauthorizedTenantAttempt"})
+        raise AssertionError("Expected 403")
+    except RecallDbException as e:
+        assert_equal(403, e.status_code, "Status code")
+        assert_not_empty(e.error_code, "error_code on 403")
+
+    plain = RecallDbException(502, "Bad Gateway")
+    assert_true(plain.error_code is None and plain.error_message is None, "Non-JSON body leaves error fields None")
+    assert_equal("RecallDB API returned 502: Bad Gateway", str(plain), "Non-JSON message format")
+
+
+# ---------------------------------------------------------------------------
 # Test-23: Document Enumeration
 # ---------------------------------------------------------------------------
 
@@ -1522,7 +1875,7 @@ def main():
     global _endpoint, _api_key, _admin_client, _total_start
 
     parser = argparse.ArgumentParser(description="RecallDB SDK Integration Test Harness")
-    parser.add_argument("endpoint", nargs="?", default="http://localhost:8600", help="RecallDB server endpoint")
+    parser.add_argument("endpoint", nargs="?", default="http://127.0.0.1:8600", help="RecallDB server endpoint")
     parser.add_argument("api_key", nargs="?", default="recalldbadmin", help="Admin API key / bearer token")
     args = parser.parse_args()
 
@@ -1687,6 +2040,27 @@ def main():
     run_test("Neighbor retrieval: setup data", test_neighbor_data_setup)
     run_test("Neighbor retrieval: search with neighbors", test_neighbor_search_with_neighbors)
     run_test("Neighbor retrieval: search without neighbors", test_neighbor_search_without_neighbors)
+
+    # 22c. Hybrid, notice, stored vectors, collapse, recency, minimum should match
+    run_test("Search hybrid: round trip fields, scores, and ranks (text-only hit has null VectorRank)", test_search_hybrid_round_trip)
+    run_test("Search notice: hybrid options on a vector-only search", test_search_notice_hybrid_ignored)
+    run_test("Search embeddings: off by default", test_search_include_embeddings_default_off)
+    run_test("Search embeddings: IncludeEmbeddings returns collection-dimension vectors", test_search_include_embeddings_on)
+    run_test("Search collapse: setup grouping collection", test_group_data_setup)
+    run_test("Search collapse: by tag with recency", test_search_collapse_tag_with_recency)
+    run_test("Search collapse: vector-only by DocumentId", test_search_collapse_vector_only)
+    run_test("Search collapse: validation (TagKey required, Filter rejected)", test_search_collapse_validation)
+    run_test("Search full-text: MinimumShouldMatch 2 excludes a one-term match", test_search_minimum_should_match)
+    run_test("Search hybrid: RecencyWeight 1.5 rejected with error_message", test_search_recency_weight_validation)
+    run_test("Search collapse: cleanup grouping collection", test_group_cleanup)
+
+    # 22d. Client behavior
+    run_test("Client: server info and capabilities", test_server_info_capabilities)
+    run_test("Client: timeout raises instead of hanging", test_timeout_raises)
+    run_test("Client: caller-supplied session with retry adapter", test_caller_supplied_session)
+    run_test("Client: reserved characters in document key and id", test_reserved_characters_key_and_id)
+    run_test("Client: exists raises on 401, missing returns False", test_exists_raises_on_unauthorized)
+    run_test("Client: structured error fields", test_structured_error)
 
     # 23. Document Enumeration
     run_test("Enum docs: basic", test_enum_documents_basic)

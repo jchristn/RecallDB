@@ -29,6 +29,16 @@ namespace RecallDb.Sdk.Models
         public int? CandidatePool { get; set; }
 
         /// <summary>
+        /// Weight of a third, recency signal in Rrf fusion: candidates are ranked by their newest CreatedUtc per
+        /// collapse group (or per document when not collapsing), and each adds RecencyWeight / (RrfK + recency rank)
+        /// to its score, which stays normalized to 0.0-1.0. Used only by the Rrf strategy; Linear and Filter ignore it
+        /// and the result carries a Notice. Hits carry RecencyRank when it is on.
+        /// Default: null (omitted; the server default 0.0 turns it off). Minimum: 0.0. Maximum: 1.0.
+        /// Requires the server capability search.hybrid.recency; older servers ignore it silently.
+        /// </summary>
+        public double? RecencyWeight { get; set; }
+
+        /// <summary>
         /// Instantiate.
         /// </summary>
         public HybridQuery()

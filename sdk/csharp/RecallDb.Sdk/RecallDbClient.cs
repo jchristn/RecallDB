@@ -4,6 +4,7 @@ namespace RecallDb.Sdk
     using System.Collections.Generic;
     using System.Net;
     using System.Net.Http;
+    using System.Net.Http.Headers;
     using System.Text;
     using System.Text.Json;
     using System.Text.Json.Serialization;
@@ -18,36 +19,99 @@ namespace RecallDb.Sdk
     {
         #region Public-Members
 
+        /// <summary>
+        /// Time allowed for each request, from sending it to reading the whole response body. A request that takes
+        /// longer throws <see cref="TimeoutException"/>. Use <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>
+        /// to disable the limit.
+        /// Default: 100 seconds (the HttpClient default). Must be positive or infinite.
+        /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the value is zero or negative and not infinite.</exception>
+        public TimeSpan Timeout
+        {
+            get
+            {
+                return _Timeout;
+            }
+            set
+            {
+                if (value != System.Threading.Timeout.InfiniteTimeSpan && value <= TimeSpan.Zero)
+                    throw new ArgumentOutOfRangeException(nameof(Timeout), "Timeout must be positive or Timeout.InfiniteTimeSpan.");
+                _Timeout = value;
+            }
+        }
+
         #endregion
 
         #region Private-Members
 
         private readonly HttpClient _HttpClient;
+        private readonly bool _OwnsHttpClient;
         private readonly string _Endpoint;
+        private readonly AuthenticationHeaderValue _Authorization;
         private readonly JsonSerializerOptions _JsonOptions;
+        private TimeSpan _Timeout = TimeSpan.FromSeconds(100);
+        private List<string>? _Capabilities = null;
+        private bool _Disposed = false;
 
         #endregion
 
         #region Constructors-and-Factories
 
         /// <summary>
-        /// Instantiate the RecallDB client.
+        /// Instantiate the RecallDB client. The client creates and owns its own HttpClient, which it disposes in
+        /// <see cref="Dispose"/>. To share a connection pool across clients, or to add retry, logging, or telemetry
+        /// handlers, use the constructor that takes an HttpClient or an HttpMessageHandler.
         /// </summary>
-        /// <param name="endpoint">Base URL of the RecallDB server (e.g. http://localhost:8600).</param>
+        /// <param name="endpoint">Base URL of the RecallDB server (e.g. http://127.0.0.1:8600).</param>
         /// <param name="bearerToken">Bearer token for authentication.</param>
         public RecallDbClient(string endpoint, string bearerToken)
+            : this(endpoint, bearerToken, new HttpClient(), true)
+        {
+        }
+
+        /// <summary>
+        /// Instantiate the RecallDB client over a caller-supplied HttpClient. The caller owns the HttpClient:
+        /// <see cref="Dispose"/> does not dispose it, and the client does not change its default headers or timeout
+        /// (the bearer token is sent on each request, and <see cref="Timeout"/> is applied per request).
+        /// </summary>
+        /// <param name="endpoint">Base URL of the RecallDB server (e.g. http://127.0.0.1:8600).</param>
+        /// <param name="bearerToken">Bearer token for authentication.</param>
+        /// <param name="httpClient">HttpClient to send requests with.</param>
+        public RecallDbClient(string endpoint, string bearerToken, HttpClient httpClient)
+            : this(endpoint, bearerToken, httpClient ?? throw new ArgumentNullException(nameof(httpClient)), false)
+        {
+        }
+
+        /// <summary>
+        /// Instantiate the RecallDB client over a caller-supplied HttpMessageHandler, for example a
+        /// DelegatingHandler that retries 429, 502, and 503 responses, or a shared SocketsHttpHandler. The client
+        /// owns the HttpClient it builds around the handler; the caller owns the handler, which
+        /// <see cref="Dispose"/> does not dispose.
+        /// </summary>
+        /// <param name="endpoint">Base URL of the RecallDB server (e.g. http://127.0.0.1:8600).</param>
+        /// <param name="bearerToken">Bearer token for authentication.</param>
+        /// <param name="handler">Message handler to send requests through.</param>
+        public RecallDbClient(string endpoint, string bearerToken, HttpMessageHandler handler)
+            : this(endpoint, bearerToken, new HttpClient(handler ?? throw new ArgumentNullException(nameof(handler)), false), true)
+        {
+        }
+
+        private RecallDbClient(string endpoint, string bearerToken, HttpClient httpClient, bool ownsHttpClient)
         {
             if (string.IsNullOrEmpty(endpoint)) throw new ArgumentNullException(nameof(endpoint));
             if (string.IsNullOrEmpty(bearerToken)) throw new ArgumentNullException(nameof(bearerToken));
 
             _Endpoint = endpoint.TrimEnd('/');
-            _HttpClient = new HttpClient();
-            _HttpClient.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", bearerToken);
+            _HttpClient = httpClient;
+            _OwnsHttpClient = ownsHttpClient;
+            _Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+
+            // The per-request Timeout replaces HttpClient's own limit on clients this instance owns.
+            if (_OwnsHttpClient) _HttpClient.Timeout = System.Threading.Timeout.InfiniteTimeSpan;
 
             _JsonOptions = new JsonSerializerOptions
             {
-                WriteIndented = true,
+                WriteIndented = false,
                 DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
                 PropertyNameCaseInsensitive = true,
                 Converters = { new JsonStringEnumConverter() }
@@ -59,13 +123,52 @@ namespace RecallDb.Sdk
         #region Health
 
         /// <summary>
-        /// Retrieve health and version information from the server.
+        /// Retrieve health and version information from the server as untyped fields.
+        /// <see cref="GetServerInfoAsync"/> returns the same response typed.
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Dictionary containing health response fields.</returns>
         public async Task<Dictionary<string, object>> HealthAsync(CancellationToken token = default)
         {
             return await GetAsync<Dictionary<string, object>>("/", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Retrieve the server's name, version, uptime, and search capabilities. Capabilities is empty for servers
+        /// that predate the field.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Server information.</returns>
+        public async Task<ServerInfo> GetServerInfoAsync(CancellationToken token = default)
+        {
+            ServerInfo info = await GetAsync<ServerInfo>("/", token).ConfigureAwait(false);
+            if (info.Capabilities == null) info.Capabilities = new List<string>();
+            return info;
+        }
+
+        /// <summary>
+        /// Check whether the server supports a search capability (see <see cref="Constants.Capabilities"/>).
+        /// New request fields are ignored silently by servers that do not support them, so check before relying on
+        /// one. The capability list is fetched once and cached for this client's lifetime; pass refresh to re-read it,
+        /// for example after the server is upgraded.
+        /// </summary>
+        /// <param name="capability">Capability string, for example Capabilities.Collapse.</param>
+        /// <param name="refresh">True to re-read the capability list from the server.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>True if the server reports the capability.</returns>
+        public async Task<bool> SupportsAsync(string capability, bool refresh = false, CancellationToken token = default)
+        {
+            if (string.IsNullOrEmpty(capability)) throw new ArgumentNullException(nameof(capability));
+
+            List<string>? capabilities = _Capabilities;
+            if (capabilities == null || refresh)
+            {
+                ServerInfo info = await GetServerInfoAsync(token).ConfigureAwait(false);
+                capabilities = info.Capabilities;
+                _Capabilities = capabilities;
+            }
+
+            return capabilities.Contains(capability);
         }
 
         #endregion
@@ -109,7 +212,7 @@ namespace RecallDb.Sdk
         public async Task<TenantMetadata> GetTenantAsync(string id, CancellationToken token = default)
         {
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
-            return await GetAsync<TenantMetadata>("/v1.0/tenants/" + id, token).ConfigureAwait(false);
+            return await GetAsync<TenantMetadata>("/v1.0/tenants/" + Seg(id), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -123,7 +226,7 @@ namespace RecallDb.Sdk
         {
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
             if (tenant == null) throw new ArgumentNullException(nameof(tenant));
-            return await PutAsync<TenantMetadata>("/v1.0/tenants/" + id, tenant, token).ConfigureAwait(false);
+            return await PutAsync<TenantMetadata>("/v1.0/tenants/" + Seg(id), tenant, token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -134,7 +237,7 @@ namespace RecallDb.Sdk
         public async Task DeleteTenantAsync(string id, CancellationToken token = default)
         {
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
-            await DeleteAsync("/v1.0/tenants/" + id, token).ConfigureAwait(false);
+            await DeleteAsync("/v1.0/tenants/" + Seg(id), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -146,7 +249,7 @@ namespace RecallDb.Sdk
         public async Task<bool> TenantExistsAsync(string id, CancellationToken token = default)
         {
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
-            return await HeadAsync("/v1.0/tenants/" + id, token).ConfigureAwait(false);
+            return await HeadAsync("/v1.0/tenants/" + Seg(id), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -176,7 +279,7 @@ namespace RecallDb.Sdk
         {
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (user == null) throw new ArgumentNullException(nameof(user));
-            return await PutAsync<UserMaster>("/v1.0/tenants/" + tenantId + "/users", user, token).ConfigureAwait(false);
+            return await PutAsync<UserMaster>("/v1.0/tenants/" + Seg(tenantId) + "/users", user, token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -190,7 +293,7 @@ namespace RecallDb.Sdk
         {
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
-            return await GetAsync<UserMaster>("/v1.0/tenants/" + tenantId + "/users/" + id, token).ConfigureAwait(false);
+            return await GetAsync<UserMaster>("/v1.0/tenants/" + Seg(tenantId) + "/users/" + Seg(id), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -206,7 +309,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
             if (user == null) throw new ArgumentNullException(nameof(user));
-            return await PutAsync<UserMaster>("/v1.0/tenants/" + tenantId + "/users/" + id, user, token).ConfigureAwait(false);
+            return await PutAsync<UserMaster>("/v1.0/tenants/" + Seg(tenantId) + "/users/" + Seg(id), user, token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -219,7 +322,7 @@ namespace RecallDb.Sdk
         {
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
-            await DeleteAsync("/v1.0/tenants/" + tenantId + "/users/" + id, token).ConfigureAwait(false);
+            await DeleteAsync("/v1.0/tenants/" + Seg(tenantId) + "/users/" + Seg(id), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -233,7 +336,7 @@ namespace RecallDb.Sdk
         {
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
-            return await HeadAsync("/v1.0/tenants/" + tenantId + "/users/" + id, token).ConfigureAwait(false);
+            return await HeadAsync("/v1.0/tenants/" + Seg(tenantId) + "/users/" + Seg(id), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -247,7 +350,7 @@ namespace RecallDb.Sdk
         {
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (query == null) query = new EnumerationQuery();
-            return await PostAsync<EnumerationResult<UserMaster>>("/v1.0/tenants/" + tenantId + "/users/enumerate", query, token).ConfigureAwait(false);
+            return await PostAsync<EnumerationResult<UserMaster>>("/v1.0/tenants/" + Seg(tenantId) + "/users/enumerate", query, token).ConfigureAwait(false);
         }
 
         #endregion
@@ -265,7 +368,7 @@ namespace RecallDb.Sdk
         {
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (credential == null) throw new ArgumentNullException(nameof(credential));
-            return await PutAsync<Credential>("/v1.0/tenants/" + tenantId + "/credentials", credential, token).ConfigureAwait(false);
+            return await PutAsync<Credential>("/v1.0/tenants/" + Seg(tenantId) + "/credentials", credential, token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -279,7 +382,7 @@ namespace RecallDb.Sdk
         {
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
-            return await GetAsync<Credential>("/v1.0/tenants/" + tenantId + "/credentials/" + id, token).ConfigureAwait(false);
+            return await GetAsync<Credential>("/v1.0/tenants/" + Seg(tenantId) + "/credentials/" + Seg(id), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -295,7 +398,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
             if (credential == null) throw new ArgumentNullException(nameof(credential));
-            return await PutAsync<Credential>("/v1.0/tenants/" + tenantId + "/credentials/" + id, credential, token).ConfigureAwait(false);
+            return await PutAsync<Credential>("/v1.0/tenants/" + Seg(tenantId) + "/credentials/" + Seg(id), credential, token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -308,7 +411,7 @@ namespace RecallDb.Sdk
         {
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
-            await DeleteAsync("/v1.0/tenants/" + tenantId + "/credentials/" + id, token).ConfigureAwait(false);
+            await DeleteAsync("/v1.0/tenants/" + Seg(tenantId) + "/credentials/" + Seg(id), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -322,7 +425,7 @@ namespace RecallDb.Sdk
         {
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
-            return await HeadAsync("/v1.0/tenants/" + tenantId + "/credentials/" + id, token).ConfigureAwait(false);
+            return await HeadAsync("/v1.0/tenants/" + Seg(tenantId) + "/credentials/" + Seg(id), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -336,7 +439,7 @@ namespace RecallDb.Sdk
         {
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (query == null) query = new EnumerationQuery();
-            return await PostAsync<EnumerationResult<Credential>>("/v1.0/tenants/" + tenantId + "/credentials/enumerate", query, token).ConfigureAwait(false);
+            return await PostAsync<EnumerationResult<Credential>>("/v1.0/tenants/" + Seg(tenantId) + "/credentials/enumerate", query, token).ConfigureAwait(false);
         }
 
         #endregion
@@ -354,7 +457,7 @@ namespace RecallDb.Sdk
         {
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (collection == null) throw new ArgumentNullException(nameof(collection));
-            return await PutAsync<CollectionMetadata>("/v1.0/tenants/" + tenantId + "/collections", collection, token).ConfigureAwait(false);
+            return await PutAsync<CollectionMetadata>("/v1.0/tenants/" + Seg(tenantId) + "/collections", collection, token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -368,7 +471,7 @@ namespace RecallDb.Sdk
         {
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
-            return await GetAsync<CollectionMetadata>("/v1.0/tenants/" + tenantId + "/collections/" + collectionId, token).ConfigureAwait(false);
+            return await GetAsync<CollectionMetadata>("/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -384,7 +487,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             if (collection == null) throw new ArgumentNullException(nameof(collection));
-            return await PutAsync<CollectionMetadata>("/v1.0/tenants/" + tenantId + "/collections/" + collectionId, collection, token).ConfigureAwait(false);
+            return await PutAsync<CollectionMetadata>("/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId), collection, token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -397,7 +500,7 @@ namespace RecallDb.Sdk
         {
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
-            await DeleteAsync("/v1.0/tenants/" + tenantId + "/collections/" + collectionId, token).ConfigureAwait(false);
+            await DeleteAsync("/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -411,7 +514,7 @@ namespace RecallDb.Sdk
         {
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
-            return await HeadAsync("/v1.0/tenants/" + tenantId + "/collections/" + collectionId, token).ConfigureAwait(false);
+            return await HeadAsync("/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -425,7 +528,7 @@ namespace RecallDb.Sdk
         {
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (query == null) query = new EnumerationQuery();
-            return await PostAsync<EnumerationResult<CollectionMetadata>>("/v1.0/tenants/" + tenantId + "/collections/enumerate", query, token).ConfigureAwait(false);
+            return await PostAsync<EnumerationResult<CollectionMetadata>>("/v1.0/tenants/" + Seg(tenantId) + "/collections/enumerate", query, token).ConfigureAwait(false);
         }
 
         #endregion
@@ -446,7 +549,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             if (document == null) throw new ArgumentNullException(nameof(document));
             return await PutAsync<DocumentRecord>(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/documents",
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/documents",
                 document, token).ConfigureAwait(false);
         }
 
@@ -556,7 +659,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             if (query == null) query = new EnumerationQuery();
             return await PostAsync<EnumerationResult<DocumentRecord>>(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/documents/enumerate",
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/documents/enumerate",
                 query, token).ConfigureAwait(false);
         }
 
@@ -574,7 +677,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             if (documents == null) throw new ArgumentNullException(nameof(documents));
             return await PostAsync<List<DocumentRecord>>(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/documents/batch",
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/documents/batch",
                 documents, token).ConfigureAwait(false);
         }
 
@@ -593,7 +696,7 @@ namespace RecallDb.Sdk
             BatchDeleteRequest req = new BatchDeleteRequest();
             req.DocumentKeys = documentKeys;
             await PostAsync(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/documents/batch/delete",
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/documents/batch/delete",
                 req, token).ConfigureAwait(false);
         }
 
@@ -611,7 +714,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             if (filter == null) filter = new EnumerationQuery();
             return await PostAsync<DeleteResult>(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/documents/delete/filter",
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/documents/delete/filter",
                 filter, token).ConfigureAwait(false);
         }
 
@@ -633,7 +736,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             if (label == null) throw new ArgumentNullException(nameof(label));
             return await PutAsync<LabelRecord>(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/labels",
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/labels",
                 label, token).ConfigureAwait(false);
         }
 
@@ -651,7 +754,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
             return await GetAsync<LabelRecord>(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/labels/" + id,
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/labels/" + Seg(id),
                 token).ConfigureAwait(false);
         }
 
@@ -668,7 +771,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
             await DeleteAsync(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/labels/" + id,
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/labels/" + Seg(id),
                 token).ConfigureAwait(false);
         }
 
@@ -684,7 +787,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             return await GetAsync<EnumerationResult<LabelRecord>>(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/labels",
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/labels",
                 token).ConfigureAwait(false);
         }
 
@@ -700,7 +803,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             return await GetAsync<List<string>>(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/labels/distinct",
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/labels/distinct",
                 token).ConfigureAwait(false);
         }
 
@@ -722,7 +825,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             if (tag == null) throw new ArgumentNullException(nameof(tag));
             return await PutAsync<TagRecord>(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/tags",
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/tags",
                 tag, token).ConfigureAwait(false);
         }
 
@@ -740,7 +843,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
             return await GetAsync<TagRecord>(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/tags/" + id,
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/tags/" + Seg(id),
                 token).ConfigureAwait(false);
         }
 
@@ -757,7 +860,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
             await DeleteAsync(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/tags/" + id,
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/tags/" + Seg(id),
                 token).ConfigureAwait(false);
         }
 
@@ -773,7 +876,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             return await GetAsync<EnumerationResult<TagRecord>>(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/tags",
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/tags",
                 token).ConfigureAwait(false);
         }
 
@@ -789,7 +892,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentNullException(nameof(tenantId));
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             return await GetAsync<List<string>>(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/tags/distinct",
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/tags/distinct",
                 token).ConfigureAwait(false);
         }
 
@@ -811,7 +914,7 @@ namespace RecallDb.Sdk
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
             if (query == null) throw new ArgumentNullException(nameof(query));
             return await PostAsync<SearchResult>(
-                "/v1.0/tenants/" + tenantId + "/collections/" + collectionId + "/search",
+                "/v1.0/tenants/" + Seg(tenantId) + "/collections/" + Seg(collectionId) + "/search",
                 query, token).ConfigureAwait(false);
         }
 
@@ -824,7 +927,9 @@ namespace RecallDb.Sdk
         /// </summary>
         public void Dispose()
         {
-            if (_HttpClient != null) _HttpClient.Dispose();
+            if (_Disposed) return;
+            _Disposed = true;
+            if (_OwnsHttpClient) _HttpClient.Dispose();
         }
 
         #endregion
@@ -843,66 +948,114 @@ namespace RecallDb.Sdk
 
         private async Task<T> GetAsync<T>(string path, CancellationToken token)
         {
-            using HttpResponseMessage response = await _HttpClient.GetAsync(_Endpoint + path, token).ConfigureAwait(false);
-            return await HandleResponseAsync<T>(response).ConfigureAwait(false);
+            return RequireBody(await SendAsync<T>(HttpMethod.Get, path, null, token).ConfigureAwait(false), path);
         }
 
         private async Task<bool> HeadAsync(string path, CancellationToken token)
         {
-            using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Head, _Endpoint + path);
-            using HttpResponseMessage response = await _HttpClient.SendAsync(request, token).ConfigureAwait(false);
-            return response.StatusCode == HttpStatusCode.OK;
+            // 200 means the resource exists and 404 that it does not. Anything else (401, 403, 429, 5xx) is a failure,
+            // not an answer, so it throws instead of reading as "does not exist".
+            using CancellationTokenSource? timeoutSource = CreateTimeoutSource(token, out CancellationToken linked);
+            try
+            {
+                using HttpRequestMessage request = CreateRequest(HttpMethod.Head, path, null);
+                using HttpResponseMessage response = await _HttpClient.SendAsync(request, linked).ConfigureAwait(false);
+                if (response.StatusCode == HttpStatusCode.OK) return true;
+                if (response.StatusCode == HttpStatusCode.NotFound) return false;
+                string body = await response.Content.ReadAsStringAsync(linked).ConfigureAwait(false);
+                throw new RecallDbException(response.StatusCode, body);
+            }
+            catch (OperationCanceledException e) when (IsTimeout(timeoutSource, token))
+            {
+                throw CreateTimeoutException(e);
+            }
         }
 
         private async Task<T> PostAsync<T>(string path, object body, CancellationToken token)
         {
-            string json = JsonSerializer.Serialize(body, _JsonOptions);
-            using StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
-            using HttpResponseMessage response = await _HttpClient.PostAsync(_Endpoint + path, content, token).ConfigureAwait(false);
-            return await HandleResponseAsync<T>(response).ConfigureAwait(false);
+            return RequireBody(await SendAsync<T>(HttpMethod.Post, path, body, token).ConfigureAwait(false), path);
         }
 
         private async Task PostAsync(string path, object body, CancellationToken token)
         {
-            string json = JsonSerializer.Serialize(body, _JsonOptions);
-            using StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
-            using HttpResponseMessage response = await _HttpClient.PostAsync(_Endpoint + path, content, token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode && response.StatusCode != HttpStatusCode.NoContent)
-            {
-                string responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                throw new RecallDbException(response.StatusCode, responseBody);
-            }
+            await SendAsync<object>(HttpMethod.Post, path, body, token, false).ConfigureAwait(false);
         }
 
         private async Task<T> PutAsync<T>(string path, object body, CancellationToken token)
         {
-            string json = JsonSerializer.Serialize(body, _JsonOptions);
-            using StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
-            using HttpResponseMessage response = await _HttpClient.PutAsync(_Endpoint + path, content, token).ConfigureAwait(false);
-            return await HandleResponseAsync<T>(response).ConfigureAwait(false);
+            return RequireBody(await SendAsync<T>(HttpMethod.Put, path, body, token).ConfigureAwait(false), path);
+        }
+
+        private static T RequireBody<T>(T? value, string path)
+        {
+            // Every typed call returns a JSON body on success; an empty one is a server or proxy fault, not a null result.
+            if (value == null) throw new InvalidOperationException("RecallDB returned a success status with an empty response body for " + path + ".");
+            return value;
         }
 
         private async Task DeleteAsync(string path, CancellationToken token)
         {
-            using HttpResponseMessage response = await _HttpClient.DeleteAsync(_Endpoint + path, token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode && response.StatusCode != HttpStatusCode.NoContent)
+            await SendAsync<object>(HttpMethod.Delete, path, null, token, false).ConfigureAwait(false);
+        }
+
+        private async Task<T?> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken token, bool deserialize = true)
+        {
+            using CancellationTokenSource? timeoutSource = CreateTimeoutSource(token, out CancellationToken linked);
+            try
             {
-                string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                throw new RecallDbException(response.StatusCode, body);
+                using HttpRequestMessage request = CreateRequest(method, path, body);
+                using HttpResponseMessage response = await _HttpClient.SendAsync(request, linked).ConfigureAwait(false);
+                string responseBody = await response.Content.ReadAsStringAsync(linked).ConfigureAwait(false);
+
+                if (!response.IsSuccessStatusCode)
+                    throw new RecallDbException(response.StatusCode, responseBody);
+
+                if (!deserialize || string.IsNullOrEmpty(responseBody)) return default;
+                return JsonSerializer.Deserialize<T>(responseBody, _JsonOptions);
+            }
+            catch (OperationCanceledException e) when (IsTimeout(timeoutSource, token))
+            {
+                throw CreateTimeoutException(e);
             }
         }
 
-        private async Task<T> HandleResponseAsync<T>(HttpResponseMessage response)
+        private HttpRequestMessage CreateRequest(HttpMethod method, string path, object? body)
         {
-            string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-
-            if (!response.IsSuccessStatusCode)
+            // The bearer token goes on each request rather than on DefaultRequestHeaders, so a caller-supplied
+            // HttpClient is never modified.
+            HttpRequestMessage request = new HttpRequestMessage(method, _Endpoint + path);
+            request.Headers.Authorization = _Authorization;
+            if (body != null)
             {
-                throw new RecallDbException(response.StatusCode, body);
+                string json = JsonSerializer.Serialize(body, _JsonOptions);
+                request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+            }
+            return request;
+        }
+
+        private CancellationTokenSource? CreateTimeoutSource(CancellationToken token, out CancellationToken linked)
+        {
+            if (_Timeout == System.Threading.Timeout.InfiniteTimeSpan)
+            {
+                linked = token;
+                return null;
             }
 
-            if (string.IsNullOrEmpty(body)) return default;
-            return JsonSerializer.Deserialize<T>(body, _JsonOptions);
+            CancellationTokenSource source = CancellationTokenSource.CreateLinkedTokenSource(token);
+            source.CancelAfter(_Timeout);
+            linked = source.Token;
+            return source;
+        }
+
+        private static bool IsTimeout(CancellationTokenSource? timeoutSource, CancellationToken callerToken)
+        {
+            // Cancelled by the timeout, not by the caller: the caller's own cancellation propagates unchanged.
+            return timeoutSource != null && timeoutSource.IsCancellationRequested && !callerToken.IsCancellationRequested;
+        }
+
+        private TimeoutException CreateTimeoutException(Exception inner)
+        {
+            return new TimeoutException("The RecallDB request did not complete within the client Timeout of " + _Timeout.TotalSeconds + " seconds.", inner);
         }
 
         #endregion

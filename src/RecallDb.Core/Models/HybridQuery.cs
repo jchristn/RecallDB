@@ -76,6 +76,29 @@ namespace RecallDb.Core.Models
             }
         }
 
+        /// <summary>
+        /// Weight (r) of a third, recency signal in Rrf fusion. Candidates are grouped by their recency key (the
+        /// collapse group when Collapse is set, otherwise the document), each key is ranked by its newest
+        /// created_utc (1 = newest), and every candidate adds r / (k + recencyRank) to its raw score. The fused
+        /// score is divided by ((1 - w) + w + r) so it stays in [0, 1]. Only used by the Rrf strategy; Linear and
+        /// Filter ignore it and the response carries a Notice.
+        /// Default: 0.0 (off; the fused score is exactly what it is without this field). Minimum: 0.0. Maximum: 1.0.
+        /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the value is outside 0.0-1.0 or is not a finite number.</exception>
+        public double RecencyWeight
+        {
+            get
+            {
+                return _RecencyWeight;
+            }
+            set
+            {
+                if (double.IsNaN(value) || value < 0.0 || value > 1.0)
+                    throw new ArgumentOutOfRangeException(nameof(RecencyWeight), "RecencyWeight must be between 0.0 and 1.0.");
+                _RecencyWeight = value;
+            }
+        }
+
         #endregion
 
         #region Private-Members
@@ -83,6 +106,7 @@ namespace RecallDb.Core.Models
         private HybridStrategyEnum _Strategy = HybridStrategyEnum.Rrf;
         private int _RrfK = 60;
         private int? _CandidatePool = null;
+        private double _RecencyWeight = 0.0;
 
         #endregion
 

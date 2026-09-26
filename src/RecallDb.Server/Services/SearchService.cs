@@ -31,6 +31,11 @@ namespace RecallDb.Server.Services
         /// </summary>
         public const string NoticeBlankFullTextIgnored = "FullText.Query was blank, so the search ran as vector-only.";
 
+        /// <summary>
+        /// Notice returned when Hybrid.RecencyWeight is set on a hybrid search whose strategy is not Rrf.
+        /// </summary>
+        public const string NoticeRecencyIgnored = "Hybrid.RecencyWeight applies only to the Rrf strategy and was ignored.";
+
         #endregion
 
         #region Private-Members
@@ -89,6 +94,10 @@ namespace RecallDb.Server.Services
             if (query.FullText != null && !hasFullText && !hasVector)
                 return ServiceResult.Fail(400, "Bad request", "FullText.Query is required for a full-text search.");
 
+            string crossFieldError = ValidateCrossField(query, hasVector, hasFullText);
+            if (crossFieldError != null)
+                return ServiceResult.Fail(400, "Bad request", crossFieldError);
+
             if (hasFullText)
             {
                 string languageError = await ValidateLanguageAsync(query.FullText.Language, token).ConfigureAwait(false);
@@ -105,6 +114,8 @@ namespace RecallDb.Server.Services
             string mode = DeriveSearchMode(query);
             string matchMode = DeriveMatchMode(query);
             string hybridStrategy = DeriveHybridStrategy(query);
+            string collapse = DeriveCollapse(query);
+            string recency = DeriveRecency(query);
 
             Stopwatch sw = Stopwatch.StartNew();
             SearchResult result;
@@ -114,6 +125,8 @@ namespace RecallDb.Server.Services
                 searchActivity?.SetTag(RecallDb.Server.Observability.ServerTelemetry.TagSearchMode, mode);
                 searchActivity?.SetTag(RecallDb.Server.Observability.ServerTelemetry.TagSearchMatchMode, matchMode);
                 searchActivity?.SetTag(RecallDb.Server.Observability.ServerTelemetry.TagSearchHybridStrategy, hybridStrategy);
+                searchActivity?.SetTag(RecallDb.Server.Observability.ServerTelemetry.TagSearchCollapse, collapse);
+                searchActivity?.SetTag(RecallDb.Server.Observability.ServerTelemetry.TagSearchRecency, recency);
                 try
                 {
                     result = await _Database.Search.SearchAsync(cid, col.Dimensionality, query, token).ConfigureAwait(false);
@@ -122,13 +135,16 @@ namespace RecallDb.Server.Services
                 catch (Exception e)
                 {
                     RecallDb.Core.Observability.RecallDbTelemetry.RecordException(searchActivity, e);
-                    RecallDb.Server.Observability.ServerTelemetry.RecordSearch(origin, mode, false, 500, sw.Elapsed.TotalSeconds, -1, matchMode, hybridStrategy);
+                    RecallDb.Server.Observability.ServerTelemetry.RecordSearch(origin, mode, false, 500, sw.Elapsed.TotalSeconds, -1, matchMode, hybridStrategy, collapse, recency);
                     throw;
                 }
             }
 
             if (query.Hybrid != null && !(hasVector && hasFullText))
                 result.AddNotice(NoticeHybridIgnored);
+
+            if (hasVector && hasFullText && query.Hybrid != null && query.Hybrid.RecencyWeight > 0.0 && query.Hybrid.Strategy != HybridStrategyEnum.Rrf)
+                result.AddNotice(NoticeRecencyIgnored);
 
             if (hasVector && query.FullText != null && !hasFullText)
                 result.AddNotice(NoticeBlankFullTextIgnored);
@@ -216,7 +232,7 @@ namespace RecallDb.Server.Services
             SanitizeScores(result.Documents);
 
             int resultCount = result.Documents != null ? result.Documents.Count : 0;
-            RecallDb.Server.Observability.ServerTelemetry.RecordSearch(origin, mode, true, 200, sw.Elapsed.TotalSeconds, resultCount, matchMode, hybridStrategy);
+            RecallDb.Server.Observability.ServerTelemetry.RecordSearch(origin, mode, true, 200, sw.Elapsed.TotalSeconds, resultCount, matchMode, hybridStrategy, collapse, recency);
 
             return ServiceResult.Ok(result);
         }
@@ -274,6 +290,41 @@ namespace RecallDb.Server.Services
             if (!HasVector(query) || !HasFullText(query)) return "none";
             HybridStrategyEnum strategy = query.Hybrid != null ? query.Hybrid.Strategy : HybridStrategyEnum.Rrf;
             return strategy.ToString().ToLowerInvariant();
+        }
+
+        private static string DeriveCollapse(SearchQuery query)
+        {
+            if (query == null || query.Collapse == null) return "none";
+            return query.Collapse.Field.ToString().ToLowerInvariant();
+        }
+
+        private static string DeriveRecency(SearchQuery query)
+        {
+            // On only when the recency signal actually enters the score: a hybrid Rrf search with a positive weight.
+            if (!HasVector(query) || !HasFullText(query) || query.Hybrid == null) return "off";
+            if (query.Hybrid.Strategy != HybridStrategyEnum.Rrf) return "off";
+            return query.Hybrid.RecencyWeight > 0.0 ? "on" : "off";
+        }
+
+        private static string ValidateCrossField(SearchQuery query, bool hasVector, bool hasFullText)
+        {
+            // Single-field ranges are enforced by the model setters (400 on deserialization); these rules span fields.
+            if (query.FullText != null && query.FullText.MinimumShouldMatch > 1 && query.FullText.MatchMode != TextMatchModeEnum.Any)
+                return "FullText.MinimumShouldMatch applies only to MatchMode Any.";
+
+            if (query.Collapse != null)
+            {
+                if (query.Collapse.Field == CollapseFieldEnum.Tag && string.IsNullOrWhiteSpace(query.Collapse.TagKey))
+                    return "Collapse.TagKey is required when Collapse.Field is Tag.";
+
+                if (!hasVector && !hasFullText)
+                    return "Collapse requires a vector or a full-text query.";
+
+                if (hasVector && hasFullText && query.Hybrid != null && query.Hybrid.Strategy == HybridStrategyEnum.Filter)
+                    return "Collapse is not supported with Hybrid.Strategy Filter.";
+            }
+
+            return null;
         }
 
         private async Task<string> ValidateLanguageAsync(string language, CancellationToken token)

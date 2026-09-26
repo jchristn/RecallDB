@@ -16,12 +16,12 @@ namespace RecallDb.Sdk.Models
         /// <summary>
         /// Document key (unique identifier within the collection).
         /// </summary>
-        public string DocumentKey { get; set; }
+        public string? DocumentKey { get; set; }
 
         /// <summary>
         /// Document ID (groups chunks of the same document).
         /// </summary>
-        public string DocumentId { get; set; }
+        public string? DocumentId { get; set; }
 
         /// <summary>
         /// Content length in bytes.
@@ -31,12 +31,12 @@ namespace RecallDb.Sdk.Models
         /// <summary>
         /// Entity tag.
         /// </summary>
-        public string Etag { get; set; }
+        public string? Etag { get; set; }
 
         /// <summary>
         /// SHA256 hash of the content.
         /// </summary>
-        public string Sha256 { get; set; }
+        public string? Sha256 { get; set; }
 
         /// <summary>
         /// Position (chunk index within a document).
@@ -51,17 +51,17 @@ namespace RecallDb.Sdk.Models
         /// <summary>
         /// Text content.
         /// </summary>
-        public string Content { get; set; }
+        public string? Content { get; set; }
 
         /// <summary>
         /// Binary data.
         /// </summary>
-        public byte[] BinaryData { get; set; }
+        public byte[]? BinaryData { get; set; }
 
         /// <summary>
         /// Vector embeddings.
         /// </summary>
-        public List<float> Embeddings { get; set; }
+        public List<float>? Embeddings { get; set; }
 
         /// <summary>
         /// Creation timestamp in UTC.
@@ -103,20 +103,37 @@ namespace RecallDb.Sdk.Models
         public int? TextRank { get; set; }
 
         /// <summary>
+        /// 1-based rank of this document's recency key among the candidates, 1 = newest (hybrid Rrf search with
+        /// Hybrid.RecencyWeight above 0). Every candidate of one collapse group shares a rank. Null otherwise.
+        /// </summary>
+        public int? RecencyRank { get; set; }
+
+        /// <summary>
+        /// The group this hit represents when the search is collapsed: the DocumentId or tag value it was grouped
+        /// by, or its DocumentKey when it has none. Null when the search is not collapsed.
+        /// </summary>
+        public string? GroupKey { get; set; }
+
+        /// <summary>
+        /// Number of candidates in this hit's group, including this hit, when the search is collapsed. Null otherwise.
+        /// </summary>
+        public int? GroupHits { get; set; }
+
+        /// <summary>
         /// Neighboring chunks surrounding this document in positional order.
         /// Populated when IncludeNeighbors is specified in the search query. Null when not requested.
         /// </summary>
-        public List<DocumentRecord> Neighbors { get; set; }
+        public List<DocumentRecord>? Neighbors { get; set; }
 
         /// <summary>
         /// Labels associated with this document.
         /// </summary>
-        public List<string> Labels { get; set; }
+        public List<string>? Labels { get; set; }
 
         /// <summary>
         /// Tags associated with this document.
         /// </summary>
-        public Dictionary<string, string> Tags { get; set; }
+        public Dictionary<string, string>? Tags { get; set; }
 
         /// <summary>
         /// Instantiate.
