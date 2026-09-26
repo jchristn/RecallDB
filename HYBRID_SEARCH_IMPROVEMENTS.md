@@ -836,7 +836,7 @@ Annotate in place. Status values: `todo`, `doing`, `done`, `blocked`, `skipped`.
 | R5 | `TESTING.md` | 6.5 | done | |  |
 | R6 | CHANGELOG bullets under v0.2.1 | 11 | done | | No version change; Server bullets under v0.2.1; SDK bullets under a new SDKs v0.2.2 heading |
 | R7 | Em-dash sweep of every changed file | 9 | done | |  |
-| R8 | Owner decision on publishing the SDKs | 11 | done | | Owner only; Owner set the SDKs to 0.2.2; publishing itself is still open |
+| R8 | Owner decision on publishing the SDKs | 11 | done | | Owner only; Owner set the SDKs to 0.2.2; RecallDb.Sdk 0.2.2 published to NuGet |
 
 ### Verification
 

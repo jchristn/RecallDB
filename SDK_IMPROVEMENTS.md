@@ -6,7 +6,7 @@ covers code, tests, documentation, the changelog, and release.
 
 **Status (2026-09-26):** implemented, with the SDKs at a common version, 0.2.2, as the owner directed (section 9).
 The server work it depended on (recency, collapse, minimum-should-match, capabilities) was implemented at the same
-time from `HYBRID_SEARCH_IMPROVEMENTS.md`. Publishing the packages and the Isis move (I1) are still open.
+time from `HYBRID_SEARCH_IMPROVEMENTS.md`. RecallDb.Sdk 0.2.2 is published to NuGet; npm/PyPI publishing and the Isis move (I1) are still open.
 
 This plan owns the SDK side of `HYBRID_SEARCH_IMPROVEMENTS.md`. That plan's section 6.4 and checklist items K1 to K5
 (new hybrid fields, capabilities helper, harness cases) are adopted here as items S3 and S5, so the SDK work can be
@@ -380,7 +380,7 @@ Following `C:\code\agents\requirements\VERSIONING.md`, this plan changed no vers
 
 | # | Item | Ref | Status | Owner | Notes |
 |---|---|---|---|---|---|
-| S1 | Publish decision and version alignment | 4, 9 | done | owner | Version 0.2.2 in all three SDKs; release notes updated. Publishing to NuGet/npm/PyPI not done |
+| S1 | Publish decision and version alignment | 4, 9 | done | owner | Version 0.2.2 in all three SDKs; release notes updated. RecallDb.Sdk 0.2.2 and its symbol package published to NuGet from da2683d; npm and PyPI not published |
 | S2 | JS and Python docs for existing fields; parity harness cases | 4 | done | |  |
 | S3 | Hybrid-plan fields in all SDKs (replaces hybrid plan K1, K3, K4) | 4 | done | | depends on server work; Server work implemented alongside |
 | S4 | `IncludeEmbeddings` in JS and Python; vector cost note | 4 | done | | Group mean vectors remain out of scope |
