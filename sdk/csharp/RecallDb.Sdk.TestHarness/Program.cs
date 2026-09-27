@@ -290,7 +290,10 @@ namespace RecallDb.Sdk.TestHarness
             await RunTest("SDK 0.2.2: collapse by tag with recency", TestSdkCollapseRecency);
             await RunTest("SDK 0.2.2: vector-only collapse", TestSdkVectorCollapse);
             await RunTest("SDK 0.2.2: minimum should match", TestSdkMinimumShouldMatch);
+            await RunTest("SDK 0.2.2: hybrid Linear collapse", TestSdkLinearCollapse);
             await RunTest("SDK 0.2.2: recency weight out of range", TestSdkRecencyWeightRejected);
+            await RunTest("SDK 0.2.2: invalid collapse rejected", TestSdkCollapseRejected);
+            await RunTest("SDK 0.2.2: invalid minimum should match rejected", TestSdkMinimumShouldMatchRejected);
             await RunTest("SDK 0.2.2: structured errors", TestSdkStructuredError);
             await RunTest("SDK 0.2.2: injected HttpClient", TestSdkInjectedHttpClient);
             await RunTest("SDK 0.2.2: handler and compact JSON", TestSdkHandlerAndCompactJson);
@@ -1967,6 +1970,74 @@ namespace RecallDb.Sdk.TestHarness
             List<string> keys = result.Documents.Select(d => d.DocumentKey ?? "").ToList();
             AssertTrue(keys.Contains("m-two"), "Two-term match kept");
             AssertTrue(!keys.Contains("m-one"), "One-term match excluded");
+        }
+
+        private static async Task TestSdkLinearCollapse()
+        {
+            SearchQuery query = GroupHybridQuery("signing key rotation");
+            query.Hybrid = new HybridQuery();
+            query.Hybrid.Strategy = HybridStrategies.Linear;
+            query.Collapse = new CollapseQuery();
+            query.Collapse.Field = CollapseFields.Tag;
+            query.Collapse.TagKey = "parentKey";
+            SearchResult result = await GroupSearch(query).ConfigureAwait(false);
+            List<string> groups = result.Documents.Select(d => d.GroupKey ?? "").ToList();
+            AssertTrue(groups.Count > 0, "Results");
+            AssertEqual(groups.Count, groups.Distinct(StringComparer.Ordinal).Count(), "One hit per GroupKey");
+            AssertTrue(groups.Contains("p-new") && groups.Contains("p-old"), "Both parents are returned");
+            AssertTrue(result.Documents.All(d => d.GroupHits.HasValue && d.GroupHits.Value >= 1), "Every hit carries GroupHits");
+            AssertTrue(result.Documents.All(d => !d.RecencyRank.HasValue), "Linear has no RecencyRank");
+            AssertEqual((long)groups.Count, result.TotalRecords, "TotalRecords counts groups");
+        }
+
+        private static async Task TestSdkCollapseRejected()
+        {
+            SearchQuery missingTagKey = GroupHybridQuery("signing key");
+            missingTagKey.Collapse = new CollapseQuery();
+            missingTagKey.Collapse.Field = CollapseFields.Tag;
+            await AssertSearchRejected(missingTagKey, "TagKey").ConfigureAwait(false);
+
+            SearchQuery filter = GroupHybridQuery("signing key");
+            filter.Hybrid = new HybridQuery();
+            filter.Hybrid.Strategy = HybridStrategies.Filter;
+            filter.Collapse = new CollapseQuery();
+            await AssertSearchRejected(filter, "Filter").ConfigureAwait(false);
+
+            SearchQuery pool = GroupHybridQuery("signing key");
+            pool.FullText = null;
+            pool.Collapse = new CollapseQuery();
+            pool.Collapse.CandidatePool = 10001;
+            await AssertSearchRejected(pool, "CandidatePool").ConfigureAwait(false);
+        }
+
+        private static async Task TestSdkMinimumShouldMatchRejected()
+        {
+            SearchQuery wrongMode = new SearchQuery();
+            wrongMode.FullText = new FullTextQuery();
+            wrongMode.FullText.Query = "alpha beta";
+            wrongMode.FullText.MatchMode = FullTextMatchModes.All;
+            wrongMode.FullText.MinimumShouldMatch = 2;
+            await AssertSearchRejected(wrongMode, "MinimumShouldMatch").ConfigureAwait(false);
+
+            SearchQuery outOfRange = new SearchQuery();
+            outOfRange.FullText = new FullTextQuery();
+            outOfRange.FullText.Query = "alpha beta";
+            outOfRange.FullText.MinimumShouldMatch = 4;
+            await AssertSearchRejected(outOfRange, "MinimumShouldMatch").ConfigureAwait(false);
+        }
+
+        private static async Task AssertSearchRejected(SearchQuery query, string mention)
+        {
+            try
+            {
+                await GroupSearch(query).ConfigureAwait(false);
+                AssertTrue(false, "Search should be rejected (" + mention + ")");
+            }
+            catch (RecallDbException e)
+            {
+                AssertEqual(400, (int)e.StatusCode, "StatusCode");
+                AssertTrue(e.ResponseBody.Contains(mention), "Response names " + mention + ", got " + e.ResponseBody);
+            }
         }
 
         private static async Task TestSdkRecencyWeightRejected()

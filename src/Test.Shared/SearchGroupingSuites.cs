@@ -172,6 +172,17 @@ namespace Test.Shared
 
                     // ----- Collapse -----
 
+                    Case("SearchHybridRecencyIgnoredForSingleLeg", "Recency: a single-leg search ignores Hybrid.RecencyWeight", async ct =>
+                    {
+                        JsonElement vector = await Search(new { Vector = Vec(), Hybrid = new { RecencyWeight = 0.5 }, MaxResults = 10 }).ConfigureAwait(false);
+                        AssertTrue(Docs(vector).Count > 0, "Vector-only still runs");
+                        AssertTrue(Docs(vector).All(d => !GetInt(d, "RecencyRank").HasValue), "No RecencyRank on a vector-only search");
+
+                        JsonElement text = await Search(new { FullText = new { Query = _Query }, Hybrid = new { RecencyWeight = 0.5 }, MaxResults = 10 }).ConfigureAwait(false);
+                        AssertTrue(Docs(text).Count > 0, "Full-text-only still runs");
+                        AssertTrue(Docs(text).All(d => !GetInt(d, "RecencyRank").HasValue), "No RecencyRank on a full-text-only search");
+                    }),
+
                     Case("SearchCollapseTagOneHitPerParent", "Collapse: hybrid by tag returns one hit per parent with GroupHits", async ct =>
                     {
                         JsonElement json = await Search(new { Vector = Vec(), FullText = new { Query = _Query }, Collapse = new { Field = "Tag", TagKey = "parentKey" }, MaxResults = 50 }).ConfigureAwait(false);
@@ -179,6 +190,24 @@ namespace Test.Shared
                         AssertEqual(groups.Count, groups.Distinct(StringComparer.Ordinal).Count(), "No two hits share a GroupKey");
                         AssertEqual(3, GetInt(FindGroup(json, "p-new"), "GroupHits") ?? -1, "p-new has three candidate chunks");
                         AssertEqual(2, GetInt(FindGroup(json, "p-old"), "GroupHits") ?? -1, "p-old has two candidate chunks");
+                        AssertEqual((long)groups.Count, json.GetProperty("TotalRecords").GetInt64(), "TotalRecords counts groups");
+                    }),
+
+                    Case("SearchCollapseHybridLinear", "Collapse: hybrid Linear returns one hit per parent, its best chunk", async ct =>
+                    {
+                        JsonElement flat = await Search(new { Vector = Vec(), FullText = new { Query = _Query }, Hybrid = new { Strategy = "Linear" }, MaxResults = 50 }).ConfigureAwait(false);
+                        JsonElement json = await Search(new { Vector = Vec(), FullText = new { Query = _Query }, Hybrid = new { Strategy = "Linear" }, Collapse = new { Field = "Tag", TagKey = "parentKey" }, MaxResults = 50 }).ConfigureAwait(false);
+                        List<string> groups = Docs(json).Select(d => d.GetProperty("GroupKey").GetString()).ToList();
+                        AssertEqual(groups.Count, groups.Distinct(StringComparer.Ordinal).Count(), "No two hits share a GroupKey");
+                        AssertTrue(groups.Contains("p-old") && groups.Contains("p-new"), "Both parents are returned, got " + string.Join(",", groups));
+                        AssertTrue(GetInt(FindGroup(json, "p-new"), "GroupHits") >= 1, "GroupHits is set");
+                        AssertTrue(Docs(json).All(d => !GetInt(d, "RecencyRank").HasValue), "No RecencyRank for Linear");
+                        foreach (JsonElement hit in Docs(json))
+                        {
+                            string group = hit.GetProperty("GroupKey").GetString();
+                            JsonElement best = Docs(flat).First(d => ParentOf(d) == group);
+                            AssertTrue(Math.Abs(best.GetProperty("Score").GetDouble() - hit.GetProperty("Score").GetDouble()) < 1e-12, "Representative of " + group + " is its best Linear chunk");
+                        }
                         AssertEqual((long)groups.Count, json.GetProperty("TotalRecords").GetInt64(), "TotalRecords counts groups");
                     }),
 
@@ -313,6 +342,21 @@ namespace Test.Shared
                     {
                         await AssertBadRequest(new { Vector = Vec(), FullText = new { Query = _Query }, Hybrid = new { RecencyWeight = 1.5 } }).ConfigureAwait(false);
                         await AssertBadRequest(new { Vector = Vec(), FullText = new { Query = _Query }, Hybrid = new { RecencyWeight = -0.1 } }).ConfigureAwait(false);
+                        await AssertBadRequest(new { Vector = Vec(), FullText = new { Query = _Query }, Hybrid = new { RecencyWeight = "high" } }).ConfigureAwait(false);
+                    }),
+
+                    Case("SearchValidationBoundariesAccepted", "Validation: the edges of every new range are accepted", async ct =>
+                    {
+                        await Search(new { Vector = Vec(), FullText = new { Query = _Query }, Hybrid = new { RecencyWeight = 0.0 }, MaxResults = 5 }).ConfigureAwait(false);
+                        await Search(new { Vector = Vec(), FullText = new { Query = _Query }, Hybrid = new { RecencyWeight = 1.0 }, MaxResults = 5 }).ConfigureAwait(false);
+                        await Search(new { Vector = Vec(), Collapse = new { Field = "DocumentId", CandidatePool = 1 }, MaxResults = 5 }).ConfigureAwait(false);
+                        await Search(new { Vector = Vec(), Collapse = new { Field = "DocumentId", CandidatePool = 10000 }, MaxResults = 5 }).ConfigureAwait(false);
+                        JsonElement longKey = await Search(new { Vector = Vec(), Collapse = new { Field = "Tag", TagKey = new string('k', 256) }, MaxResults = 50 }).ConfigureAwait(false);
+                        AssertTrue(Docs(longKey).All(d => d.GetProperty("GroupKey").GetString() == d.GetProperty("DocumentKey").GetString()), "An absent 256-character tag key groups every document by its own key");
+                        await Search(new { FullText = new { Query = "alpha beta", MinimumShouldMatch = 1 }, MaxResults = 5 }).ConfigureAwait(false);
+                        await Search(new { FullText = new { Query = "alpha beta gamma", MinimumShouldMatch = 3 }, MaxResults = 5 }).ConfigureAwait(false);
+                        await Search(new { FullText = new { Query = "alpha beta", MatchMode = "All", MinimumShouldMatch = 1 }, MaxResults = 5 }).ConfigureAwait(false);
+                        await Search(new { Vector = Vec(), Collapse = new { Field = "Tag", TagKey = "parentKey", CandidatePool = 3 }, Hybrid = new { Strategy = "Linear" }, MaxResults = 5 }).ConfigureAwait(false);
                     }),
 
                     Case("SearchValidationCollapse", "Validation: invalid Collapse requests are rejected", async ct =>
@@ -321,6 +365,8 @@ namespace Test.Shared
                         await AssertBadRequest(new { Vector = Vec(), Collapse = new { Field = "Tag", TagKey = "  " } }).ConfigureAwait(false);
                         await AssertBadRequest(new { Vector = Vec(), Collapse = new { Field = "Chapter" } }).ConfigureAwait(false);
                         await AssertBadRequest(new { Vector = Vec(), Collapse = new { CandidatePool = 0 } }).ConfigureAwait(false);
+                        await AssertBadRequest(new { Vector = Vec(), Collapse = new { CandidatePool = 10001 } }).ConfigureAwait(false);
+                        await AssertBadRequest(new { FullText = new { Query = _Query }, Collapse = new { Field = "Tag", TagKey = (string)null } }).ConfigureAwait(false);
                         await AssertBadRequest(new { Vector = Vec(), Collapse = new { TagKey = new string('k', 257) } }).ConfigureAwait(false);
                         await AssertBadRequest(new { Vector = Vec(), FullText = new { Query = _Query }, Hybrid = new { Strategy = "Filter" }, Collapse = new { Field = "DocumentId" } }).ConfigureAwait(false);
                         await AssertBadRequest(new { Collapse = new { Field = "DocumentId" } }).ConfigureAwait(false);
@@ -331,6 +377,9 @@ namespace Test.Shared
                         await AssertBadRequest(new { FullText = new { Query = "alpha beta", MinimumShouldMatch = 0 } }).ConfigureAwait(false);
                         await AssertBadRequest(new { FullText = new { Query = "alpha beta", MinimumShouldMatch = 4 } }).ConfigureAwait(false);
                         await AssertBadRequest(new { FullText = new { Query = "alpha beta", MatchMode = "All", MinimumShouldMatch = 2 } }).ConfigureAwait(false);
+                        await AssertBadRequest(new { FullText = new { Query = "alpha beta", MatchMode = "Phrase", MinimumShouldMatch = 2 } }).ConfigureAwait(false);
+                        await AssertBadRequest(new { FullText = new { Query = "alpha beta", MatchMode = "WebSearch", MinimumShouldMatch = 3 } }).ConfigureAwait(false);
+                        await AssertBadRequest(new { Vector = Vec(), FullText = new { Query = "alpha beta", MatchMode = "All", MinimumShouldMatch = 2 } }).ConfigureAwait(false);
                     }),
 
                     Case("SearchGroupingCleanup", "Grouping: delete collection", async ct =>

@@ -1043,6 +1043,42 @@ async function testCollapseVectorOnly() {
     assertEqual("parent-a", docs[0].GroupKey, "Nearest group first");
 }
 
+async function testCollapseHybridLinear() {
+    const r = await _adminClient.search(_testTenantId, _featureCollectionId, {
+        Vector: { SearchType: "CosineSimilarity", Embeddings: [1, 0, 0] },
+        FullText: { Query: "river" },
+        Hybrid: { Strategy: HybridStrategies.Linear },
+        Collapse: { Field: CollapseFields.Tag, TagKey: "parentKey" },
+        MaxResults: 10
+    });
+    const docs = r.Documents || [];
+    assertTrue(docs.length > 0, "Linear collapse should return hits");
+    assertEqual(docs.length, new Set(docs.map(d => d.GroupKey)).size, "GroupKeys should be unique");
+    for (const d of docs) {
+        assertTrue(COLLAPSE_PARENTS.includes(d.GroupKey), "GroupKey should be a parentKey value: " + d.GroupKey);
+        assertTrue(typeof d.GroupHits === "number" && d.GroupHits >= 1, "GroupHits should be >= 1");
+        assertTrue(d.RecencyRank == null, "Linear should not report RecencyRank");
+    }
+    assertTrue(docs.some(d => d.GroupKey === "parent-a") && docs.some(d => d.GroupKey === "parent-b"), "Both river parents should be returned");
+    assertEqual(docs.length, r.TotalRecords, "TotalRecords should count groups");
+}
+
+async function testCollapseRequiresTagKey() {
+    for (const collapse of [{ Field: CollapseFields.Tag }, { Field: CollapseFields.Tag, TagKey: "   " }, { Field: CollapseFields.DocumentId, CandidatePool: 0 }]) {
+        try {
+            await _adminClient.search(_testTenantId, _featureCollectionId, {
+                Vector: { SearchType: "CosineSimilarity", Embeddings: [1, 0, 0] },
+                Collapse: collapse,
+                MaxResults: 10
+            });
+            throw new Error("Expected 400 Bad Request for Collapse " + JSON.stringify(collapse));
+        } catch (e) {
+            if (!(e instanceof RecallDbException)) throw e;
+            assertEqual(400, e.statusCode, "Status code for Collapse " + JSON.stringify(collapse));
+        }
+    }
+}
+
 async function testCollapseRejectsFilterStrategy() {
     try {
         await _adminClient.search(_testTenantId, _featureCollectionId, {
@@ -1700,7 +1736,9 @@ async function main() {
     await runTest("Collapse: hybrid text-only hit has no vector rank", testSearchHybridTextOnlyHit);
     await runTest("Collapse: by tag with recency", testCollapseByTagWithRecency);
     await runTest("Collapse: vector-only by document id", testCollapseVectorOnly);
+    await runTest("Collapse: hybrid linear by tag", testCollapseHybridLinear);
     await runTest("Collapse: rejected with hybrid filter strategy", testCollapseRejectsFilterStrategy);
+    await runTest("Collapse: blank tag key and pool 0 rejected", testCollapseRequiresTagKey);
     await runTest("Collapse: cleanup feature collection", testCleanupFeatureCollection);
 
     // 21e. Reserved characters and Exists semantics

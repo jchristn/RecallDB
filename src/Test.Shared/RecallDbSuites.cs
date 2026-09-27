@@ -71,6 +71,23 @@ namespace Test.Shared
                                 AssertTrue(names.Contains(expected), "Capabilities should contain " + expected);
                         }),
 
+                        // 1c. OpenAPI request examples carry client fields only
+                        Case("OpenApiDocumentExampleOmitsResponseFields", "OpenAPI: document write examples omit search-only response fields", async ct =>
+                        {
+                            using HttpResponseMessage response = await GetAsync(AdminClient, "/openapi.json").ConfigureAwait(false);
+                            AssertStatusCode(response, HttpStatusCode.OK);
+                            JsonElement spec = await ReadResponse<JsonElement>(response).ConfigureAwait(false);
+
+                            JsonElement create = OpenApiExample(spec, "/v1.0/tenants/{tid}/collections/{cid}/documents", "put");
+                            AssertTrue(create.TryGetProperty("Content", out _), "Document example should contain the client field Content");
+                            AssertTrue(create.TryGetProperty("Embeddings", out _), "Document example should contain the client field Embeddings");
+                            foreach (string field in new[] { "Score", "VectorRank", "TextRank", "RecencyRank", "GroupKey", "GroupHits" })
+                                AssertTrue(!create.TryGetProperty(field, out _), "Document example should not contain the response field " + field);
+
+                            JsonElement search = OpenApiExample(spec, "/v1.0/tenants/{tid}/collections/{cid}/search", "post");
+                            AssertTrue(search.TryGetProperty("Hybrid", out _), "Search example should be a hybrid request");
+                        }),
+
                         // 2. Connectivity HEAD
                         Case("ConnectivityHead", "Connectivity: HEAD /", async ct =>
                         {
@@ -2469,6 +2486,18 @@ namespace Test.Shared
                 caseId: caseId,
                 displayName: displayName,
                 executeAsync: execute);
+        }
+
+        private static JsonElement OpenApiExample(JsonElement spec, string path, string method)
+        {
+            string operation = method.ToUpperInvariant() + " " + path;
+            JsonElement current = spec;
+            foreach (string name in new[] { "paths", path, method, "requestBody", "content", "application/json", "example" })
+            {
+                AssertTrue(current.ValueKind == JsonValueKind.Object && current.TryGetProperty(name, out current), "OpenAPI " + operation + " should have " + name);
+            }
+            AssertTrue(current.ValueKind == JsonValueKind.Object, "OpenAPI " + operation + " example should be a JSON object");
+            return current;
         }
     }
 }

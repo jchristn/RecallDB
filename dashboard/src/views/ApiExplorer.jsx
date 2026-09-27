@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import api from '../api/api.js'
 import ErrorModal from '../components/ErrorModal.jsx'
+import { examplesForOperation } from './searchRequest.js'
 
 const METHOD_COLORS = {
   GET: '#3b82f6',
@@ -96,6 +97,7 @@ export default function ApiExplorer() {
   const [pathParams, setPathParams] = useState({})
   const [queryParams, setQueryParams] = useState({})
   const [bodyText, setBodyText] = useState('')
+  const [exampleIndex, setExampleIndex] = useState('')
 
   const [sending, setSending] = useState(false)
   const [response, setResponse] = useState(null)
@@ -170,8 +172,18 @@ export default function ApiExplorer() {
     }
   }, [selectedOpId])
 
+  const extraExamples = selectedOp ? examplesForOperation(selectedOp.method, selectedOp.path) : []
+
+  const handleExampleChange = useCallback((e) => {
+    const value = e.target.value
+    setExampleIndex(value)
+    const example = value === '' ? selectedOp?.bodyExample : extraExamples[Number(value)]?.body
+    setBodyText(example !== undefined ? JSON.stringify(example, null, 2) : '{\n  \n}')
+  }, [selectedOp, extraExamples])
+
   const handleSelectOperation = useCallback((e) => {
     setSelectedOpId(e.target.value)
+    setExampleIndex('')
     setResponse(null)
     setHeadersExpanded(false)
   }, [])
@@ -439,6 +451,15 @@ export default function ApiExplorer() {
           {selectedOp.hasBody && (
             <div style={{ marginBottom: 16 }}>
               <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Request Body (JSON)</h3>
+              {extraExamples.length > 0 && (
+                <div className="form-group" style={{ marginBottom: 8 }}>
+                  <label htmlFor="ae-example">Example</label>
+                  <select id="ae-example" value={exampleIndex} onChange={handleExampleChange}>
+                    <option value="">Server example</option>
+                    {extraExamples.map((ex, i) => <option key={ex.label} value={String(i)}>{ex.label}</option>)}
+                  </select>
+                </div>
+              )}
               <div className="form-group">
                 <textarea
                   value={bodyText}

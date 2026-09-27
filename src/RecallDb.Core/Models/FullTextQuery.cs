@@ -151,7 +151,8 @@ namespace RecallDb.Core.Models
         /// <summary>
         /// Minimum number of distinct query terms a document must contain to match, for MatchMode Any.
         /// 1 (default) is plain Any matching. With 2 or 3, only documents containing at least that many of the
-        /// query's terms match, which cuts ranking work on large collections. A query with fewer distinct terms
+        /// query's terms match, so fewer rows are ranked. The generated query has one clause per combination of
+        /// terms, so short queries usually get faster and long ones can get slower. A query with fewer distinct terms
         /// than the value requires all of its terms. Only the first 16 distinct terms of the query are considered
         /// when the value is above 1. Rejected with 400 for other match modes when above 1.
         /// Default: 1. Minimum: 1. Maximum: 3.

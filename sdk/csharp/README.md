@@ -174,7 +174,7 @@ if (await client.SupportsAsync(Capabilities.Collapse) && await client.SupportsAs
 - `Collapse.Field` is `DocumentId` (the default) or `Tag` with `TagKey`. A document without a group value is its own group, keyed by its `DocumentKey`.
 - Collapse works with vector-only, full-text-only, and hybrid `Rrf` and `Linear` searches; hybrid `Filter` rejects it with 400. For single-leg searches, `Collapse.CandidatePool` sets how many candidates are grouped. A `Notice` says when the pool filled up with fewer groups than you asked for.
 - `RecencyWeight` is 0.0 to 1.0 and off by default. Ranks decide the fused score, so a small weight breaks near-ties rather than reordering strong matches.
-- `FullText.MinimumShouldMatch` (1 to 3, `MatchMode` `Any` only) requires that many distinct query terms, which cuts ranking work on large collections.
+- `FullText.MinimumShouldMatch` (1 to 3, `MatchMode` `Any` only) requires that many distinct query terms. Fewer rows are ranked, but the generated query grows with the square of the term count, so short queries usually get faster and long ones can get slower; measure before turning it on.
 
 ### Stored vectors
 

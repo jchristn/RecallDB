@@ -38,7 +38,11 @@ command-line flags. The defaults are `http://127.0.0.1:8600` and `recalldbadmin`
   recency-weighted `search/query` cases and the `server/info` capability list.
 
 The main suite also checks that `GET /` reports every capability in
-`RecallDb.Core.SearchCapabilities` (`HealthReportsCapabilities`).
+`RecallDb.Core.SearchCapabilities` (`HealthReportsCapabilities`), and that the
+OpenAPI document's document-write examples carry client fields such as
+`Content` but none of the search-only response fields (`Score`, `VectorRank`,
+`TextRank`, `RecencyRank`, `GroupKey`, `GroupHits`), so the API Explorer does
+not prefill them (`OpenApiDocumentExampleOmitsResponseFields`).
 
 The hybrid suite's 11 seed documents exist to make the new semantics
 observable, so each has a job. `hy-guide` is the best semantic match for the
@@ -76,6 +80,19 @@ checks every score against `((1-w)/(k+vr) + w/(k+tr) + r/(k+rr)) * (k+1)/(1+r)`.
 `DocumentKey` fallback, and `m-two` / `m-one` share two and one terms of
 "alpha beta" for `MinimumShouldMatch`.
 
+Each feature is covered in both directions. Positive cases include recency on
+and off, collapse by tag and by `DocumentId` for vector-only, full-text-only,
+hybrid `Rrf`, and hybrid `Linear`, and the edges of every range
+(`SearchValidationBoundariesAccepted`: `RecencyWeight` 0 and 1, collapse pool 1
+and 10000, a 256-character `TagKey`, `MinimumShouldMatch` 1 and 3). Negative
+cases are rejected with 400: `RecencyWeight` below 0, above 1, or not a number;
+collapse by tag with a missing, null, or blank `TagKey`; an unknown collapse
+field; a collapse pool of 0 or 10001; a 257-character `TagKey`; collapse with
+the `Filter` strategy or with no query; `MinimumShouldMatch` 0 or 4, or above 1
+with `All`, `Phrase`, or `WebSearch`. Two ignored-input cases check that
+`RecencyWeight` has no effect on `Linear` (with a `Notice`) or on single-leg
+searches.
+
 ## Retrieval-quality and performance verification
 
 Search-ranking changes are verified once before sign-off, outside the unit
@@ -88,11 +105,37 @@ suites, and the numbers go in the PR description.
 - **Query plans.** On a large collection, `EXPLAIN (ANALYZE, BUFFERS)` the
   full-text query (expect a Bitmap Index Scan on `idx_col_<id>_tsv`), the
   hybrid vector leg (an Index Scan on `idx_col_<id>_hnsw`), and the hybrid text
-  leg (a Bitmap Index Scan on `_tsv`). Set `Database.LogQueries` to capture the
-  generated SQL. Long statements are split across log lines, so rebuild the
-  full text from the builder in `SearchMethods` when they are.
+  leg (a Bitmap Index Scan on `_tsv`). Collapse by tag adds an Index Scan on
+  `_t_dkey`. The simplest way to see the exact statements the server runs is
+  `auto_explain` on a throwaway test database, never a shared one:
+  `ALTER DATABASE recalldb SET session_preload_libraries = 'auto_explain'`, then
+  `auto_explain.log_min_duration = 0`, `log_analyze = on`, `log_buffers = on`,
+  and `log_format = 'json'`. Restart the server so its pooled connections pick
+  the settings up, read the plans from the PostgreSQL log (`docker logs`), and
+  finish with `ALTER DATABASE recalldb RESET ALL`. `Database.LogQueries` also
+  shows the SQL, but it splits long statements across log lines.
 - **Latency.** Measure p50/p95 of `SearchResult.TotalMs` for vector-only,
   full-text, and hybrid searches at 10k and 100k documents.
+
+## Dashboard unit tests
+
+The Search view's request builder and form validation live in
+`dashboard/src/views/searchRequest.js`, without React, so they can be tested
+with Node's built-in runner and no extra dependencies:
+
+```bash
+cd dashboard
+npm test
+```
+
+The cases (`dashboard/test/searchRequest.test.js`) check what each control
+sends and when it is left out (recency weight, collapse field, tag key, and
+pool, minimum terms to match, include embeddings), that the validation accepts
+the edges of each server range and rejects the values the server rejects, that
+hidden fields are neither validated nor sent, that a plain hybrid search builds
+the same body as before, which result columns appear, and that the API
+Explorer's extra search examples are offered only for the search operation and
+pass the same validation.
 
 ## Test.Automated (CLI runner)
 
@@ -145,7 +188,8 @@ PYTHONDONTWRITEBYTECODE=1 python sdk/python/test_harness.py http://127.0.0.1:860
 Besides the CRUD, enumeration, and search cases that mirror Test.Automated, each
 harness covers the 0.2.2 SDK surface: server info and `supports`, the hybrid
 round trip fields, a search `Notice`, `IncludeEmbeddings`, collapse by tag with
-recency, vector-only collapse, `MinimumShouldMatch`, structured errors for both
+recency, vector-only collapse, hybrid `Linear` collapse, `MinimumShouldMatch`,
+rejected collapse and `MinimumShouldMatch` requests (400), structured errors for both
 server error shapes, a request timeout (a delaying test handler in C#, a local
 stub server in JavaScript and Python), cancellation, a document key and id
 containing `#`, `?`, `/`, `%`, and a space, and `exists` throwing on 401 while

@@ -1,6 +1,6 @@
 # Hybrid Search Improvements: Single-Call Hybrid for Isis
 
-**Status:** implemented (2026-09-26) except the dashboard (6.3), the Grafana panels, and the verification runs (13, Verification)
+**Status:** implemented in RecallDB (2026-09-26), including the dashboard (6.3), the Grafana panels, and the V1 query-plan capture ([section 15](#15-v1-query-plan-results)). V2 to V5 need Isis code changes and are the acceptance test for the Isis switch (item I1 in `archive/SDK_IMPROVEMENTS.md`), not open RecallDB work. Archived.
 **Target version:** v0.2.1. No version change; the work folds into the existing v0.2.1 entry. See [section 11](#11-release-and-versioning) for what that means for the package registries.
 **Date:** 2026-09-25
 **Predecessor:** `archive/HYBRID_SEARCH_FIX.md` (implemented in `d8ce32c`, "Full-text any-term matching and rank-fused hybrid search")
@@ -28,6 +28,7 @@ implemented in the server and in the C# SDK *source*. Three things are actually 
    pagination and `TotalRecords` are in the wrong unit for Isis.
 3. **A published SDK that exposes any of this.** `RecallDb.Sdk` 0.2.1 on NuGet predates `d8ce32c`. It has no
    `Hybrid`, no `IncludeEmbeddings`, no `MatchMode`, no `VectorScore`/`VectorRank`/`TextRank`, and no `Notice`.
+   (Resolved: `RecallDb.Sdk` 0.2.2, published to NuGet from `da2683d`, has all of these and the fields this plan adds.)
 
 There is also a fourth, smaller gap that matters for rollout: a server running the new code reports the same version
 (`0.2.1`) as one running the old code, so Isis has no way to tell whether a single call will be honored. This plan adds
@@ -72,7 +73,7 @@ and collapse. Everything else is release plumbing, docs, and tests.
 |---|---|---|---|
 | G1 | No recency signal in fusion | `GetRrfFusionSql` has two terms only; `HybridQuery` has `Strategy`, `RrfK`, `CandidatePool` and nothing else | Isis's default `RecencyWeight` is 0.1 (`MemorySearchQuery.cs`). A single call without it reorders near-ties, which is exactly the supersession case recency was added for (Isis round 2) |
 | G2 | No server-side collapse by a tag or column | Results are per chunk document; `MaxResults`, `TotalRecords` and continuation tokens count chunks (`SearchMethods.cs` L351-358, `BuildResult` L618-642) | Isis must over-fetch (`fetch = max(topK x 4, 20)`, `RecallDbMemoryStore.cs` L353) and roll up client-side (`GroupByParent`, L509-523). It cannot page by memory at all |
-| G3 | Published `RecallDb.Sdk` 0.2.1 lacks every field added since `d5d4e30` | Byte search of `~/.nuget/packages/recalldb.sdk/0.2.1/lib/net10.0/RecallDb.Sdk.dll` finds no `HybridQuery`, `IncludeEmbeddings`, `VectorRank`, `TextRank`, `VectorScore`, `Notice`, `MatchMode`, or `CandidatePool` (it does find `IncludeNeighbors` and `TextScore`) | Isis cannot express a hybrid request, cannot request embeddings (blocking Isis items "stored vectors in results" for MMR and the similarity check), and cannot read ranks |
+| G3 | Published `RecallDb.Sdk` 0.2.1 lacks every field added since `d5d4e30` | Byte search of `~/.nuget/packages/recalldb.sdk/0.2.1/lib/net10.0/RecallDb.Sdk.dll` finds no `HybridQuery`, `IncludeEmbeddings`, `VectorRank`, `TextRank`, `VectorScore`, `Notice`, `MatchMode`, or `CandidatePool` (it does find `IncludeNeighbors` and `TextScore`) | Isis cannot express a hybrid request, cannot request embeddings (blocking Isis items "stored vectors in results" for MMR and the similarity check), and cannot read ranks. Resolved by `RecallDb.Sdk` 0.2.2 on NuGet |
 | G4 | No way to detect server capability | `GET /` returns only `Name`, `Version`, `UptimeMs` (`src/RecallDb.Server/RecallDbServer.cs` L1456-1465). Old and new servers both say `0.2.1` | Isis cannot decide between single-call and its fallback. A server built before `d8ce32c` treats a hybrid request as text-filtered and silently ignores unknown fields such as `Collapse` |
 | G5 | The text leg ranks every any-term match | `txt` CTE is `WHERE content_tsv @@ tsq ... ORDER BY text_score DESC LIMIT pool` (`SearchMethods.cs` L327-330). `LIMIT` caps output, not the rows ranked | SciFact (about 11,000 chunk documents) ranks thousands of matches per query; hybrid p50 about 89 ms (Isis `benchmarks/RESULTS.md`, Latency) |
 | G6 | Isis's vector leg is silently truncated at 40 rows | Isis's separate vector-only call does not raise `hnsw.ef_search`, so with pgvector 0.5.1 an HNSW scan returns at most 40 rows even when Isis asks for `fetch` > 40 (any `topK` above 10). The fused path already raises it (`GetHnswSetupStatements`) | Not a RecallDB defect, but it means single-call parity with Isis can only be exact for `fetch` <= 40. Single call fixes it as a side effect |
@@ -730,7 +731,8 @@ they are. The CHANGELOG gets bullets appended to the existing **v0.2.1** entry a
 because of that. Getting the C# SDK changes (from `d8ce32c` onward, plus this plan) to Isis through NuGet needs a
 publish, and whether and how to publish is the owner's call under VERSIONING.md section 4; this plan does not make it.
 Until then, Isis can validate the work against a project reference to `sdk/csharp/RecallDb.Sdk` in a local branch, and
-the capability check keeps production Isis on its fallback.
+the capability check keeps production Isis on its fallback. (Resolved: the owner set the SDKs to 0.2.2 and published
+`RecallDb.Sdk` 0.2.2 to NuGet, so Isis can use the package directly and needs no project reference.)
 
 **Same tag, different behavior.** Re-pushing `jchristn77/recalldb-server:v0.2.1` gives existing callers new capabilities
 but no behavior change, because every new field defaults to off. That is the reason for making `RecencyWeight`
@@ -751,6 +753,10 @@ default 0 and `MinimumShouldMatch` default 1 rather than matching Isis's default
   full-text-only searches.
 - **A RecallDB benchmark suite** under `benchmarks/` and `src/Test.Benchmark/` to the `BENCHMARKING.md` standard, so the
   next search change is gated by RecallDB's own numbers instead of Isis's.
+- **`MinimumShouldMatch` on long queries.** V1 (section 15) shows the m-term tsquery helps short queries and hurts long
+  ones: a 16-lexeme SciFact query went from 33 ms to 87 ms at m = 2, because each matching row is rechecked and ranked
+  against a 120-clause tsquery. Two options to evaluate: rank with the plain `Any` tsquery and use the m-term one only to
+  match (keeps `TextScore` identical to m = 1 for the rows that survive), or lower the lexeme cap when m > 1.
 - **Vector-only thresholds in SQL on the uncollapsed path.** Still applied after `LIMIT` (`SearchMethods.cs` L198-222);
   the new collapsed path does not have the problem.
 - **HNSW index for non-cosine metrics.** The only HNSW index is `vector_cosine_ops` (`DynamicTableQueries.cs` L66), so
@@ -788,24 +794,24 @@ Annotate in place. Status values: `todo`, `doing`, `done`, `blocked`, `skipped`.
 | S2 | `HealthGetRoute` returns `HealthInfo` with capabilities; OpenAPI description | 4.6, 6.2 | done | |  |
 | S3 | Search route description and `BuildSearchCollapsedExample` | 6.2 | done | | Descriptions updated; the OpenAPI helper takes one example, so no second example |
 | S4 | MCP `search/query` description and example; `server/info` capabilities | 6.2 | done | |  |
-| S5 | Telemetry labels and span attributes; Grafana Search dashboard panels | 10 | doing | | Labels and span attributes done; Grafana panels not added |
+| S5 | Telemetry labels and span attributes; Grafana Search dashboard panels | 10 | done | | Panels 9-12: rate and p95 by `recalldb_search_collapse`, hybrid `Rrf` rate and p95 by `recalldb_search_recency`; label values checked against the live `/metrics` output |
 
 ### Dashboard
 
 | # | Item | Ref | Status | Owner | Notes |
 |---|---|---|---|---|---|
-| D1 | Recency weight input (Rrf only) | 6.3 | todo | |  |
-| D2 | Collapse controls and validation | 6.3 | todo | |  |
-| D3 | Min terms to match select | 6.3 | todo | |  |
-| D4 | Include embeddings checkbox | 6.3 | todo | |  |
-| D5 | Group, Group hits, Recency rank result columns | 6.3 | todo | |  |
-| D6 | API Explorer example | 6.3 | todo | |  |
+| D1 | Recency weight input (Rrf only) | 6.3 | done | | Request building and validation moved to `dashboard/src/views/searchRequest.js`; unit tests in `dashboard/test` (`npm test`) |
+| D2 | Collapse controls and validation | 6.3 | done | | "Result Grouping (Collapse)" section; tag key required for Tag, at most 256 characters; pool 1-10000 for single-leg searches; Filter rejected |
+| D3 | Min terms to match select | 6.3 | done | | Shown and sent only for match mode `Any`; 1 is not sent |
+| D4 | Include embeddings checkbox | 6.3 | done | |  |
+| D5 | Group, Group hits, Recency rank result columns | 6.3 | done | | Totals read "groups" for a collapsed search |
+| D6 | API Explorer example | 6.3 | done | | The server's OpenAPI takes one example per operation, so the API Explorer offers three extra search examples client-side. Also fixed: document write examples no longer carry `RecencyRank`, `GroupKey`, `GroupHits` |
 
 ### SDKs
 
 | # | Item | Ref | Status | Owner | Notes |
 |---|---|---|---|---|---|
-| K1 | C# models and `GetCapabilitiesAsync` | 6.4 | done | | See SDK_IMPROVEMENTS.md |
+| K1 | C# models and `GetCapabilitiesAsync` | 6.4 | done | | See archive/SDK_IMPROVEMENTS.md |
 | K2 | C# README and GETTING_STARTED | 6.4 | done | |  |
 | K3 | JS JSDoc, `getCapabilities()`, README, GETTING_STARTED | 6.4 | done | |  |
 | K4 | Python docstring, `get_capabilities()`, README, GETTING_STARTED | 6.4 | done | |  |
@@ -842,11 +848,11 @@ Annotate in place. Status values: `todo`, `doing`, `done`, `blocked`, `skipped`.
 
 | # | Item | Ref | Status | Owner | Notes |
 |---|---|---|---|---|---|
-| V1 | `EXPLAIN (ANALYZE, BUFFERS)` capture, before and after | 4.7, 7.4 | todo | | |
-| V2 | Isis retrieval runs on four datasets and `compare` | 7.4 | todo | | |
-| V3 | `MinimumShouldMatch` sweep and recommendation for Isis | 7.4 | todo | | |
-| V4 | Isis load test | 7.4 | todo | | |
-| V5 | Isis parity suite (in a local Isis branch against a project-referenced SDK) | 8 | todo | | |
+| V1 | `EXPLAIN (ANALYZE, BUFFERS)` capture, before and after | 4.7, 7.4 | done | | Section 15: index scans only, text leg dominant, `MinimumShouldMatch` mixed |
+| V2 | Isis retrieval runs on four datasets and `compare` | 7.4 | todo | Isis | Part of the Isis switch (I1) |
+| V3 | `MinimumShouldMatch` sweep and recommendation for Isis | 7.4 | todo | Isis | Part of I1. V1 already shows long queries get slower at m = 2, so sweep by query length, not only by dataset |
+| V4 | Isis load test | 7.4 | todo | Isis | Part of I1 |
+| V5 | Isis parity suite, in a local Isis branch against `RecallDb.Sdk` 0.2.2 from NuGet | 8 | todo | Isis | Part of I1 |
 
 ---
 
@@ -859,14 +865,59 @@ checked by searching the DLL in the local NuGet cache for member names, not by d
 
 Not verified, and worth a check before or during implementation:
 
-- The SQL in 4.4 and 4.7 has not been executed. It follows the shape of the statement `d8ce32c` validated on
-  PostgreSQL 15.4, but the new CTEs, the `COLLATE "C"` tie-break, and the m-lexeme tsquery should be run against the
-  shipped `ankane/pgvector:v0.5.1` image first.
-- Where the SciFact hybrid time actually goes. The Isis results attribute it to text ranking; 4.7 step 1 exists to
-  confirm that before anyone optimizes it.
+- ~~The SQL in 4.4 and 4.7 has not been executed.~~ Since verified: the server suites run every new statement against
+  `ankane/pgvector:v0.5.1` (PostgreSQL 15.4), and V1 (section 15) captured their plans.
+- ~~Where the SciFact hybrid time actually goes.~~ V1 (section 15) confirms it is the text leg's ranking.
 - The 40-row truncation of Isis's vector leg (gap G6) is inferred from pgvector 0.5.1's documented HNSW behavior and
   the comment at `SearchMethods.cs` L57-60; it has not been reproduced against Isis.
 - Whether any deployed Isis instance points at a RecallDB built before `d8ce32c`. The capability check makes the answer
   irrelevant to correctness, but it decides how long the fallback path stays warm.
 - The 10% SciFact latency target in section 9 is a judgment, not a measurement. Adjust it after V1 if the plan capture
   says the round trip was never the expensive part.
+
+---
+
+## 15. V1 query-plan results
+
+Captured 2026-09-26 against a local build (`da2683d` plus the dashboard changes, which do not touch search SQL) on
+`ankane/pgvector:v0.5.1` (PostgreSQL 15.4, default `shared_buffers` 128 MB) in Docker on the development machine.
+
+**Data.** The SciFact corpus from the Isis benchmark data (5,183 abstracts), split at sentence boundaries into chunks of
+at most 750 characters: 13,716 chunk documents, each tagged `parentKey` with its abstract id and with `DocumentId` set to
+the same value. Embeddings are a deterministic 384-dimension hashed bag of words, not a real model, so plan shape and
+text-leg cost are representative while vector-leg recall is not measured here.
+
+**Method.** `auto_explain` (`log_min_duration = 0`, `log_analyze`, `log_buffers`, JSON) was enabled on the throwaway test
+database only, so the plans are of the exact statements the server ran, including `SET LOCAL hnsw.ef_search`. Five
+SciFact queries (ids 1, 3, 5, 13, 36; 5 to 16 lexemes) ran through the REST API in seven shapes, each warmed twice and
+then captured. Times are the statement's execution time from `auto_explain`, in ms.
+
+| Shape | q1 (6 lexemes) | q3 (16) | q5 (5) | q13 (7) | q36 (7) |
+|---|---|---|---|---|---|
+| A: hybrid, existing path (pool 100) | 14.2 | 33.0 | 6.4 | 10.9 | 15.6 |
+| B: A + collapse by tag + recency 0.1 | 12.0 | 30.2 | 9.5 | 13.9 | 16.5 |
+| C: Isis shape, B with pool 40 | 11.2 | 31.1 | 5.1 | 12.5 | 13.9 |
+| D: vector-only + collapse (pool 40) | 1.6 | 1.7 | 1.9 | 1.9 | 2.0 |
+| E: full-text-only + collapse (pool 40) | 9.9 | 27.2 | 3.5 | 7.4 | 12.0 |
+| F: A with `MinimumShouldMatch` 2 | 5.5 | 86.7 | 3.7 | 8.0 | 13.0 |
+| G: C with `MinimumShouldMatch` 2 | 4.1 | 92.2 | 3.2 | 7.6 | 11.2 |
+| Rows matched by the text leg, m = 1 / m = 2 | 2,502 / 149 | 5,542 / 1,361 | 932 / 16 | 2,282 / 265 | 3,942 / 723 |
+
+**Index use (criterion 6).** Every shape uses only index access on the documents table: an Index Scan on `_hnsw` for the
+vector leg, a Bitmap Index Scan on `_tsv` for the text leg, `_pkey` lookups for the join back, and, when collapsing by
+tag, an Index Scan on `_t_dkey` for the group key. No plan contains a Seq Scan of the documents table.
+
+**Where the time goes (4.7 step 1).** In the collapsed hybrid statement (B), the `txt` CTE takes 31% (q5) to 82% (q3) of
+the statement time and is the majority in four of five queries; `vec` takes 1 to 3 ms, and the `grp` recency CTE under
+0.12 ms. Within `txt`, the Bitmap Index Scan takes 0.4 to 1.3 ms and the rest is the heap recheck and `ts_rank` over
+every matching row. This confirms the Isis attribution: the cost is ranking every any-term match.
+
+**Collapse and recency cost.** Adding collapse by tag and recency to the fused statement (A to B) cost between -2.8 and
++3.1 ms across the five queries, within run-to-run noise at this scale. The per-candidate tag lookup is an index scan.
+
+**`MinimumShouldMatch` (input to V3).** At m = 2 the text leg matched 4x to 58x fewer rows, and the hybrid statement was
+17% to 61% faster for the four short queries (5 to 7 lexemes). For the 16-lexeme query it was 2.6x slower (33.0 to
+86.7 ms): the tsquery becomes 120 two-term clauses, and the recheck and `ts_rank` cost per row rose about tenfold, which
+outweighed matching 4x fewer rows. Isis should not turn it on for all queries without the V3 sweep, and section 12 lists
+two ways to remove the long-query penalty.
+

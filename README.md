@@ -170,6 +170,8 @@ When a document is stored as several chunks, add `Collapse` to get one hit per d
 
 Servers that report the same version can differ in which search features they support, so check the `Capabilities` list returned by `GET /` (for example `search.collapse` and `search.hybrid.recency`) before relying on one.
 
+The dashboard's Search page has the same controls: **Recency Weight** under Hybrid Ranking (shown for `Rrf`), a **Result Grouping (Collapse)** section, **Min Terms to Match** for match mode `Any`, and **Include Embeddings**, with Group, Group Hits, and Recency Rank columns in the results.
+
 ## Search
 
 RecallDB search goes well beyond nearest-neighbor. A single query can combine any of these filters:

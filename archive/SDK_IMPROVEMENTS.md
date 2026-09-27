@@ -396,7 +396,7 @@ Following `C:\code\agents\requirements\VERSIONING.md`, this plan changed no vers
 | S14 | Harness cases in all three SDKs (replaces hybrid plan K5) | 6 | done | | C# 164, JS 165, Python 160 cases pass |
 | D1 | READMEs and GETTING_STARTED (replaces hybrid plan K2) | 5 | done | |  |
 | D2 | CHANGELOG and TESTING.md | 5, 8 | done | |  |
-| I1 | Isis moves to the published package, then to the single call | 7 | todo | | after S1 |
+| I1 | Isis moves to the published package, then to the single call | 7 | todo | | after S1; acceptance is `HYBRID_SEARCH_IMPROVEMENTS.md` V2 to V5 (retrieval compare, `MinimumShouldMatch` sweep by query length, load test, parity suite on the NuGet 0.2.2 package) |
 
 ## 12. Verified, and not verified
 

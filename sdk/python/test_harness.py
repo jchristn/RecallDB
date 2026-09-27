@@ -1273,6 +1273,24 @@ def test_search_collapse_vector_only():
         assert_true(d.get("RecencyRank") is None, "RecencyRank absent without hybrid recency")
 
 
+def test_search_collapse_hybrid_linear():
+    resp = do_group_search({
+        "Vector": {"SearchType": VectorSearchTypes.COSINE_SIMILARITY, "Embeddings": [0.9, 0.1, 0.05]},
+        "FullText": {"Query": "orchard"},
+        "Hybrid": {"Strategy": HybridStrategies.LINEAR},
+        "Collapse": {"Field": CollapseFields.TAG, "TagKey": "parentKey"},
+        "MaxResults": 10
+    })
+    docs = resp.get("Documents", [])
+    keys = [d.get("GroupKey") for d in docs]
+    assert_equal({"thread-a", "thread-b"}, set(keys), "One hit per parentKey group")
+    assert_equal(len(keys), len(set(keys)), "GroupKeys should be distinct")
+    assert_equal(len(docs), resp.get("TotalRecords"), "TotalRecords counts groups")
+    for d in docs:
+        assert_true(d.get("GroupHits") is not None and d["GroupHits"] >= 1, "GroupHits")
+        assert_true(d.get("RecencyRank") is None, "Linear has no RecencyRank")
+
+
 def test_search_collapse_validation():
     base = {"Vector": {"SearchType": VectorSearchTypes.COSINE_SIMILARITY, "Embeddings": [0.9, 0.1, 0.05]}, "FullText": {"Query": "orchard"}, "MaxResults": 5}
     try:
@@ -1281,6 +1299,13 @@ def test_search_collapse_validation():
     except RecallDbException as e:
         assert_equal(400, e.status_code, "Status code")
         assert_true(e.error_message is not None and "TagKey" in e.error_message, "error_message should mention TagKey")
+    for pool in (0, 10001):
+        try:
+            _admin_client.search(_test_tenant_id, _group_collection_id,
+                                 {"Vector": base["Vector"], "Collapse": {"Field": CollapseFields.DOCUMENT_ID, "CandidatePool": pool}, "MaxResults": 5})
+            raise AssertionError("Expected 400 for Collapse.CandidatePool " + str(pool))
+        except RecallDbException as e:
+            assert_equal(400, e.status_code, "Status code for CandidatePool " + str(pool))
     try:
         _admin_client.search(_test_tenant_id, _group_collection_id,
                              dict(base, Hybrid={"Strategy": HybridStrategies.FILTER}, Collapse={"Field": CollapseFields.DOCUMENT_ID}))
@@ -1299,6 +1324,8 @@ def test_search_minimum_should_match():
     assert_true("srch-doc-0" in keys, "MinimumShouldMatch 2 should include a two-term match")
     assert_true("srch-doc-1" not in keys, "MinimumShouldMatch 2 should exclude a one-term match")
     _assert_search_bad_request({"FullText": {"Query": "machine learning", "MatchMode": FullTextMatchModes.ALL, "MinimumShouldMatch": 2}, "MaxResults": 10})
+    _assert_search_bad_request({"FullText": {"Query": "machine learning", "MinimumShouldMatch": 0}, "MaxResults": 10})
+    _assert_search_bad_request({"FullText": {"Query": "machine learning", "MinimumShouldMatch": 4}, "MaxResults": 10})
 
 
 def test_search_recency_weight_validation():
@@ -2049,7 +2076,8 @@ def main():
     run_test("Search collapse: setup grouping collection", test_group_data_setup)
     run_test("Search collapse: by tag with recency", test_search_collapse_tag_with_recency)
     run_test("Search collapse: vector-only by DocumentId", test_search_collapse_vector_only)
-    run_test("Search collapse: validation (TagKey required, Filter rejected)", test_search_collapse_validation)
+    run_test("Search collapse: hybrid Linear by tag", test_search_collapse_hybrid_linear)
+    run_test("Search collapse: validation (TagKey required, pool range, Filter rejected)", test_search_collapse_validation)
     run_test("Search full-text: MinimumShouldMatch 2 excludes a one-term match", test_search_minimum_should_match)
     run_test("Search hybrid: RecencyWeight 1.5 rejected with error_message", test_search_recency_weight_validation)
     run_test("Search collapse: cleanup grouping collection", test_group_cleanup)

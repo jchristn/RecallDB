@@ -7,6 +7,12 @@ import ActionMenu from '../components/ActionMenu.jsx'
 import JsonModal from '../components/JsonModal.jsx'
 import ViewDocumentModal from '../components/ViewDocumentModal.jsx'
 import ErrorModal from '../components/ErrorModal.jsx'
+import {
+  TAG_CONDITIONS, SEARCH_TYPES, SORT_ORDERS, TEXT_SEARCH_TYPES, MATCH_MODES, HYBRID_STRATEGIES, COLLAPSE_FIELDS,
+  MINIMUM_SHOULD_MATCH_OPTIONS, TEXT_WEIGHT_RANGE, NORMALIZATION_RANGE, RRF_K_RANGE, CANDIDATE_POOL_RANGE,
+  RECENCY_WEIGHT_RANGE, COLLAPSE_POOL_RANGE, TAG_KEY_MAX_LENGTH, DEFAULT_TEXT_WEIGHT, DEFAULT_NORMALIZATION,
+  DEFAULT_RECENCY_WEIGHT, parseCommaSep, searchShape, validateSearch, buildQuery, resultColumnFlags
+} from './searchRequest.js'
 
 function CollapsibleSection({ title, children, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -21,169 +27,12 @@ function CollapsibleSection({ title, children, defaultOpen = false }) {
   )
 }
 
-const TAG_CONDITIONS = [
-  'Equals', 'NotEquals', 'GreaterThan', 'LessThan',
-  'Contains', 'ContainsNot', 'StartsWith', 'EndsWith',
-  'IsNull', 'IsNotNull'
-]
-
-const SEARCH_TYPES = [
-  { value: 'CosineSimilarity', label: 'Cosine Similarity' },
-  { value: 'CosineDistance', label: 'Cosine Distance' },
-  { value: 'EuclideanSimilarity', label: 'Euclidean Similarity' },
-  { value: 'EuclideanDistance', label: 'Euclidean Distance' },
-  { value: 'InnerProduct', label: 'Inner Product' }
-]
-
-const SORT_ORDERS = [
-  { value: 'ScoreDescending', label: 'Score Descending' },
-  { value: 'ScoreAscending', label: 'Score Ascending' },
-  { value: 'DistanceDescending', label: 'Distance Descending' },
-  { value: 'DistanceAscending', label: 'Distance Ascending' },
-  { value: 'TextScoreDescending', label: 'Text Score Descending' },
-  { value: 'TextScoreAscending', label: 'Text Score Ascending' },
-  { value: 'CreatedDescending', label: 'Created Descending' },
-  { value: 'CreatedAscending', label: 'Created Ascending' }
-]
-
-const TEXT_SEARCH_TYPES = [
-  { value: 'TsRank', label: 'TsRank (Term Frequency)' },
-  { value: 'TsRankCd', label: 'TsRankCd (Cover Density)' }
-]
-
-const MATCH_MODES = [
-  { value: 'Any', label: 'Any', help: 'Matches documents containing any of the query terms (stemmed, stop words removed).' },
-  { value: 'All', label: 'All', help: 'Every query term must appear in the document.' },
-  { value: 'Phrase', label: 'Phrase', help: 'Terms must appear adjacent and in the order given.' },
-  { value: 'WebSearch', label: 'WebSearch', help: 'Web-style syntax: "quoted phrase", or, and -exclude.' }
-]
-
-const HYBRID_STRATEGIES = [
-  { value: 'Rrf', label: 'RRF', help: 'Reciprocal rank fusion of the vector and text result lists. A text match is not required.' },
-  { value: 'Linear', label: 'Linear', help: 'Weighted sum of normalized vector and text scores. A text match is not required.' },
-  { value: 'Filter', label: 'Filter (legacy)', help: 'Text query is a required filter; vector and raw text scores are blended.' }
-]
-
-// Server-side validation ranges, mirrored so errors show before submit.
-const TEXT_WEIGHT_RANGE = { min: 0, max: 1 }
-const NORMALIZATION_RANGE = { min: 0, max: 63 }
-const RRF_K_RANGE = { min: 1, max: 100000 }
-const CANDIDATE_POOL_RANGE = { min: 1, max: 10000 }
-
-const DEFAULT_TEXT_WEIGHT = 0.5
-const DEFAULT_NORMALIZATION = 32
-
-function isBlank(value) {
-  return value === null || value === undefined || String(value).trim() === ''
-}
-
-// Returns the parsed number, or the fallback when the input is blank or not a finite number.
-// Unlike `parseFloat(x) || fallback`, this keeps an explicit 0.
-function numberOrDefault(value, fallback) {
-  if (isBlank(value)) return fallback
-  const n = Number(value)
-  return Number.isFinite(n) ? n : fallback
-}
-
-// Returns an error message when a non-blank input is outside [min, max] (or not an integer when required).
-function rangeError(value, { min, max }, integer) {
-  if (isBlank(value)) return null
-  const n = Number(value)
-  if (!Number.isFinite(n)) return 'Must be a number.'
-  if (integer && !Number.isInteger(n)) return 'Must be a whole number.'
-  if (n < min || n > max) return `Must be between ${min} and ${max}.`
-  return null
-}
-
 const HINT_STYLE = { display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }
 const INVALID_STYLE = { borderColor: 'var(--danger)' }
 
 function FieldError({ message }) {
   if (!message) return null
   return <span role="alert" style={{ display: 'block', fontSize: 12, color: 'var(--danger)', marginTop: 4 }}>{message}</span>
-}
-
-function parseCommaSep(str) {
-  if (!str.trim()) return []
-  return str.split(',').map(s => s.trim()).filter(Boolean)
-}
-
-function buildQuery({ embeddings, searchType, minScore, maxScore, minDistance, maxDistance,
-  requiredLabels, excludedLabels, requiredTags, excludedTags, requiredTerms, excludedTerms,
-  sortOrder, maxResults, includeNeighbors, createdBefore, createdAfter, documentIds,
-  fullTextQuery, fullTextSearchType, fullTextMatchMode, fullTextLanguage, fullTextNormalization, fullTextMinScore, fullTextWeight,
-  hybridStrategy, hybridRrfK, hybridCandidatePool }) {
-  const query = {
-    SortOrder: sortOrder,
-    MaxResults: parseInt(maxResults) || 10
-  }
-
-  if (createdBefore) query.CreatedBefore = new Date(createdBefore).toISOString()
-  if (createdAfter) query.CreatedAfter = new Date(createdAfter).toISOString()
-
-  const docIds = parseCommaSep(documentIds)
-  if (docIds.length > 0) query.DocumentIds = docIds
-
-  if (embeddings.trim()) {
-    const embList = embeddings.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v))
-    if (embList.length > 0) {
-      query.Vector = { SearchType: searchType, Embeddings: embList }
-      if (minScore) query.Vector.MinimumScore = parseFloat(minScore)
-      if (maxScore) query.Vector.MaximumScore = parseFloat(maxScore)
-      if (minDistance) query.Vector.MinimumDistance = parseFloat(minDistance)
-      if (maxDistance) query.Vector.MaximumDistance = parseFloat(maxDistance)
-    }
-  }
-
-  const reqLabels = Array.isArray(requiredLabels) ? requiredLabels.filter(Boolean) : parseCommaSep(requiredLabels)
-  const excLabels = Array.isArray(excludedLabels) ? excludedLabels.filter(Boolean) : parseCommaSep(excludedLabels)
-  if (reqLabels.length > 0 || excLabels.length > 0) {
-    query.LabelFilter = {}
-    if (reqLabels.length > 0) query.LabelFilter.Required = reqLabels
-    if (excLabels.length > 0) query.LabelFilter.Excluded = excLabels
-  }
-
-  const validReqTags = requiredTags.filter(t => t.Key.trim())
-  const validExcTags = excludedTags.filter(t => t.Key.trim())
-  if (validReqTags.length > 0 || validExcTags.length > 0) {
-    query.TagFilter = {}
-    if (validReqTags.length > 0) query.TagFilter.Required = validReqTags
-    if (validExcTags.length > 0) query.TagFilter.Excluded = validExcTags
-  }
-
-  const reqTerms = parseCommaSep(requiredTerms)
-  const excTerms = parseCommaSep(excludedTerms)
-  if (reqTerms.length > 0 || excTerms.length > 0) {
-    query.Terms = {}
-    if (reqTerms.length > 0) query.Terms.Required = reqTerms
-    if (excTerms.length > 0) query.Terms.Excluded = excTerms
-  }
-
-  const parsedNeighbors = parseInt(includeNeighbors)
-  if (parsedNeighbors > 0) query.IncludeNeighbors = parsedNeighbors
-
-  if (fullTextQuery && fullTextQuery.trim()) {
-    query.FullText = {
-      Query: fullTextQuery.trim(),
-      SearchType: fullTextSearchType || 'TsRank',
-      MatchMode: fullTextMatchMode || 'Any',
-      Language: fullTextLanguage || 'english',
-      Normalization: numberOrDefault(fullTextNormalization, DEFAULT_NORMALIZATION),
-      TextWeight: numberOrDefault(fullTextWeight, DEFAULT_TEXT_WEIGHT)
-    }
-    const ftMinScore = parseFloat(fullTextMinScore)
-    if (!isNaN(ftMinScore)) query.FullText.MinimumScore = ftMinScore
-  }
-
-  // Hybrid options only apply when both a vector and a text query are present.
-  if (query.Vector && query.FullText) {
-    const strategy = hybridStrategy || 'Rrf'
-    query.Hybrid = { Strategy: strategy }
-    if (strategy === 'Rrf' && !isBlank(hybridRrfK)) query.Hybrid.RrfK = Number(hybridRrfK)
-    if (strategy !== 'Filter' && !isBlank(hybridCandidatePool)) query.Hybrid.CandidatePool = Number(hybridCandidatePool)
-  }
-
-  return query
 }
 
 function TenantCollectionPicker({ selectedTenant, setSelectedTenant, selectedCollection, setSelectedCollection }) {
@@ -322,7 +171,14 @@ function SearchTab({ tenantId, collectionId }) {
   const [hybridStrategy, setHybridStrategy] = useState('Rrf')
   const [hybridRrfK, setHybridRrfK] = useState(60)
   const [hybridCandidatePool, setHybridCandidatePool] = useState('')
+  const [hybridRecencyWeight, setHybridRecencyWeight] = useState(DEFAULT_RECENCY_WEIGHT)
+  const [fullTextMinimumShouldMatch, setFullTextMinimumShouldMatch] = useState(1)
+  const [collapseField, setCollapseField] = useState('')
+  const [collapseTagKey, setCollapseTagKey] = useState('')
+  const [collapseCandidatePool, setCollapseCandidatePool] = useState('')
+  const [includeEmbeddings, setIncludeEmbeddings] = useState(false)
   const [lastSearchWasHybrid, setLastSearchWasHybrid] = useState(false)
+  const [lastSearchWasCollapsed, setLastSearchWasCollapsed] = useState(false)
   const [sortOrder, setSortOrder] = useState('ScoreDescending')
   const [maxResults, setMaxResults] = useState(10)
   const [includeNeighbors, setIncludeNeighbors] = useState('')
@@ -348,60 +204,37 @@ function SearchTab({ tenantId, collectionId }) {
   const updateTagRow = (setter, index, field, value) => setter(prev => prev.map((row, i) => i === index ? { ...row, [field]: value } : row))
   const removeTagRow = (setter, index) => setter(prev => prev.filter((_, i) => i !== index))
 
-  const parsedEmbeddings = embeddings.trim()
-    ? embeddings.split(',').map(v => v.trim()).filter(v => v && !isNaN(parseFloat(v)))
-    : []
-  const embeddingsEmpty = parsedEmbeddings.length === 0
-  const embeddingsMismatch = dimensionality && parsedEmbeddings.length > 0 && parsedEmbeddings.length !== dimensionality
-
-  const hasFullTextQuery = fullTextQuery.trim().length > 0
-  const isHybrid = !embeddingsEmpty && hasFullTextQuery
-  const showRrfK = hybridStrategy === 'Rrf'
-  const showCandidatePool = hybridStrategy !== 'Filter'
-
-  const fieldErrors = {
-    fullTextWeight: rangeError(fullTextWeight, TEXT_WEIGHT_RANGE, false),
-    fullTextNormalization: rangeError(fullTextNormalization, NORMALIZATION_RANGE, true),
-    hybridRrfK: isHybrid && showRrfK ? rangeError(hybridRrfK, RRF_K_RANGE, true) : null,
-    hybridCandidatePool: isHybrid && showCandidatePool ? rangeError(hybridCandidatePool, CANDIDATE_POOL_RANGE, true) : null
+  const form = {
+    embeddings, searchType, minScore, maxScore, minDistance, maxDistance,
+    requiredLabels, excludedLabels, requiredTags, excludedTags, requiredTerms, excludedTerms,
+    sortOrder, maxResults, includeNeighbors, includeEmbeddings, createdBefore, createdAfter, documentIds,
+    fullTextQuery, fullTextSearchType, fullTextMatchMode, fullTextLanguage, fullTextNormalization, fullTextMinScore, fullTextWeight,
+    fullTextMinimumShouldMatch,
+    hybridStrategy, hybridRrfK, hybridCandidatePool, hybridRecencyWeight,
+    collapseField, collapseTagKey, collapseCandidatePool
   }
-  const fieldLabels = {
-    fullTextWeight: 'Text Weight',
-    fullTextNormalization: 'Normalization',
-    hybridRrfK: 'RRF k',
-    hybridCandidatePool: 'Candidate Pool'
-  }
+  const shape = searchShape(form)
+  const { isHybrid, showRrfK, showCandidatePool, showRecencyWeight, showCollapseTagKey, showCollapsePool } = shape
+  const { fieldErrors } = validateSearch(form, dimensionality)
 
   const selectedMatchMode = MATCH_MODES.find(m => m.value === fullTextMatchMode) || MATCH_MODES[0]
   const selectedStrategy = HYBRID_STRATEGIES.find(s => s.value === hybridStrategy) || HYBRID_STRATEGIES[0]
+  const selectedCollapse = COLLAPSE_FIELDS.find(f => f.value === collapseField) || COLLAPSE_FIELDS[0]
 
   const handleSearch = async (e) => {
     e.preventDefault()
     setError(null)
-    if (embeddingsEmpty && !hasFullTextQuery) {
-      setError(new Error('Embeddings or a full-text query are required. Provide embeddings for vector search, a full-text query for text search, or both for hybrid search.'))
-      return
-    }
-    if (embeddingsMismatch) {
-      setError(new Error(`Embeddings count (${parsedEmbeddings.length}) does not match the collection dimensionality (${dimensionality}).`))
-      return
-    }
-    const invalid = Object.keys(fieldErrors).filter(k => fieldErrors[k])
-    if (invalid.length > 0) {
-      setError(new Error('Fix the highlighted fields before searching. ' + invalid.map(k => `${fieldLabels[k]}: ${fieldErrors[k]}`).join(' ')))
+    const validation = validateSearch(form, dimensionality)
+    if (validation.error) {
+      setError(new Error(validation.error))
       return
     }
     setLoading(true)
     try {
-      const query = buildQuery({
-        embeddings, searchType, minScore, maxScore, minDistance, maxDistance,
-        requiredLabels, excludedLabels, requiredTags, excludedTags, requiredTerms, excludedTerms,
-        sortOrder, maxResults, includeNeighbors, createdBefore, createdAfter, documentIds,
-        fullTextQuery, fullTextSearchType, fullTextMatchMode, fullTextLanguage, fullTextNormalization, fullTextMinScore, fullTextWeight,
-        hybridStrategy, hybridRrfK, hybridCandidatePool
-      })
+      const query = buildQuery(form)
       const result = await api.search(tenantId, collectionId, query)
       setLastSearchWasHybrid(!!query.Hybrid)
+      setLastSearchWasCollapsed(!!query.Collapse)
       setResults(result)
     } catch (err) {
       setError(err)
@@ -412,9 +245,7 @@ function SearchTab({ tenantId, collectionId }) {
 
   const renderScore = (value) => value != null ? <span className="score-badge">{value.toFixed(4)}</span> : '-'
   const renderRank = (value) => value != null ? value : '-'
-  const resultDocs = results?.Documents || []
-  const showVectorScore = lastSearchWasHybrid || resultDocs.some(d => d.VectorScore != null)
-  const showRanks = lastSearchWasHybrid || resultDocs.some(d => d.VectorRank != null || d.TextRank != null)
+  const { showVectorScore, showRanks, showGroup, showRecencyRank } = resultColumnFlags(results?.Documents, lastSearchWasHybrid)
 
   const resultColumns = [
     {
@@ -450,6 +281,23 @@ function SearchTab({ tenantId, collectionId }) {
         key: 'TextRank', label: 'Text Rank', width: '90px',
         render: (d) => renderRank(d.TextRank),
         sortValue: (d) => d.TextRank
+      }
+    ] : []),
+    ...(showRecencyRank ? [{
+      key: 'RecencyRank', label: 'Recency Rank', width: '110px',
+      render: (d) => renderRank(d.RecencyRank),
+      sortValue: (d) => d.RecencyRank
+    }] : []),
+    ...(showGroup ? [
+      {
+        key: 'GroupKey', label: 'Group',
+        render: (d) => d.GroupKey ? <CopyId value={d.GroupKey} truncate={16} /> : '-',
+        filterValue: (d) => d.GroupKey || ''
+      },
+      {
+        key: 'GroupHits', label: 'Group Hits', width: '90px',
+        render: (d) => renderRank(d.GroupHits),
+        sortValue: (d) => d.GroupHits
       }
     ] : []),
     {
@@ -543,7 +391,7 @@ function SearchTab({ tenantId, collectionId }) {
                 <FieldError message={fieldErrors.fullTextNormalization} />
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
               <div className="form-group">
                 <label htmlFor="ft-min-score">Min Text Score</label>
                 <input id="ft-min-score" type="number" step="any" value={fullTextMinScore} onChange={(e) => setFullTextMinScore(e.target.value)} placeholder="0.0" />
@@ -562,13 +410,29 @@ function SearchTab({ tenantId, collectionId }) {
                 <span style={HINT_STYLE}>Share given to the text leg in hybrid search; the vector leg gets the rest. 0 ranks by vector only.</span>
                 <FieldError message={fieldErrors.fullTextWeight} />
               </div>
+              {fullTextMatchMode === 'Any' && (
+                <div className="form-group">
+                  <label htmlFor="ft-min-should-match">Min Terms to Match</label>
+                  <select
+                    id="ft-min-should-match"
+                    value={fullTextMinimumShouldMatch}
+                    onChange={(e) => setFullTextMinimumShouldMatch(Number(e.target.value))}
+                    aria-invalid={!!fieldErrors.fullTextMinimumShouldMatch}
+                    style={fieldErrors.fullTextMinimumShouldMatch ? INVALID_STYLE : undefined}
+                  >
+                    {MINIMUM_SHOULD_MATCH_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                  <span style={HINT_STYLE}>Match mode Any only. 2 or 3 requires that many distinct query terms. Fewer rows are ranked, but long queries can get slower. A query with fewer terms requires all of them.</span>
+                  <FieldError message={fieldErrors.fullTextMinimumShouldMatch} />
+                </div>
+              )}
             </div>
           </CollapsibleSection>
 
           {/* Hybrid ranking: only meaningful when both a vector and a text query are supplied */}
           {isHybrid && (
             <CollapsibleSection title="Hybrid Ranking" defaultOpen={true}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16 }}>
                 <div className="form-group">
                   <label htmlFor="hy-strategy">Hybrid Strategy</label>
                   <select id="hy-strategy" value={hybridStrategy} onChange={(e) => setHybridStrategy(e.target.value)} aria-describedby="hy-strategy-help">
@@ -608,9 +472,76 @@ function SearchTab({ tenantId, collectionId }) {
                     <FieldError message={fieldErrors.hybridCandidatePool} />
                   </div>
                 )}
+                {showRecencyWeight && (
+                  <div className="form-group">
+                    <label htmlFor="hy-recency-weight">Recency Weight (0.0-1.0)</label>
+                    <input
+                      id="hy-recency-weight" type="number" step="0.05"
+                      min={RECENCY_WEIGHT_RANGE.min} max={RECENCY_WEIGHT_RANGE.max}
+                      value={hybridRecencyWeight}
+                      onChange={(e) => setHybridRecencyWeight(e.target.value)}
+                      placeholder={String(DEFAULT_RECENCY_WEIGHT)}
+                      aria-invalid={!!fieldErrors.hybridRecencyWeight}
+                      style={fieldErrors.hybridRecencyWeight ? INVALID_STYLE : undefined}
+                    />
+                    <span style={HINT_STYLE}>Weight of a third RRF signal that ranks candidates newest first (per collapse group when collapsing). 0 turns it off.</span>
+                    <FieldError message={fieldErrors.hybridRecencyWeight} />
+                  </div>
+                )}
               </div>
             </CollapsibleSection>
           )}
+
+          {/* Result grouping: one hit per group instead of one per chunk */}
+          <CollapsibleSection title="Result Grouping (Collapse)" defaultOpen={collapseField !== ''}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+              <div className="form-group">
+                <label htmlFor="co-field">Collapse By</label>
+                <select
+                  id="co-field" value={collapseField}
+                  onChange={(e) => setCollapseField(e.target.value)}
+                  aria-describedby="co-field-help"
+                  aria-invalid={!!fieldErrors.collapseField}
+                  style={fieldErrors.collapseField ? INVALID_STYLE : undefined}
+                >
+                  {COLLAPSE_FIELDS.map(f => <option key={f.value} value={f.value} title={f.help}>{f.label}</option>)}
+                </select>
+                <span id="co-field-help" style={HINT_STYLE}>{selectedCollapse.help}{collapseField ? ' Max Results and paging count groups.' : ''}</span>
+                <FieldError message={fieldErrors.collapseField} />
+              </div>
+              {showCollapseTagKey && (
+                <div className="form-group">
+                  <label htmlFor="co-tag-key">Tag Key</label>
+                  <input
+                    id="co-tag-key" type="text" maxLength={TAG_KEY_MAX_LENGTH}
+                    value={collapseTagKey}
+                    onChange={(e) => setCollapseTagKey(e.target.value)}
+                    placeholder="parentKey"
+                    aria-invalid={!!fieldErrors.collapseTagKey}
+                    style={fieldErrors.collapseTagKey ? INVALID_STYLE : undefined}
+                  />
+                  <span style={HINT_STYLE}>Name of the tag whose value identifies the group, at most {TAG_KEY_MAX_LENGTH} characters.</span>
+                  <FieldError message={fieldErrors.collapseTagKey} />
+                </div>
+              )}
+              {showCollapsePool && (
+                <div className="form-group">
+                  <label htmlFor="co-candidate-pool">Collapse Candidate Pool</label>
+                  <input
+                    id="co-candidate-pool" type="number" step="1"
+                    min={COLLAPSE_POOL_RANGE.min} max={COLLAPSE_POOL_RANGE.max}
+                    value={collapseCandidatePool}
+                    onChange={(e) => setCollapseCandidatePool(e.target.value)}
+                    placeholder="Auto"
+                    aria-invalid={!!fieldErrors.collapseCandidatePool}
+                    style={fieldErrors.collapseCandidatePool ? INVALID_STYLE : undefined}
+                  />
+                  <span style={HINT_STYLE}>Candidates retrieved before grouping, 1-10000. Leave blank for automatic (max of 4x Max Results and 100, capped at 1000). Hybrid searches use the hybrid Candidate Pool.</span>
+                  <FieldError message={fieldErrors.collapseCandidatePool} />
+                </div>
+              )}
+            </div>
+          </CollapsibleSection>
 
           {/* Filters */}
           <CollapsibleSection title="Filters">
@@ -716,7 +647,7 @@ function SearchTab({ tenantId, collectionId }) {
           </CollapsibleSection>
 
           {/* Results options & submit */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: 16, alignItems: 'end', marginTop: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto auto', gap: 16, alignItems: 'end', marginTop: 8 }}>
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label>Sort Order</label>
               <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)}>
@@ -731,6 +662,17 @@ function SearchTab({ tenantId, collectionId }) {
               <label>Include Neighbors</label>
               <input type="number" value={includeNeighbors} onChange={(e) => setIncludeNeighbors(e.target.value)} min={0} max={10} placeholder="0" />
             </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label htmlFor="sr-include-embeddings" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                <input
+                  id="sr-include-embeddings" type="checkbox"
+                  checked={includeEmbeddings}
+                  onChange={(e) => setIncludeEmbeddings(e.target.checked)}
+                  style={{ width: 'auto' }}
+                />
+                Include Embeddings
+              </label>
+            </div>
             <button type="submit" className="btn btn-primary" disabled={loading || !tenantId || !collectionId} style={{ marginBottom: 0 }}>
               {loading ? 'Searching...' : 'Search'}
             </button>
@@ -741,7 +683,7 @@ function SearchTab({ tenantId, collectionId }) {
       {results && (
         <div style={{ marginTop: 24 }}>
           <p style={{ marginBottom: 12, color: 'var(--text-secondary)' }}>
-            {results.TotalRecords || 0} total results {results.EndOfResults ? '' : `(showing first ${results.Documents?.length || 0})`}
+            {results.TotalRecords || 0} total {lastSearchWasCollapsed ? 'groups' : 'results'} {results.EndOfResults ? '' : `(showing first ${results.Documents?.length || 0})`}
           </p>
           {results.Notice && (
             <div

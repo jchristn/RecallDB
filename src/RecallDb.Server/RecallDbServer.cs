@@ -501,7 +501,7 @@ namespace RecallDb.Server
             [typeof(TenantMetadata)]     = new HashSet<string> { "Id", "CreatedUtc", "LastUpdateUtc" },
             [typeof(Credential)]         = new HashSet<string> { "Id", "TenantId", "BearerToken", "CreatedUtc", "LastUpdateUtc" },
             [typeof(UserMaster)]         = new HashSet<string> { "Id", "TenantId", "CreatedUtc", "LastUpdateUtc" },
-            [typeof(DocumentRecord)]     = new HashSet<string> { "Id", "ContentLength", "Etag", "Sha256", "CreatedUtc", "Distance", "Score", "TextScore", "VectorScore", "VectorRank", "TextRank", "Neighbors" },
+            [typeof(DocumentRecord)]     = new HashSet<string> { "Id", "ContentLength", "Etag", "Sha256", "CreatedUtc", "Distance", "Score", "TextScore", "VectorScore", "VectorRank", "TextRank", "RecencyRank", "GroupKey", "GroupHits", "Neighbors" },
             [typeof(LabelRecord)]        = new HashSet<string> { "Id", "CreatedUtc" },
             [typeof(TagRecord)]          = new HashSet<string> { "Id", "CreatedUtc" },
         };
