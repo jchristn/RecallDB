@@ -29,5 +29,15 @@ namespace RecallDb.Sdk.Constants
         /// FullText.MinimumShouldMatch is honored.
         /// </summary>
         public const string FullTextMinimumShouldMatch = "search.fulltext.minimum-should-match";
+
+        /// <summary>
+        /// VectorQuery.EfSearch is honored, and vector-only searches are no longer limited to 40 hits.
+        /// </summary>
+        public const string VectorEfSearch = "search.vector.ef-search";
+
+        /// <summary>
+        /// LabelFilter.RequiredMode is honored (All, the default, or Any).
+        /// </summary>
+        public const string LabelFilterRequiredMode = "search.label-filter.required-mode";
     }
 }

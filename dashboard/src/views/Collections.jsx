@@ -170,7 +170,7 @@ export default function Collections() {
               <TenantPicker value={createTenantId} onChange={setCreateTenantId} />
               <div className="form-group"><label>Name</label><input type="text" value={form.Name} onChange={(e) => setForm({...form, Name: e.target.value})} required /></div>
               <div className="form-group"><label>Description</label><textarea value={form.Description} onChange={(e) => setForm({...form, Description: e.target.value})} rows={3} /></div>
-              <div className="form-group"><label>Dimensionality</label><input type="number" value={form.Dimensionality} onChange={(e) => setForm({...form, Dimensionality: e.target.value})} min={1} required /></div>
+              <div className="form-group"><label>Dimensionality (1-2000)</label><input type="number" value={form.Dimensionality} onChange={(e) => setForm({...form, Dimensionality: e.target.value})} min={1} max={2000} required /></div>
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(false)}>Cancel</button>
                 <button type="submit" className="btn btn-primary">Create</button>

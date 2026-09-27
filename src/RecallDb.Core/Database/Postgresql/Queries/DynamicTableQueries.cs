@@ -18,6 +18,12 @@ namespace RecallDb.Core.Database.Postgresql.Queries
         /// </summary>
         public const int MaxIndexIdentifierLength = 48;
 
+        /// <summary>
+        /// Largest vector dimensionality a collection can have. Every collection gets an HNSW index on its embeddings,
+        /// and pgvector 0.5.1 (the shipped image) cannot build an HNSW index above 2000 dimensions.
+        /// </summary>
+        public const int MaxVectorDimensions = 2000;
+
         private static readonly Regex _ValidResourceId = new Regex("^[A-Za-z0-9_]+$", RegexOptions.Compiled);
         private static readonly Regex _CreateIndexNameAndTable = new Regex(
             @"IF NOT EXISTS (?<name>\S+) ON (?<table>\S+)", RegexOptions.Compiled);

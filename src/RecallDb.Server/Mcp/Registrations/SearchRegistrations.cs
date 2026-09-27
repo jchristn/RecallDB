@@ -38,6 +38,8 @@ namespace RecallDb.Server.Mcp.Registrations
                     + "Hybrid.RecencyWeight (0.0-1.0, default 0, Rrf only) adds a recency signal (newest CreatedUtc per group); hits carry RecencyRank. "
                     + "Collapse {\"Field\":\"DocumentId\"|\"Tag\",\"TagKey\":\"...\",\"CandidatePool\":n} returns one hit per group (best chunk) with GroupKey and GroupHits; "
                     + "MaxResults and TotalRecords then count groups. FullText.MinimumShouldMatch (1-3, Any only) requires that many distinct terms. "
+                    + "Vector.EfSearch (1-1000, clamped) sets the HNSW candidate list size (default covers four times the page, at least 100). "
+                    + "LabelFilter {\"Required\":[...],\"RequiredMode\":\"All\"|\"Any\",\"Excluded\":[...]}: RequiredMode All (default) needs every required label, Any at least one. "
                     + "Hybrid example: {\"Vector\":{\"SearchType\":\"CosineSimilarity\",\"Embeddings\":[0.1,0.2,0.3]},"
                     + "\"FullText\":{\"Query\":\"run the test suite\",\"TextWeight\":0.5},\"Hybrid\":{\"Strategy\":\"Rrf\",\"RecencyWeight\":0.1},"
                     + "\"Collapse\":{\"Field\":\"Tag\",\"TagKey\":\"parentKey\"},\"MaxResults\":10}",
@@ -49,7 +51,7 @@ namespace RecallDb.Server.Mcp.Registrations
                         bearerToken = new { type = "string", description = "Caller bearer token." },
                         tenantId = new { type = "string", description = "Tenant ID." },
                         collectionId = new { type = "string", description = "Collection ID." },
-                        search = new { type = "string", description = "SearchQuery serialized as a JSON string (Vector, FullText with MatchMode/MinimumShouldMatch, Hybrid with Strategy/RrfK/CandidatePool/RecencyWeight, Collapse, filters, MaxResults, ContinuationToken)." }
+                        search = new { type = "string", description = "SearchQuery serialized as a JSON string (Vector with EfSearch, FullText with MatchMode/MinimumShouldMatch, Hybrid with Strategy/RrfK/CandidatePool/RecencyWeight, Collapse, LabelFilter with RequiredMode, other filters, MaxResults, ContinuationToken)." }
                     },
                     required = new[] { "bearerToken", "tenantId", "collectionId", "search" }
                 },

@@ -8,6 +8,7 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
+    using Npgsql;
     using SyslogLogging;
     using RecallDb.Core.Database.Interfaces;
     using RecallDb.Core.Database.Postgresql.Queries;
@@ -86,7 +87,15 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                 ") RETURNING id, created_utc";
 
             // Read back the generated id and the stored timestamp, so the response matches a later read.
-            DataTable result = await _Driver.ExecuteQueryAsync(query, true, token).ConfigureAwait(false);
+            DataTable result;
+            try
+            {
+                result = await _Driver.ExecuteQueryAsync(query, true, token).ConfigureAwait(false);
+            }
+            catch (PostgresException pe) when (IsDocumentKeyViolation(pe))
+            {
+                throw new DuplicateDocumentKeyException(collectionId, document.DocumentKey, pe);
+            }
             if (result != null && result.Rows.Count > 0) ApplyInsertedRow(document, result.Rows[0]);
 
             if (_Logging != null) _Logging.Debug(_Header + "created document " + document.DocumentKey + " in " + collectionId);
@@ -138,7 +147,16 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                 "(document_key, document_id, content_length, etag, sha256, position, content_type, content, binary_data, embeddings, created_utc) " +
                 "VALUES " + string.Join(", ", rows) + " RETURNING id, document_key, created_utc";
 
-            DataTable result = await _Driver.ExecuteQueryAsync(query, true, token).ConfigureAwait(false);
+            DataTable result;
+            try
+            {
+                result = await _Driver.ExecuteQueryAsync(query, true, token).ConfigureAwait(false);
+            }
+            catch (PostgresException pe) when (IsDocumentKeyViolation(pe))
+            {
+                throw new DuplicateDocumentKeyException(collectionId, null, pe);
+            }
+
             if (result != null)
             {
                 Dictionary<string, DataRow> byKey = new Dictionary<string, DataRow>(StringComparer.Ordinal);
@@ -265,7 +283,7 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
         /// <param name="collectionId">Collection ID.</param>
         /// <param name="document">Document record with updated values.</param>
         /// <param name="token">Cancellation token.</param>
-        /// <returns>The updated document record.</returns>
+        /// <returns>The updated document record, or null when no document has the key.</returns>
         public async Task<DocumentRecord> UpdateAsync(string collectionId, DocumentRecord document, CancellationToken token = default)
         {
             if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
@@ -284,9 +302,14 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                 "content = " + _Driver.FormatNullableString(document.Content) + ", " +
                 "binary_data = " + FormatBinaryData(document.BinaryData) + ", " +
                 "embeddings = " + FormatEmbeddings(document.Embeddings) + " " +
-                "WHERE document_key = '" + _Driver.Sanitize(document.DocumentKey) + "'";
+                "WHERE document_key = '" + _Driver.Sanitize(document.DocumentKey) + "' " +
+                "RETURNING id, created_utc";
 
-            await _Driver.ExecuteQueryAsync(query, true, token).ConfigureAwait(false);
+            DataTable result = await _Driver.ExecuteQueryAsync(query, true, token).ConfigureAwait(false);
+            if (result == null || result.Rows.Count == 0) return null;
+
+            // The row keeps its id and original created_utc; report both so the response matches a later read.
+            ApplyInsertedRow(document, result.Rows[0]);
 
             if (_Logging != null) _Logging.Debug(_Header + "updated document " + document.DocumentKey + " in " + collectionId);
             return document;
@@ -394,6 +417,38 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
         }
 
         /// <summary>
+        /// Return which of the given document keys already exist in a collection.
+        /// </summary>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <param name="documentKeys">Document keys to check.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>The keys that exist, in no particular order.</returns>
+        public async Task<List<string>> GetExistingKeysAsync(string collectionId, List<string> documentKeys, CancellationToken token = default)
+        {
+            if (string.IsNullOrEmpty(collectionId)) throw new ArgumentNullException(nameof(collectionId));
+            if (documentKeys == null) throw new ArgumentNullException(nameof(documentKeys));
+
+            List<string> existing = new List<string>();
+            if (documentKeys.Count == 0) return existing;
+
+            string tableName = "collection_" + SanitizeTableName(collectionId);
+            List<string> sanitizedKeys = documentKeys.Distinct(StringComparer.Ordinal).Select(k => "'" + _Driver.Sanitize(k) + "'").ToList();
+
+            string query =
+                "SELECT document_key FROM " + tableName + " " +
+                "WHERE document_key IN (" + string.Join(", ", sanitizedKeys) + ")";
+
+            DataTable result = await _Driver.ExecuteQueryAsync(query, false, token).ConfigureAwait(false);
+            if (result == null) return existing;
+            foreach (DataRow row in result.Rows)
+            {
+                string key = DataTableHelper.GetStringValue(row, "document_key");
+                if (key != null) existing.Add(key);
+            }
+            return existing;
+        }
+
+        /// <summary>
         /// Enumerate document records within a collection with pagination and optional filtering.
         /// </summary>
         /// <param name="collectionId">Collection ID.</param>
@@ -451,11 +506,7 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                     {
                         sanitizedLabels.Add("'" + _Driver.Sanitize(label) + "'");
                     }
-                    conditions.Add(
-                        "document_key IN (" +
-                        "SELECT document_key FROM " + labelsTableName + " " +
-                        "WHERE label IN (" + string.Join(",", sanitizedLabels) + ")" +
-                        ")");
+                    conditions.Add(FilterQueries.BuildLabelRequiredCondition(labelsTableName, sanitizedLabels, query.LabelFilter.RequiredMode));
                 }
 
                 if (query.LabelFilter.Excluded != null && query.LabelFilter.Excluded.Count > 0)
@@ -556,6 +607,14 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
         #endregion
 
         #region Private-Methods
+
+        private static bool IsDocumentKeyViolation(PostgresException pe)
+        {
+            // The documents table's only unique index is idx_col_<id>_dkey on document_key.
+            return pe.SqlState == PostgresErrorCodes.UniqueViolation
+                && pe.ConstraintName != null
+                && pe.ConstraintName.EndsWith("_dkey", StringComparison.Ordinal);
+        }
 
         private static void ApplyInsertedRow(DocumentRecord document, DataRow row)
         {

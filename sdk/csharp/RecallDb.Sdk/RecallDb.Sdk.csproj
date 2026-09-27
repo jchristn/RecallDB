@@ -5,7 +5,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <Version>0.2.2</Version>
+    <Version>0.2.3</Version>
 
     <!-- NuGet package metadata -->
     <PackageId>RecallDb.Sdk</PackageId>
@@ -21,7 +21,7 @@
     <RepositoryType>git</RepositoryType>
     <PackageTags>recalldb;vector-database;pgvector;postgresql;embeddings;vector-search;semantic-search;rag;sdk;client</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>SDK 0.2.2: single-call hybrid search options (Hybrid Strategy, RrfK, CandidatePool, RecencyWeight), result collapse (Collapse), FullText MatchMode and MinimumShouldMatch, stored vectors on request (IncludeEmbeddings), per-hit VectorScore, VectorRank, TextRank, RecencyRank, GroupKey, and GroupHits, search Notices, typed server info with capabilities (GetServerInfoAsync, SupportsAsync), constructors that accept an HttpClient or HttpMessageHandler, a per-request Timeout, cancellation of response reads, compact request JSON, URL-encoding of every path segment, structured errors (ErrorCode, ErrorMessage), string constants, and nullable annotations. Behavior change: Exists methods now throw on any status other than 200 or 404. See CHANGELOG.md for details.</PackageReleaseNotes>
+    <PackageReleaseNotes>SDK 0.2.3: VectorQuery.EfSearch (HNSW candidate list size) and LabelFilter.RequiredMode (All, the server default, or Any), LabelMatchModes constants, and the VectorEfSearch and LabelFilterRequiredMode capability constants. Against a current server: an existing DocumentKey is a 409, a key repeated in a batch is a 400, updating a missing document is a 404, and an update that leaves Labels or Tags null keeps them.</PackageReleaseNotes>
 
     <!-- Symbol package + source link for a first-class debugging experience -->
     <IncludeSymbols>true</IncludeSymbols>

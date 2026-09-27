@@ -301,6 +301,13 @@ namespace RecallDb.Sdk.TestHarness
             await RunTest("SDK 0.2.2: cancellation", TestSdkCancellation);
             await RunTest("SDK 0.2.2: reserved characters in keys", TestSdkReservedCharacters);
             await RunTest("SDK 0.2.2: exists reports failures", TestSdkExistsOnFailure);
+            await RunTest("SDK: label RequiredMode All and Any", TestSdkLabelRequiredMode);
+            await RunTest("SDK: invalid label RequiredMode rejected", TestSdkLabelRequiredModeRejected);
+            await RunTest("SDK: vector EfSearch accepted and clamped", TestSdkEfSearch);
+            await RunTest("SDK: duplicate document key is 409", TestSdkDuplicateKeyConflict);
+            await RunTest("SDK: update of a missing document is 404", TestSdkUpdateMissingNotFound);
+            await RunTest("SDK: update keeps omitted labels and tags", TestSdkUpdateKeepsLabelsTags);
+            await RunTest("SDK: wrong-length query vector is 400", TestSdkSearchWrongDimensions);
             await RunTest("SDK 0.2.2: delete grouping collection", TestSdkGroupingCleanup);
 
             await RunTest("Cleanup: delete search labels", TestCleanupSearchLabels);
@@ -2037,6 +2044,151 @@ namespace RecallDb.Sdk.TestHarness
             {
                 AssertEqual(400, (int)e.StatusCode, "StatusCode");
                 AssertTrue(e.ResponseBody.Contains(mention), "Response names " + mention + ", got " + e.ResponseBody);
+            }
+        }
+
+        private static DocumentRecord LabeledDoc(string key, params string[] labels)
+        {
+            DocumentRecord doc = new DocumentRecord();
+            doc.DocumentKey = key;
+            doc.Content = "labeled document " + key;
+            doc.Embeddings = new List<float> { 0.0f, 1.0f, 0.0f };
+            doc.Labels = labels.ToList();
+            return doc;
+        }
+
+        private static async Task<List<string>> LabelSearchKeys(string mode)
+        {
+            SearchQuery query = new SearchQuery();
+            query.Vector = new VectorQuery();
+            query.Vector.Embeddings = new List<float> { 0.0f, 1.0f, 0.0f };
+            query.LabelFilter = new LabelFilter();
+            query.LabelFilter.Required = new List<string> { "sdk-a", "sdk-b" };
+            query.LabelFilter.RequiredMode = mode;
+            query.MaxResults = 50;
+            SearchResult result = await GroupSearch(query).ConfigureAwait(false);
+            return result.Documents.Select(d => d.DocumentKey ?? "").OrderBy(k => k, StringComparer.Ordinal).ToList();
+        }
+
+        private static async Task TestSdkLabelRequiredMode()
+        {
+            AssertTrue(await _AdminClient.SupportsAsync(Capabilities.LabelFilterRequiredMode, true).ConfigureAwait(false), "SupportsAsync(search.label-filter.required-mode)");
+            await _AdminClient.CreateDocumentBatchAsync(_TestTenantId, _GroupCollectionId, new List<DocumentRecord>
+            {
+                LabeledDoc("sdk-la", "sdk-a"),
+                LabeledDoc("sdk-lb", "sdk-b"),
+                LabeledDoc("sdk-lab", "sdk-a", "sdk-b")
+            }).ConfigureAwait(false);
+
+            AssertEqual("sdk-lab", string.Join(",", await LabelSearchKeys(null).ConfigureAwait(false)), "Default (All) needs both labels");
+            AssertEqual("sdk-lab", string.Join(",", await LabelSearchKeys(LabelMatchModes.All).ConfigureAwait(false)), "All needs both labels");
+            AssertEqual("sdk-la,sdk-lab,sdk-lb", string.Join(",", await LabelSearchKeys(LabelMatchModes.Any).ConfigureAwait(false)), "Any needs one label");
+        }
+
+        private static async Task TestSdkLabelRequiredModeRejected()
+        {
+            try
+            {
+                await LabelSearchKeys("Some").ConfigureAwait(false);
+                AssertTrue(false, "RequiredMode Some should be rejected");
+            }
+            catch (RecallDbException e)
+            {
+                AssertEqual(400, (int)e.StatusCode, "StatusCode");
+            }
+        }
+
+        private static async Task TestSdkEfSearch()
+        {
+            AssertTrue(await _AdminClient.SupportsAsync(Capabilities.VectorEfSearch).ConfigureAwait(false), "SupportsAsync(search.vector.ef-search)");
+            foreach (int ef in new[] { 1, 200, 1000, 0, 5000 })
+            {
+                SearchQuery query = new SearchQuery();
+                query.Vector = new VectorQuery();
+                query.Vector.Embeddings = new List<float> { 1.0f, 0.0f, 0.0f };
+                query.Vector.EfSearch = ef;
+                query.MaxResults = 5;
+                SearchResult result = await GroupSearch(query).ConfigureAwait(false);
+                AssertTrue(result.Documents.Count > 0, "EfSearch " + ef + " returns hits (out-of-range values are clamped)");
+            }
+        }
+
+        private static async Task TestSdkDuplicateKeyConflict()
+        {
+            try
+            {
+                await _AdminClient.CreateDocumentAsync(_TestTenantId, _GroupCollectionId, LabeledDoc("sdk-la", "sdk-a")).ConfigureAwait(false);
+                AssertTrue(false, "Creating an existing key should fail");
+            }
+            catch (RecallDbException e)
+            {
+                AssertEqual(409, (int)e.StatusCode, "StatusCode");
+                AssertTrue(e.ResponseBody.Contains("sdk-la"), "The conflict names the key");
+            }
+
+            try
+            {
+                await _AdminClient.CreateDocumentBatchAsync(_TestTenantId, _GroupCollectionId, new List<DocumentRecord> { LabeledDoc("sdk-fresh", "x"), LabeledDoc("sdk-lb", "x") }).ConfigureAwait(false);
+                AssertTrue(false, "A batch with an existing key should fail");
+            }
+            catch (RecallDbException e)
+            {
+                AssertEqual(409, (int)e.StatusCode, "Batch StatusCode");
+            }
+            AssertTrue(!await _AdminClient.DocumentExistsAsync(_TestTenantId, _GroupCollectionId, "sdk-fresh").ConfigureAwait(false), "The failed batch stored nothing");
+        }
+
+        private static async Task TestSdkUpdateMissingNotFound()
+        {
+            DocumentRecord doc = new DocumentRecord();
+            doc.Content = "nothing here";
+            try
+            {
+                await _AdminClient.UpdateDocumentAsync(_TestTenantId, _GroupCollectionId, "sdk-no-such-doc", doc).ConfigureAwait(false);
+                AssertTrue(false, "Updating a missing key should fail");
+            }
+            catch (RecallDbException e)
+            {
+                AssertEqual(404, (int)e.StatusCode, "StatusCode");
+            }
+        }
+
+        private static async Task TestSdkUpdateKeepsLabelsTags()
+        {
+            DocumentRecord doc = LabeledDoc("sdk-keep", "keep-me");
+            doc.Tags = new Dictionary<string, string> { { "k", "v" } };
+            await _AdminClient.CreateDocumentAsync(_TestTenantId, _GroupCollectionId, doc).ConfigureAwait(false);
+
+            DocumentRecord change = new DocumentRecord();
+            change.Content = "revised";
+            change.Embeddings = new List<float> { 0.0f, 1.0f, 0.0f };
+            await _AdminClient.UpdateDocumentAsync(_TestTenantId, _GroupCollectionId, "sdk-keep", change).ConfigureAwait(false);
+
+            DocumentRecord read = await _AdminClient.GetDocumentAsync(_TestTenantId, _GroupCollectionId, "sdk-keep").ConfigureAwait(false);
+            AssertEqual("revised", read.Content ?? "", "Content updated");
+            AssertEqual("keep-me", string.Join(",", read.Labels ?? new List<string>()), "Labels kept");
+            AssertTrue(read.Tags != null && read.Tags.TryGetValue("k", out string v) && v == "v", "Tags kept");
+
+            change.Labels = new List<string>();
+            await _AdminClient.UpdateDocumentAsync(_TestTenantId, _GroupCollectionId, "sdk-keep", change).ConfigureAwait(false);
+            read = await _AdminClient.GetDocumentAsync(_TestTenantId, _GroupCollectionId, "sdk-keep").ConfigureAwait(false);
+            AssertEqual(0, (read.Labels ?? new List<string>()).Count, "An empty list clears labels");
+            AssertTrue(read.Tags != null && read.Tags.ContainsKey("k"), "Tags still kept");
+        }
+
+        private static async Task TestSdkSearchWrongDimensions()
+        {
+            SearchQuery query = new SearchQuery();
+            query.Vector = new VectorQuery();
+            query.Vector.Embeddings = new List<float> { 1.0f, 0.0f };
+            try
+            {
+                await GroupSearch(query).ConfigureAwait(false);
+                AssertTrue(false, "A 2-dimension query against a 3-dimension collection should fail");
+            }
+            catch (RecallDbException e)
+            {
+                AssertEqual(400, (int)e.StatusCode, "StatusCode");
             }
         }
 

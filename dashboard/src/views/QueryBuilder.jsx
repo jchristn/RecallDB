@@ -7,6 +7,7 @@ import ActionMenu from '../components/ActionMenu.jsx'
 import JsonModal from '../components/JsonModal.jsx'
 import ViewDocumentModal from '../components/ViewDocumentModal.jsx'
 import ErrorModal from '../components/ErrorModal.jsx'
+import { LABEL_MATCH_MODES, buildLabelFilter } from './searchRequest.js'
 
 function CollapsibleSection({ title, children, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -39,6 +40,7 @@ export default function QueryBuilder() {
 
   const [requiredLabels, setRequiredLabels] = useState('')
   const [excludedLabels, setExcludedLabels] = useState('')
+  const [labelRequiredMode, setLabelRequiredMode] = useState('All')
 
   const [requiredTags, setRequiredTags] = useState([])
   const [excludedTags, setExcludedTags] = useState([])
@@ -102,13 +104,8 @@ export default function QueryBuilder() {
         }
       }
 
-      const reqLabels = parseCommaSep(requiredLabels)
-      const excLabels = parseCommaSep(excludedLabels)
-      if (reqLabels.length > 0 || excLabels.length > 0) {
-        query.LabelFilter = {}
-        if (reqLabels.length > 0) query.LabelFilter.Required = reqLabels
-        if (excLabels.length > 0) query.LabelFilter.Excluded = excLabels
-      }
+      const labelFilter = buildLabelFilter(parseCommaSep(requiredLabels), parseCommaSep(excludedLabels), labelRequiredMode)
+      if (labelFilter) query.LabelFilter = labelFilter
 
       const validReqTags = requiredTags.filter(t => t.Key.trim())
       const validExcTags = excludedTags.filter(t => t.Key.trim())
@@ -257,6 +254,12 @@ export default function QueryBuilder() {
           </CollapsibleSection>
 
           <CollapsibleSection title="Label Filter">
+            <div className="form-group">
+              <label htmlFor="qb-label-mode">Required labels must match</label>
+              <select id="qb-label-mode" value={labelRequiredMode} onChange={(e) => setLabelRequiredMode(e.target.value)} style={{ maxWidth: 260 }}>
+                {LABEL_MATCH_MODES.map(m => <option key={m.value} value={m.value} title={m.help}>{m.label}: {m.help}</option>)}
+              </select>
+            </div>
             <div className="form-group">
               <label>Required Labels (comma-separated)</label>
               <textarea value={requiredLabels} onChange={(e) => setRequiredLabels(e.target.value)} rows={2} placeholder="label1, label2" />

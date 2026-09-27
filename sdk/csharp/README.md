@@ -2,6 +2,8 @@
 
 A .NET client library for interacting with the RecallDB vector database REST API.
 
+For how RecallDB stores, indexes, and ranks data (search modes, filters, collapse, recency, paging, performance, and known limits), read [Ingestion](../../docs/INGESTION.md) and [Retrieval](../../docs/RETRIEVAL.md); the REST field reference is [REST_API.md](../../REST_API.md).
+
 ## Overview
 
 The RecallDB C# SDK provides a strongly-typed interface for all RecallDB operations including:
@@ -23,10 +25,10 @@ The RecallDB C# SDK provides a strongly-typed interface for all RecallDB operati
 
 ## Installation
 
-Install the `RecallDb.Sdk` package (0.2.2 or later for everything below):
+Install the `RecallDb.Sdk` package (0.2.3 or later for everything below):
 
 ```bash
-dotnet add package RecallDb.Sdk --version 0.2.2
+dotnet add package RecallDb.Sdk --version 0.2.3
 ```
 
 Or add a project reference to `RecallDb.Sdk.csproj`:
@@ -130,7 +132,7 @@ Full-text matching notes:
 - To restore the previous hybrid behavior (the text query is a required filter and raw scores are blended), set `Hybrid.Strategy` to `Filter` and `FullText.MatchMode` to `All`.
 - `FullText.TextWeight` must be between 0.0 and 1.0, `FullText.Normalization` between 0 and 63, and `FullText.Language` must be a text search configuration installed on the server. Out-of-range values are rejected with HTTP 400.
 - The search result may include a `Notice` explaining how the search was evaluated, for example when the text query contained only stop words or hybrid options were ignored.
-- String values have named constants in `RecallDb.Sdk.Constants`: `HybridStrategies`, `FullTextMatchModes`, `FullTextSearchTypes`, `VectorSearchTypes`, `SortOrders`, `CollapseFields`, and `Capabilities`.
+- String values have named constants in `RecallDb.Sdk.Constants`: `HybridStrategies`, `FullTextMatchModes`, `FullTextSearchTypes`, `VectorSearchTypes`, `SortOrders`, `CollapseFields`, `LabelMatchModes`, and `Capabilities`.
 
 ### Check server capabilities first
 
@@ -224,6 +226,15 @@ A failed call throws `RecallDbException` with `StatusCode` and the raw `Response
 **Behavior change in 0.2.2:** the `...ExistsAsync` methods return `true` for 200 and `false` for 404, and throw `RecallDbException` for anything else (401, 403, 429, 5xx). Earlier versions returned `false` for every non-200 status, so an unauthorized or failing server read as "does not exist".
 
 All path segments (tenant, user, credential, collection, label, tag, document ids and keys) are URL-encoded, so keys containing `#`, `?`, `/`, `%`, or spaces round-trip. The client sends compact JSON, and its public surface carries nullable annotations: a nullable member is one the server may omit or that you may leave unset.
+
+## Label matching, EfSearch, and write errors
+
+These need a server that reports `Capabilities.LabelFilterRequiredMode` and `Capabilities.VectorEfSearch`.
+
+- `LabelFilter.RequiredMode` is `LabelMatchModes.All` (the server default: every required label) or `LabelMatchModes.Any` (at least one). A server without the capability treats several required labels as any-of.
+- `VectorQuery.EfSearch` sets the HNSW candidate list size (the server clamps it to 1-1000). Leave it null for the default, four times the requested page with a floor of 100; raise it for selective filters or deeper pages.
+- `CreateDocumentAsync` and `CreateDocumentBatchAsync` throw `RecallDbException` with status 409 when a `DocumentKey` already exists (nothing is written), and 400 when a batch repeats a key. `UpdateDocumentAsync` throws with 404 when the key does not exist. A wrong-length vector is a 400.
+- `UpdateDocumentAsync` replaces the stored fields; leaving `Labels` or `Tags` null keeps the document's current ones, and an empty collection removes them.
 
 ## Project Structure
 

@@ -121,6 +121,11 @@ namespace RecallDb.Server.Services
             if (col == null)
                 return ServiceResult.Fail(400, "Bad request", "Request body is required.");
 
+            if (col.Dimensionality > DynamicTableQueries.MaxVectorDimensions)
+                return ServiceResult.Fail(400, "Bad request",
+                    "Dimensionality must be at most " + DynamicTableQueries.MaxVectorDimensions + " (the HNSW vector index supports up to "
+                    + DynamicTableQueries.MaxVectorDimensions + " dimensions); received " + col.Dimensionality + ".");
+
             // The id flows unescaped into every DDL/DML statement as a table and index name, so a client-supplied id
             // must be a plain identifier. Server-generated ids always satisfy this; reject anything else rather than
             // letting it reach SQL.

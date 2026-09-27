@@ -3,15 +3,15 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  buildQuery, validateFields, validateSearch, searchShape, resultColumnFlags,
+  buildQuery, validateFields, validateSearch, searchShape, resultColumnFlags, buildLabelFilter,
   examplesForOperation, SEARCH_EXAMPLES, TAG_KEY_MAX_LENGTH
 } from '../src/views/searchRequest.js'
 
 // A minimal form: every field the view holds, at its initial value.
 function form(overrides = {}) {
   return {
-    embeddings: '', searchType: 'CosineSimilarity', minScore: '', maxScore: '', minDistance: '', maxDistance: '',
-    requiredLabels: [], excludedLabels: [], requiredTags: [], excludedTags: [], requiredTerms: '', excludedTerms: '',
+    embeddings: '', searchType: 'CosineSimilarity', minScore: '', maxScore: '', minDistance: '', maxDistance: '', vectorEfSearch: '',
+    requiredLabels: [], excludedLabels: [], labelRequiredMode: 'All', requiredTags: [], excludedTags: [], requiredTerms: '', excludedTerms: '',
     sortOrder: 'ScoreDescending', maxResults: 10, includeNeighbors: '', includeEmbeddings: false,
     createdBefore: '', createdAfter: '', documentIds: '',
     fullTextQuery: '', fullTextSearchType: 'TsRank', fullTextMatchMode: 'Any', fullTextLanguage: 'english',
@@ -149,6 +149,55 @@ describe('minimum should match', () => {
 
   test('is not sent without a full-text query', () => {
     assert.equal(buildQuery(form({ ...VECTOR, fullTextMinimumShouldMatch: 2 })).FullText, undefined)
+  })
+})
+
+describe('vector EfSearch', () => {
+  test('is sent when set, including the range edges', () => {
+    assert.equal(buildQuery(form({ ...VECTOR, vectorEfSearch: '200' })).Vector.EfSearch, 200)
+    assert.equal(buildQuery(form({ ...VECTOR, vectorEfSearch: 1 })).Vector.EfSearch, 1)
+    assert.equal(buildQuery(form({ ...HYBRID, vectorEfSearch: 1000 })).Vector.EfSearch, 1000)
+    assert.deepEqual(errorsOf(form({ ...VECTOR, vectorEfSearch: 1 })), [])
+    assert.deepEqual(errorsOf(form({ ...VECTOR, vectorEfSearch: 1000 })), [])
+  })
+
+  test('is omitted when blank, so the server picks the default', () => {
+    assert.equal('EfSearch' in buildQuery(form({ ...VECTOR, vectorEfSearch: '' })).Vector, false)
+  })
+
+  test('rejects values outside 1-1000, fractions, and non-numbers', () => {
+    for (const bad of [0, 1001, 2.5, 'x']) {
+      assert.deepEqual(errorsOf(form({ ...VECTOR, vectorEfSearch: bad })), ['vectorEfSearch'], String(bad))
+    }
+  })
+
+  test('is ignored without a vector', () => {
+    assert.deepEqual(errorsOf(form({ ...TEXT, vectorEfSearch: 0 })), [])
+    assert.equal(buildQuery(form({ ...TEXT, vectorEfSearch: 50 })).Vector, undefined)
+  })
+})
+
+describe('label required mode', () => {
+  test('sends All by default and Any when chosen, with the required labels', () => {
+    assert.deepEqual(buildQuery(form({ ...VECTOR, requiredLabels: ['a', 'b'] })).LabelFilter, { Required: ['a', 'b'], RequiredMode: 'All' })
+    assert.deepEqual(buildQuery(form({ ...VECTOR, requiredLabels: ['a', 'b'], labelRequiredMode: 'Any' })).LabelFilter, { Required: ['a', 'b'], RequiredMode: 'Any' })
+  })
+
+  test('is not sent without required labels', () => {
+    assert.deepEqual(buildQuery(form({ ...VECTOR, excludedLabels: ['x'], labelRequiredMode: 'Any' })).LabelFilter, { Excluded: ['x'] })
+    assert.equal(buildQuery(form({ ...VECTOR, labelRequiredMode: 'Any' })).LabelFilter, undefined)
+  })
+
+  test('rejects an unknown mode', () => {
+    assert.deepEqual(errorsOf(form({ ...VECTOR, labelRequiredMode: 'Some' })), ['labelRequiredMode'])
+  })
+
+  test('buildLabelFilter builds the enumeration filter the same way', () => {
+    assert.deepEqual(buildLabelFilter(['a', ' ', 'b'], [], 'Any'), { Required: ['a', 'b'], RequiredMode: 'Any' })
+    assert.deepEqual(buildLabelFilter(['a'], ['z'], undefined), { Required: ['a'], RequiredMode: 'All', Excluded: ['z'] })
+    assert.deepEqual(buildLabelFilter([], ['z'], 'Any'), { Excluded: ['z'] })
+    assert.equal(buildLabelFilter([], [], 'Any'), null)
+    assert.equal(buildLabelFilter(undefined, undefined), null)
   })
 })
 

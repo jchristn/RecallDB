@@ -26,6 +26,7 @@ from recalldb_sdk import (
     CollapseFields,
     FullTextMatchModes,
     HybridStrategies,
+    LabelMatchModes,
     RecallDbClient,
     RecallDbException,
     VectorSearchTypes,
@@ -1342,6 +1343,78 @@ def test_search_recency_weight_validation():
         assert_true(e.error_message is not None and "RecencyWeight" in e.error_message, "error_message should mention RecencyWeight")
 
 
+def _expect_status(call, status, name):
+    try:
+        call()
+    except RecallDbException as e:
+        assert_equal(status, e.status_code, name)
+        return e
+    raise AssertionError("Expected " + str(status) + " but call succeeded: " + name)
+
+
+def _labeled_doc(key, labels):
+    return {"DocumentKey": key, "Content": "labeled document " + key, "ContentType": "Text", "Embeddings": [0.0, 1.0, 0.0], "Labels": labels}
+
+
+def _label_search_keys(mode):
+    label_filter = {"Required": ["sdk-a", "sdk-b"]}
+    if mode:
+        label_filter["RequiredMode"] = mode
+    resp = _admin_client.search(_test_tenant_id, _group_collection_id, {"Vector": {"Embeddings": [0.0, 1.0, 0.0]}, "LabelFilter": label_filter, "MaxResults": 50})
+    return ",".join(sorted(d["DocumentKey"] for d in resp.get("Documents", [])))
+
+
+def test_label_required_mode():
+    assert_true(_admin_client.supports(Capabilities.LABEL_FILTER_REQUIRED_MODE, refresh=True), "Server reports search.label-filter.required-mode")
+    _admin_client.create_document_batch(_test_tenant_id, _group_collection_id, [
+        _labeled_doc("sdk-la", ["sdk-a"]), _labeled_doc("sdk-lb", ["sdk-b"]), _labeled_doc("sdk-lab", ["sdk-a", "sdk-b"])])
+    assert_equal("sdk-lab", _label_search_keys(None), "Default (All) needs both labels")
+    assert_equal("sdk-lab", _label_search_keys(LabelMatchModes.ALL), "All needs both labels")
+    assert_equal("sdk-la,sdk-lab,sdk-lb", _label_search_keys(LabelMatchModes.ANY), "Any needs one label")
+
+
+def test_label_required_mode_rejected():
+    _expect_status(lambda: _label_search_keys("Some"), 400, "RequiredMode Some")
+
+
+def test_ef_search():
+    assert_true(_admin_client.supports(Capabilities.VECTOR_EF_SEARCH), "Server reports search.vector.ef-search")
+    for ef in (1, 200, 1000, 0, 5000):
+        resp = _admin_client.search(_test_tenant_id, _group_collection_id, {"Vector": {"Embeddings": [0.9, 0.1, 0.05], "EfSearch": ef}, "MaxResults": 5})
+        assert_true(len(resp.get("Documents", [])) > 0, "EfSearch " + str(ef) + " returns hits (out-of-range values are clamped)")
+
+
+def test_duplicate_key_conflict():
+    e = _expect_status(lambda: _admin_client.create_document(_test_tenant_id, _group_collection_id, _labeled_doc("sdk-la", ["x"])), 409, "Create with an existing key")
+    assert_true("sdk-la" in e.response_body, "The conflict names the key")
+    _expect_status(lambda: _admin_client.create_document_batch(_test_tenant_id, _group_collection_id, [_labeled_doc("sdk-fresh", ["x"]), _labeled_doc("sdk-lb", ["x"])]), 409, "Batch with an existing key")
+    assert_true(not _admin_client.document_exists(_test_tenant_id, _group_collection_id, "sdk-fresh"), "The failed batch stored nothing")
+    _expect_status(lambda: _admin_client.create_document_batch(_test_tenant_id, _group_collection_id, [_labeled_doc("sdk-twice", ["x"]), _labeled_doc("sdk-twice", ["x"])]), 400, "Key repeated inside a batch")
+
+
+def test_update_missing_not_found():
+    _expect_status(lambda: _admin_client.update_document(_test_tenant_id, _group_collection_id, "sdk-no-such-doc", {"Content": "x"}), 404, "Update of a missing key")
+
+
+def test_update_keeps_labels_tags():
+    doc = _labeled_doc("sdk-keep", ["keep-me"])
+    doc["Tags"] = {"k": "v"}
+    _admin_client.create_document(_test_tenant_id, _group_collection_id, doc)
+    _admin_client.update_document(_test_tenant_id, _group_collection_id, "sdk-keep", {"Content": "revised", "Embeddings": [0.0, 1.0, 0.0]})
+    d = _admin_client.get_document(_test_tenant_id, _group_collection_id, "sdk-keep")
+    assert_equal("revised", d.get("Content"), "Content updated")
+    assert_equal("keep-me", ",".join(d.get("Labels") or []), "Labels kept")
+    assert_equal("v", (d.get("Tags") or {}).get("k"), "Tags kept")
+    _admin_client.update_document(_test_tenant_id, _group_collection_id, "sdk-keep", {"Content": "revised", "Embeddings": [0.0, 1.0, 0.0], "Labels": []})
+    d = _admin_client.get_document(_test_tenant_id, _group_collection_id, "sdk-keep")
+    assert_equal(0, len(d.get("Labels") or []), "An empty list clears labels")
+    assert_equal("v", (d.get("Tags") or {}).get("k"), "Tags still kept")
+
+
+def test_search_wrong_dimensions():
+    _expect_status(lambda: _admin_client.search(_test_tenant_id, _group_collection_id, {"Vector": {"Embeddings": [1.0, 0.0]}, "MaxResults": 5}), 400, "2-dimension query against a 3-dimension collection")
+
+
 def test_group_cleanup():
     if not _group_collection_id:
         return
@@ -2080,6 +2153,13 @@ def main():
     run_test("Search collapse: validation (TagKey required, pool range, Filter rejected)", test_search_collapse_validation)
     run_test("Search full-text: MinimumShouldMatch 2 excludes a one-term match", test_search_minimum_should_match)
     run_test("Search hybrid: RecencyWeight 1.5 rejected with error_message", test_search_recency_weight_validation)
+    run_test("Labels: RequiredMode All (default) and Any", test_label_required_mode)
+    run_test("Labels: invalid RequiredMode rejected", test_label_required_mode_rejected)
+    run_test("Search: vector EfSearch accepted and clamped", test_ef_search)
+    run_test("Documents: duplicate key is 409, repeated key in a batch is 400", test_duplicate_key_conflict)
+    run_test("Documents: update of a missing key is 404", test_update_missing_not_found)
+    run_test("Documents: update keeps omitted labels and tags", test_update_keeps_labels_tags)
+    run_test("Search: wrong-length query vector is 400", test_search_wrong_dimensions)
     run_test("Search collapse: cleanup grouping collection", test_group_cleanup)
 
     # 22d. Client behavior

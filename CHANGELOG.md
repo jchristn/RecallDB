@@ -1,5 +1,13 @@
 # Changelog
 
+## SDKs v0.2.3 (C#, JavaScript, Python)
+
+The three SDKs move to 0.2.3 together. They target the v0.2.1 server described below.
+
+- `VectorQuery.EfSearch` / `Vector.EfSearch` and `LabelFilter.RequiredMode`, with `LabelMatchModes` constants (`All`, `Any`) and the `Capabilities.VectorEfSearch` and `Capabilities.LabelFilterRequiredMode` capability constants (`VECTOR_EF_SEARCH`, `LABEL_FILTER_REQUIRED_MODE` in Python)
+- Docs describe the server's new status codes: 409 for an existing `DocumentKey`, 400 for a key repeated in a batch, 404 for updating a missing document, and that an update keeps labels and tags left null
+- Harnesses in all three SDKs cover label modes (default, `All`, `Any`, invalid), `EfSearch` (range edges and clamping), the 409, 400, and 404 cases, update keeping labels and tags, and a wrong-length query vector
+
 ## SDKs v0.2.2 (C#, JavaScript, Python)
 
 The three SDKs now share one version, 0.2.2 (C# `RecallDb.Sdk` was 0.2.1, JavaScript was 0.2.0, Python had none). They target the v0.2.1 server described below.
@@ -63,6 +71,17 @@ Added end-to-end observability (metrics and distributed tracing) across the enti
 - The Grafana Search dashboard breaks search rate and p95 latency down by `recalldb_search_collapse`, and hybrid `Rrf` rate and latency by `recalldb_search_recency`
 - Fixed: the OpenAPI examples for document create, batch, and update bodies no longer include the search-only `RecencyRank`, `GroupKey`, and `GroupHits` fields, so the API Explorer does not prefill them
 - Tests: the grouping suite gains hybrid `Linear` collapse, recency ignored on single-leg searches, and range-edge cases, plus more 400 cases (collapse pool 10001, a null tag key, a non-numeric recency weight, and minimum should match with `Phrase` or `WebSearch`). The main suite checks the OpenAPI document examples. The dashboard's request builder and validation have unit tests (`npm test` in `dashboard`)
+- Docs: new [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (components, auth, request path, per-collection tables and indexes, startup, capabilities), [docs/INGESTION.md](docs/INGESTION.md) (data model, every write path and its guarantees, chunk modeling, limits), and [docs/RETRIEVAL.md](docs/RETRIEVAL.md) (every search mode and its scoring, filters, collapse, recency, neighbors, paging, measured performance, known limits, recipes). Corrected: tag `GreaterThan`/`LessThan` compare text; `Sha256` and `Etag` are stored as supplied, not computed; `GET .../documents` returns a paged result
+- Fixed: vector-only searches returned at most 40 hits, and pages past offset 40 were empty, because pgvector 0.5.1's HNSW scan stops at `hnsw.ef_search` (default 40) and this path did not raise it. The server now sets it per query to four times the rows the page needs (at least 100, at most 1000). Filtered vector searches find far more of their matches as a result (on 13,716 chunks, top-10 searches filtered to a term in 271 to 2,175 chunks went from 3-6 hits to 8-10)
+- New `Vector.EfSearch` (1-1000, clamped) sets the HNSW candidate list size for any search that uses the vector index, for more recall, deeper pages, or selective filters; hybrid and collapsed searches keep using their candidate pool when it is not set
+- **Behavior change:** `LabelFilter.Required` with several labels now requires every one of them (it matched documents with any of them, contrary to the documentation). New `LabelFilter.RequiredMode`: `All` (default) or `Any` for the previous behavior. Applies to search, enumeration, and delete-by-filter, so a delete-by-filter with several required labels now removes only documents that carry all of them
+- Fixed: creating a document whose `DocumentKey` already exists returns 409 naming the key (was a 500 carrying the database error); a batch returns 409 listing the existing keys, and 400 when the batch repeats a key. Nothing is written in either case
+- Fixed: updating a document key that does not exist returns 404 (was a 200 that stored nothing)
+- Fixed: a document update without `Labels` or `Tags` keeps the document's labels and tags (it removed them); sending them still replaces them, and `[]` or `{}` clears them
+- Fixed: a search vector whose length differs from the collection's dimensionality, and a document update with such embeddings, return 400 (were 500); creating a collection with more than 2000 dimensions returns 400 (was a 500 from the HNSW index build)
+- `Capabilities` adds `search.vector.ef-search` and `search.label-filter.required-mode`
+- Dashboard: an EF Search input for vector searches, a Required-labels All/Any selector on the search, enumerate, and query-builder pages, and a 2000-dimension cap on the collection form
+- Tests: a new document-behavior suite covers each of these in both directions (duplicate keys, batch conflicts, update 404, labels and tags kept, cleared, and replaced, dimensionality 400s and the 2000 limit, label modes in search, enumeration, and delete-by-filter, `EfSearch` clamping, and vector-only paging past 40), plus MCP cases for the 409, the 404, and label modes; dashboard unit tests cover the new controls
 - Search metrics and traces gain `recalldb_search_collapse` (`none`, `documentid`, `tag`) and `recalldb_search_recency` (`on`, `off`) labels
 - Fixed: document create (`PUT .../documents`) and batch create responses now carry each document's generated `Id` (previously `0`) and its stored `CreatedUtc`, so they match a later read. Batch create is now a single multi-row `INSERT ... RETURNING`
 - Docs: the README's document example sends `Tags` as an object (the array form it showed is rejected with 400), and uses the seeded `default` tenant and collection ids

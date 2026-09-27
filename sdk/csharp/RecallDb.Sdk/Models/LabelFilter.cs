@@ -8,12 +8,21 @@ namespace RecallDb.Sdk.Models
     public class LabelFilter
     {
         /// <summary>
-        /// Labels that must be present on the document.
+        /// Labels the document must carry: every one of them when <see cref="RequiredMode"/> is All (the server
+        /// default), or at least one when it is Any. An empty list does not filter.
         /// </summary>
         public List<string> Required { get; set; }
 
         /// <summary>
-        /// Labels that must not be present on the document.
+        /// How <see cref="Required"/> combines its labels: <see cref="Constants.LabelMatchModes.All"/> (every label,
+        /// the server default) or <see cref="Constants.LabelMatchModes.Any"/> (at least one). Null is omitted on the
+        /// wire. Capability: <see cref="Constants.Capabilities.LabelFilterRequiredMode"/>; a server without it treats
+        /// Required as Any.
+        /// </summary>
+        public string? RequiredMode { get; set; }
+
+        /// <summary>
+        /// Labels of which the document must carry none. An empty list does not filter.
         /// </summary>
         public List<string> Excluded { get; set; }
 

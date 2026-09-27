@@ -32,6 +32,16 @@ command-line flags. The defaults are `http://127.0.0.1:8600` and `recalldbadmin`
   `FullText.MinimumShouldMatch`, and their validation. It creates its own
   collection in the `default` tenant, so the fixed baselines of the other suites
   are unaffected, and deletes it at the end.
+- **RecallDbDocumentBehavior** (`DocumentBehaviorSuites`): write status codes and
+  filter semantics, each in both directions: a duplicate `DocumentKey` is 409
+  (and a key repeated inside a batch is 400, with nothing stored), updating a
+  missing key is 404, update keeps omitted labels and tags and replaces or
+  clears sent ones, wrong-length vectors and collections above 2000 dimensions
+  are 400, `LabelFilter.RequiredMode` (`All` by default, `Any`) in search,
+  enumeration, and delete-by-filter, and `Vector.EfSearch` (clamped values,
+  vector-only paging past 40 hits). It uses its own collection. Its small
+  collection is usually searched without the HNSW index, so the index's
+  candidate limit itself is verified on a large collection (see below).
 - **RecallDbCollectionIntegrity** (`CollectionIntegritySuites`): collection
   creation, index naming, and the startup schema repair.
 - **RecallDbMcp**: the MCP tool surface, including hybrid and collapsed,
@@ -114,6 +124,12 @@ suites, and the numbers go in the PR description.
   the settings up, read the plans from the PostgreSQL log (`docker logs`), and
   finish with `ALTER DATABASE recalldb RESET ALL`. `Database.LogQueries` also
   shows the SQL, but it splits long statements across log lines.
+- **Vector index candidate limit.** On a collection large enough for the HNSW
+  index to be used (for example SciFact split into about 13,700 chunks), check
+  that a vector-only search with `MaxResults` 100 returns 100 hits, that the
+  page at offset 40 is full, that `Vector.EfSearch: 20` caps a 40-hit page at
+  20, and how many hits filtered top-10 searches return at the default and at
+  `EfSearch: 1000`. Results are in docs/RETRIEVAL.md, section 6.5.
 - **Latency.** Measure p50/p95 of `SearchResult.TotalMs` for vector-only,
   full-text, and hybrid searches at 10k and 100k documents.
 
@@ -189,7 +205,9 @@ Besides the CRUD, enumeration, and search cases that mirror Test.Automated, each
 harness covers the 0.2.2 SDK surface: server info and `supports`, the hybrid
 round trip fields, a search `Notice`, `IncludeEmbeddings`, collapse by tag with
 recency, vector-only collapse, hybrid `Linear` collapse, `MinimumShouldMatch`,
-rejected collapse and `MinimumShouldMatch` requests (400), structured errors for both
+rejected collapse and `MinimumShouldMatch` requests (400), label `RequiredMode`
+`All`/`Any`, `EfSearch`, duplicate keys (409), updating a missing key (404),
+update keeping labels and tags, a wrong-length query vector (400), structured errors for both
 server error shapes, a request timeout (a delaying test handler in C#, a local
 stub server in JavaScript and Python), cancellation, a document key and id
 containing `#`, `?`, `/`, `%`, and a space, and `exists` throwing on 401 while

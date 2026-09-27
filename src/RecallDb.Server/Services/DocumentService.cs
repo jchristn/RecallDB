@@ -156,7 +156,14 @@ namespace RecallDb.Server.Services
             List<string> reqLabels = doc.Labels;
             Dictionary<string, string> reqTags = doc.Tags;
 
-            doc = await _Database.Documents.CreateAsync(ctx.CollectionId, doc).ConfigureAwait(false);
+            try
+            {
+                doc = await _Database.Documents.CreateAsync(ctx.CollectionId, doc).ConfigureAwait(false);
+            }
+            catch (DuplicateDocumentKeyException)
+            {
+                return ServiceResult.Fail(409, "Conflict", "A document with DocumentKey '" + doc.DocumentKey + "' already exists in this collection.");
+            }
 
             doc.Labels = reqLabels;
             doc.Tags = reqTags;
@@ -181,6 +188,16 @@ namespace RecallDb.Server.Services
             if (doc == null)
                 return ServiceResult.Fail(400, "Bad request", "Request body is required.");
 
+            if (doc.Embeddings != null)
+            {
+                CollectionMetadata col = await _Database.Collections.ReadAsync(ctx.TenantId, ctx.CollectionId).ConfigureAwait(false);
+                if (col == null)
+                    return ServiceResult.Fail(404, "Not found", "Collection not found.");
+                if (doc.Embeddings.Count != col.Dimensionality)
+                    return ServiceResult.Fail(400, "Bad request", "Embeddings dimensionality mismatch. Expected " + col.Dimensionality + " dimensions, but received " + doc.Embeddings.Count + ".");
+            }
+
+            // Null (omitted) labels or tags keep the existing ones; a list, even an empty one, replaces them.
             List<string> reqLabels = doc.Labels;
             Dictionary<string, string> reqTags = doc.Tags;
 
@@ -249,6 +266,14 @@ namespace RecallDb.Server.Services
                     return ServiceResult.Fail(400, "Bad request", "Embeddings dimensionality mismatch for document '" + d.DocumentKey + "'. Expected " + col.Dimensionality + " dimensions, but received " + d.Embeddings.Count + ".");
             }
 
+            // A key repeated within the batch can never succeed; name it instead of letting the insert fail.
+            HashSet<string> seenKeys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (DocumentRecord d in docs)
+            {
+                if (!seenKeys.Add(d.DocumentKey))
+                    return ServiceResult.Fail(400, "Bad request", "DocumentKey '" + d.DocumentKey + "' appears more than once in the batch.");
+            }
+
             Dictionary<string, List<string>> reqLabelsMap = new Dictionary<string, List<string>>();
             Dictionary<string, Dictionary<string, string>> reqTagsMap = new Dictionary<string, Dictionary<string, string>>();
             foreach (DocumentRecord d in docs)
@@ -257,7 +282,22 @@ namespace RecallDb.Server.Services
                 if (d.Tags != null) reqTagsMap[d.DocumentKey] = d.Tags;
             }
 
-            List<DocumentRecord> created = await _Database.Documents.CreateBatchAsync(ctx.CollectionId, docs).ConfigureAwait(false);
+            List<DocumentRecord> created;
+            try
+            {
+                created = await _Database.Documents.CreateBatchAsync(ctx.CollectionId, docs).ConfigureAwait(false);
+            }
+            catch (DuplicateDocumentKeyException)
+            {
+                // The batch is one INSERT, so nothing was written. Report which keys already exist.
+                List<string> existing = await _Database.Documents.GetExistingKeysAsync(ctx.CollectionId, docs.Select(d => d.DocumentKey).ToList()).ConfigureAwait(false);
+                string sample = string.Join(", ", existing.Take(10).Select(k => "'" + k + "'"));
+                string more = existing.Count > 10 ? " and " + (existing.Count - 10) + " more" : "";
+                return ServiceResult.Fail(409, "Conflict",
+                    existing.Count > 0
+                        ? "Documents with these DocumentKeys already exist in this collection: " + sample + more + ". Nothing was written."
+                        : "One or more DocumentKeys already exist in this collection. Nothing was written.");
+            }
 
             foreach (DocumentRecord d in created)
             {

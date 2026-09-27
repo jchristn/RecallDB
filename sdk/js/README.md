@@ -2,6 +2,8 @@
 
 A JavaScript (Node.js) client library for interacting with the RecallDB vector database REST API.
 
+For how RecallDB stores, indexes, and ranks data (search modes, filters, collapse, recency, paging, performance, and known limits), read [Ingestion](../../docs/INGESTION.md) and [Retrieval](../../docs/RETRIEVAL.md); the REST field reference is [REST_API.md](../../REST_API.md).
+
 ## Overview
 
 The RecallDB JavaScript SDK provides a simple interface for all RecallDB operations including:
@@ -160,7 +162,7 @@ await client.supports(Capabilities.Collapse, { refresh: true }); // re-fetches G
 ```
 
 The SDK also exports frozen constant objects for string values: `Capabilities`, `HybridStrategies`,
-`FullTextMatchModes`, `FullTextSearchTypes`, `VectorSearchTypes`, `SortOrders`, and `CollapseFields`, plus `VERSION`.
+`FullTextMatchModes`, `FullTextSearchTypes`, `VectorSearchTypes`, `SortOrders`, `CollapseFields`, and `LabelMatchModes`, plus `VERSION`.
 
 Full-text matching notes:
 
@@ -215,6 +217,20 @@ try {
   else throw e;
 }
 ```
+
+## Label matching, EfSearch, and write errors
+
+These need a server that reports `Capabilities.LabelFilterRequiredMode` and `Capabilities.VectorEfSearch`.
+
+- `LabelFilter.RequiredMode` is `LabelMatchModes.All` (the server default: every required label) or
+  `LabelMatchModes.Any` (at least one). A server without the capability treats several required labels as any-of.
+- `Vector.EfSearch` sets the HNSW candidate list size (the server clamps it to 1-1000). Omit it for the default, four
+  times the requested page with a floor of 100; raise it for selective filters or deeper pages.
+- `createDocument` and `createDocumentBatch` throw `RecallDbException` with `statusCode` 409 when a `DocumentKey`
+  already exists (nothing is written), and 400 when a batch repeats a key. `updateDocument` throws with 404 when the
+  key does not exist. A wrong-length vector is a 400.
+- `updateDocument` replaces the stored fields; omitting `Labels` or `Tags` keeps the document's current ones, and an
+  empty array or object removes them.
 
 ## Behavior changes in 0.2.2
 

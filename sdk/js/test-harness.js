@@ -11,7 +11,7 @@
 
 const {
     RecallDbClient, RecallDbException, RecallDbTimeoutError, VERSION,
-    Capabilities, HybridStrategies, FullTextMatchModes, VectorSearchTypes, SortOrders, CollapseFields
+    Capabilities, HybridStrategies, FullTextMatchModes, VectorSearchTypes, SortOrders, CollapseFields, LabelMatchModes
 } = require("./recalldb-sdk");
 const crypto = require("crypto");
 const http = require("http");
@@ -1095,6 +1095,83 @@ async function testCollapseRejectsFilterStrategy() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Test-21d2: Label RequiredMode, EfSearch, and write status codes (feature collection)
+// ---------------------------------------------------------------------------
+
+async function expectStatus(promise, status, name) {
+    try {
+        await promise;
+        throw new Error("Expected " + status + " but call succeeded: " + name);
+    } catch (e) {
+        if (!(e instanceof RecallDbException)) throw e;
+        assertEqual(status, e.statusCode, name);
+        return e;
+    }
+}
+
+function labeledDoc(key, labels) {
+    return { DocumentKey: key, Content: "labeled document " + key, ContentType: "Text", Embeddings: [0, 1, 0], Labels: labels };
+}
+
+async function labelSearchKeys(mode) {
+    const filter = { Required: ["sdk-a", "sdk-b"] };
+    if (mode) filter.RequiredMode = mode;
+    const r = await _adminClient.search(_testTenantId, _featureCollectionId, { Vector: { Embeddings: [0, 1, 0] }, LabelFilter: filter, MaxResults: 50 });
+    return (r.Documents || []).map(d => d.DocumentKey).sort().join(",");
+}
+
+async function testLabelRequiredMode() {
+    if (!(await _adminClient.supports(Capabilities.LabelFilterRequiredMode, { refresh: true }))) throw new Error("Server does not report search.label-filter.required-mode");
+    await _adminClient.createDocumentBatch(_testTenantId, _featureCollectionId, [
+        labeledDoc("sdk-la", ["sdk-a"]), labeledDoc("sdk-lb", ["sdk-b"]), labeledDoc("sdk-lab", ["sdk-a", "sdk-b"])
+    ]);
+    assertEqual("sdk-lab", await labelSearchKeys(null), "Default (All) needs both labels");
+    assertEqual("sdk-lab", await labelSearchKeys(LabelMatchModes.All), "All needs both labels");
+    assertEqual("sdk-la,sdk-lab,sdk-lb", await labelSearchKeys(LabelMatchModes.Any), "Any needs one label");
+}
+
+async function testLabelRequiredModeRejected() {
+    await expectStatus(labelSearchKeys("Some"), 400, "RequiredMode Some");
+}
+
+async function testEfSearch() {
+    if (!(await _adminClient.supports(Capabilities.VectorEfSearch))) throw new Error("Server does not report search.vector.ef-search");
+    for (const ef of [1, 200, 1000, 0, 5000]) {
+        const r = await _adminClient.search(_testTenantId, _featureCollectionId, { Vector: { Embeddings: [1, 0, 0], EfSearch: ef }, MaxResults: 5 });
+        assertTrue((r.Documents || []).length > 0, "EfSearch " + ef + " returns hits (out-of-range values are clamped)");
+    }
+}
+
+async function testDuplicateKeyConflict() {
+    const e = await expectStatus(_adminClient.createDocument(_testTenantId, _featureCollectionId, labeledDoc("sdk-la", ["x"])), 409, "Create with an existing key");
+    assertTrue(e.responseBody.includes("sdk-la"), "The conflict names the key");
+    await expectStatus(_adminClient.createDocumentBatch(_testTenantId, _featureCollectionId, [labeledDoc("sdk-fresh", ["x"]), labeledDoc("sdk-lb", ["x"])]), 409, "Batch with an existing key");
+    assertTrue(!(await _adminClient.documentExists(_testTenantId, _featureCollectionId, "sdk-fresh")), "The failed batch stored nothing");
+    await expectStatus(_adminClient.createDocumentBatch(_testTenantId, _featureCollectionId, [labeledDoc("sdk-twice", ["x"]), labeledDoc("sdk-twice", ["x"])]), 400, "Key repeated inside a batch");
+}
+
+async function testUpdateMissingNotFound() {
+    await expectStatus(_adminClient.updateDocument(_testTenantId, _featureCollectionId, "sdk-no-such-doc", { Content: "x" }), 404, "Update of a missing key");
+}
+
+async function testUpdateKeepsLabelsTags() {
+    await _adminClient.createDocument(_testTenantId, _featureCollectionId, { ...labeledDoc("sdk-keep", ["keep-me"]), Tags: { k: "v" } });
+    await _adminClient.updateDocument(_testTenantId, _featureCollectionId, "sdk-keep", { Content: "revised", Embeddings: [0, 1, 0] });
+    let d = await _adminClient.getDocument(_testTenantId, _featureCollectionId, "sdk-keep");
+    assertEqual("revised", d.Content, "Content updated");
+    assertEqual("keep-me", (d.Labels || []).join(","), "Labels kept");
+    assertEqual("v", (d.Tags || {}).k, "Tags kept");
+    await _adminClient.updateDocument(_testTenantId, _featureCollectionId, "sdk-keep", { Content: "revised", Embeddings: [0, 1, 0], Labels: [] });
+    d = await _adminClient.getDocument(_testTenantId, _featureCollectionId, "sdk-keep");
+    assertEqual(0, (d.Labels || []).length, "An empty list clears labels");
+    assertEqual("v", (d.Tags || {}).k, "Tags still kept");
+}
+
+async function testSearchWrongDimensions() {
+    await expectStatus(_adminClient.search(_testTenantId, _featureCollectionId, { Vector: { Embeddings: [1, 0] }, MaxResults: 5 }), 400, "2-dimension query against a 3-dimension collection");
+}
+
 async function testCleanupFeatureCollection() {
     if (!_featureCollectionId) return;
     await _adminClient.deleteCollection(_testTenantId, _featureCollectionId);
@@ -1156,7 +1233,7 @@ async function testSupports() {
     assertEqual(false, await c.supports("nope"), "supports nope");
     assertEqual(true, await c.supports(Capabilities.HybridRecency, { refresh: true }), "supports with refresh");
     assertTrue(Object.isFrozen(Capabilities) && Object.isFrozen(SortOrders), "Constant objects should be frozen");
-    assertEqual("0.2.2", VERSION, "VERSION");
+    assertEqual("0.2.3", VERSION, "VERSION");
 }
 
 async function withStubServer(delayMs, fn) {
@@ -1739,6 +1816,13 @@ async function main() {
     await runTest("Collapse: hybrid linear by tag", testCollapseHybridLinear);
     await runTest("Collapse: rejected with hybrid filter strategy", testCollapseRejectsFilterStrategy);
     await runTest("Collapse: blank tag key and pool 0 rejected", testCollapseRequiresTagKey);
+    await runTest("Labels: RequiredMode All (default) and Any", testLabelRequiredMode);
+    await runTest("Labels: invalid RequiredMode rejected", testLabelRequiredModeRejected);
+    await runTest("Search: vector EfSearch accepted and clamped", testEfSearch);
+    await runTest("Documents: duplicate key is 409, repeated key in a batch is 400", testDuplicateKeyConflict);
+    await runTest("Documents: update of a missing key is 404", testUpdateMissingNotFound);
+    await runTest("Documents: update keeps omitted labels and tags", testUpdateKeepsLabelsTags);
+    await runTest("Search: wrong-length query vector is 400", testSearchWrongDimensions);
     await runTest("Collapse: cleanup feature collection", testCleanupFeatureCollection);
 
     // 21e. Reserved characters and Exists semantics

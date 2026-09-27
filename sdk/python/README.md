@@ -2,6 +2,8 @@
 
 A Python client library for interacting with the RecallDB vector database REST API.
 
+For how RecallDB stores, indexes, and ranks data (search modes, filters, collapse, recency, paging, performance, and known limits), read [Ingestion](../../docs/INGESTION.md) and [Retrieval](../../docs/RETRIEVAL.md); the REST field reference is [REST_API.md](../../REST_API.md).
+
 ## Overview
 
 The RecallDB Python SDK provides a simple, typed interface for all RecallDB operations including:
@@ -33,7 +35,7 @@ pip install -r requirements.txt
 ```python
 from recalldb_sdk import RecallDbClient, __version__
 
-print(__version__)  # 0.2.2
+print(__version__)  # 0.2.3
 
 client = RecallDbClient("http://127.0.0.1:8600", "your-bearer-token")
 
@@ -127,8 +129,10 @@ if client.supports(Capabilities.COLLAPSE):  # cached per client; supports(name, 
 | `Capabilities.COLLAPSE` | `search.collapse` | `Collapse`, `GroupKey`, `GroupHits` |
 | `Capabilities.INCLUDE_EMBEDDINGS` | `search.include-embeddings` | `IncludeEmbeddings`, `Embeddings` on hits |
 | `Capabilities.FULLTEXT_MINIMUM_SHOULD_MATCH` | `search.fulltext.minimum-should-match` | `FullText.MinimumShouldMatch` |
+| `Capabilities.VECTOR_EF_SEARCH` | `search.vector.ef-search` | `Vector.EfSearch`; vector-only pages beyond 40 hits |
+| `Capabilities.LABEL_FILTER_REQUIRED_MODE` | `search.label-filter.required-mode` | `LabelFilter.RequiredMode` (`All` default, `Any`) |
 
-The module also defines named constants for the other string values: `HybridStrategies`, `FullTextMatchModes`, `FullTextSearchTypes`, `VectorSearchTypes`, `SortOrders`, and `CollapseFields`.
+The module also defines named constants for the other string values: `HybridStrategies`, `FullTextMatchModes`, `FullTextSearchTypes`, `VectorSearchTypes`, `SortOrders`, `CollapseFields`, and `LabelMatchModes`.
 
 ### Single-call hybrid search with collapse and recency
 
@@ -224,6 +228,15 @@ try:
 except RecallDbException as e:
     print(e.status_code, e.error_code, e.error_message)
 ```
+
+### Label matching, EfSearch, and write errors
+
+These need a server that reports `Capabilities.LABEL_FILTER_REQUIRED_MODE` and `Capabilities.VECTOR_EF_SEARCH`.
+
+- `LabelFilter.RequiredMode` is `LabelMatchModes.ALL` (the server default: every required label) or `LabelMatchModes.ANY` (at least one). A server without the capability treats several required labels as any-of.
+- `Vector.EfSearch` sets the HNSW candidate list size (the server clamps it to 1-1000). Omit it for the default, four times the requested page with a floor of 100; raise it for selective filters or deeper pages.
+- `create_document` and `create_document_batch` raise `RecallDbException` with `status_code` 409 when a `DocumentKey` already exists (nothing is written), and 400 when a batch repeats a key. `update_document` raises with 404 when the key does not exist. A wrong-length vector is a 400.
+- `update_document` replaces the stored fields; omitting `Labels` or `Tags` keeps the document's current ones, and an empty list or dict removes them.
 
 ### Exists calls (behavior change)
 

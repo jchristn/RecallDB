@@ -6,6 +6,7 @@
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> &middot;
+  <a href="#documentation">Docs</a> &middot;
   <a href="REST_API.md">API Docs</a> &middot;
   <a href="MCP_API.md">MCP</a> &middot;
   <a href="#sdks">SDKs</a> &middot;
@@ -34,9 +35,9 @@ Most vector databases store embeddings and call it a day. RecallDB stores the **
 | **Raw content** | Full text, code, tables, lists, hyperlinks, binary data, images |
 | **Content types** | 9 typed content categories so your retrieval pipeline knows *what* it's looking at |
 | **Chunk positions** | Ordered document segments with `document_id` + `position` grouping |
-| **Labels** | Categorical filters with AND/AND-NOT logic for scoped retrieval |
-| **Key-value tags** | Structured metadata with 10 filter operators (equals, contains, range, null checks) |
-| **SHA256 hashes + ETags** | Deduplication, cache invalidation, and change detection out of the box |
+| **Labels** | Categorical filters for scoped retrieval: require all (or any) of a set, exclude all of a set |
+| **Key-value tags** | Structured metadata with 10 filter operators (equals, contains, text-ordered range, null checks), ANDed together |
+| **SHA256 hashes + ETags** | Columns for your own content hash and version marker, stored with each chunk for change detection and sync |
 | **Content length** | Token budget awareness without recomputing |
 | **Full-text search** | Relevance-ranked keyword search with ts_rank, backed by a stored, GIN-indexed `tsvector`. Find documents by lexical relevance, not just semantic similarity |
 
@@ -178,9 +179,9 @@ RecallDB search goes well beyond nearest-neighbor. A single query can combine an
 
 **Vector** &mdash; similarity or distance search across 5 metrics with score/distance thresholds.
 
-**Labels** &mdash; require or exclude categorical labels with boolean logic.
+**Labels** &mdash; require every label in a set (or, with `RequiredMode: "Any"`, at least one), and exclude any of another set.
 
-**Tags** &mdash; filter on key-value metadata using `Equals`, `NotEquals`, `GreaterThan`, `LessThan`, `Contains`, `ContainsNot`, `StartsWith`, `EndsWith`, `IsNull`, `IsNotNull`.
+**Tags** &mdash; filter on key-value metadata using `Equals`, `NotEquals`, `GreaterThan`, `LessThan`, `Contains`, `ContainsNot`, `StartsWith`, `EndsWith`, `IsNull`, `IsNotNull`. Every condition must hold; values compare as text, so zero-pad numbers and use ISO-8601 dates for ranges.
 
 **Terms** &mdash; case-insensitive substring matching on document content. Require terms, exclude terms, or both.
 
@@ -192,9 +193,21 @@ RecallDB search goes well beyond nearest-neighbor. A single query can combine an
 
 **Neighbor retrieval** &mdash; include surrounding chunks for contextual windows (`IncludeNeighbors: N` returns up to N chunks before and after each match).
 
-**Pagination** &mdash; `MaxResults` (1-1000) with continuation tokens for large result sets.
+**Pagination** &mdash; `MaxResults` (1-1000) with continuation tokens for large result sets. Vector search can page through the 1000 nearest neighbors; `Vector.EfSearch` tunes how many candidates the HNSW index considers (see [Retrieval](docs/RETRIEVAL.md#32-how-it-runs)).
 
 **Sort** &mdash; by score, distance, or creation date in ascending or descending order.
+
+## Documentation
+
+| Document | What it covers |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, multi-tenancy and auth, the request path, per-collection tables and indexes, startup, capabilities |
+| [docs/INGESTION.md](docs/INGESTION.md) | The data model, every write path and its guarantees, modeling chunked documents, keeping data current, limits |
+| [docs/RETRIEVAL.md](docs/RETRIEVAL.md) | Every search mode and how it ranks, filters, collapse, recency, neighbors, scores and paging, performance, known limits, recipes |
+| [REST_API.md](REST_API.md) | Every REST endpoint, field, enumeration, and validation rule |
+| [MCP_API.md](MCP_API.md) | The MCP server and its tool catalog |
+| [TESTING.md](TESTING.md) | Test suites, SDK harnesses, dashboard tests, and verification |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
 
 ## SDKs
 
@@ -261,9 +274,9 @@ var hybridResults = await client.SearchAsync("default", "default", new SearchQue
 });
 ```
 
-The C# SDK models take enum values as strings (`SearchType`, `MatchMode`, `Strategy`), matching what goes over the wire. The server-side enums are `SearchTypeEnum`, `TextSearchTypeEnum`, `TextMatchModeEnum` and `HybridStrategyEnum`; see [REST_API.md](REST_API.md#enumerations) Named constants for those strings are in `RecallDb.Sdk.Constants` (`VectorSearchTypes`, `FullTextMatchModes`, `HybridStrategies`, `CollapseFields`, `SortOrders`, `Capabilities`); the JavaScript and Python SDKs export the same holders.
+The C# SDK models take enum values as strings (`SearchType`, `MatchMode`, `Strategy`), matching what goes over the wire. The server-side enums are `SearchTypeEnum`, `TextSearchTypeEnum`, `TextMatchModeEnum` and `HybridStrategyEnum`; see [REST_API.md](REST_API.md#enumerations) Named constants for those strings are in `RecallDb.Sdk.Constants` (`VectorSearchTypes`, `FullTextMatchModes`, `HybridStrategies`, `CollapseFields`, `LabelMatchModes`, `SortOrders`, `Capabilities`); the JavaScript and Python SDKs export the same holders.
 
-All three SDKs are version 0.2.2. Each can read the server's capability list (`SupportsAsync`, `supports`) before using newer search options such as `Collapse` or `Hybrid.RecencyWeight`, which older servers ignore silently; accept an injected transport and a request timeout; and throw an exception carrying the server's error code and message. The `Exists` calls return false only for 404 and throw for any other failure. See each SDK's README under [sdk/](sdk/) for details.
+All three SDKs are version 0.2.3. Each can read the server's capability list (`SupportsAsync`, `supports`) before using newer search options such as `Collapse` or `Hybrid.RecencyWeight`, which older servers ignore silently; accept an injected transport and a request timeout; and throw an exception carrying the server's error code and message. The `Exists` calls return false only for 404 and throw for any other failure. See each SDK's README under [sdk/](sdk/) for details.
 
 ### Python
 
@@ -360,7 +373,7 @@ The same startup pass also brings each collection's indexes up to the current na
                                               └──────────────────────────┘
 ```
 
-Each collection creates its own Postgres tables with a dedicated HNSW vector index. Labels and tags are stored in separate relational tables and joined at query time, keeping the vector index lean and the metadata queryable.
+Each collection creates its own Postgres tables with a dedicated HNSW vector index. Labels and tags are stored in separate relational tables and joined at query time, keeping the vector index lean and the metadata queryable. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) describes the components, the request path, and every table and index.
 
 ## Building from Source
 

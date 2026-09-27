@@ -154,7 +154,7 @@ All authenticated tools take `bearerToken`. Listed below are the additional argu
 |------|-----------|---------|
 | `server/info` | _(none, no auth)_ | Server name, version, uptime, `Capabilities`, and the MCP endpoint. |
 
-`Capabilities` is the same list of search feature strings that `GET /` returns (`search.hybrid.rrf`, `search.hybrid.recency`, `search.collapse`, `search.include-embeddings`, `search.fulltext.minimum-should-match`; see [REST_API.md, Health](REST_API.md#health)). Servers that report the same version can differ, so check this list before relying on a feature; older servers ignore unknown `search` fields silently.
+`Capabilities` is the same list of search feature strings that `GET /` returns (`search.hybrid.rrf`, `search.hybrid.recency`, `search.collapse`, `search.include-embeddings`, `search.fulltext.minimum-should-match`, `search.vector.ef-search`, `search.label-filter.required-mode`; see [REST_API.md, Health](REST_API.md#health)). Servers that report the same version can differ, so check this list before relying on a feature; older servers ignore unknown `search` fields silently.
 
 ### auth
 
@@ -209,16 +209,18 @@ All authenticated tools take `bearerToken`. Listed below are the additional argu
 
 ### document
 
+Tool semantics match the REST endpoints; [docs/INGESTION.md](docs/INGESTION.md) describes the data model and what each write guarantees.
+
 | Tool | Arguments | Purpose |
 |------|-----------|---------|
 | `document/read` | `tenantId`, `collectionId`, `documentKey` | Read a document. |
 | `document/readByPosition` | `tenantId`, `collectionId`, `documentId`, `position` | Read a chunk by document ID + position. |
 | `document/exists` | `tenantId`, `collectionId`, `documentKey` | Boolean existence check. |
 | `document/enumerate` | `tenantId`, `collectionId`, `query?` | Paginated list. |
-| `document/create` | `tenantId`, `collectionId`, `document` | Create a document (validates embedding dimensionality). |
-| `document/update` | `tenantId`, `collectionId`, `documentKey`, `document` | Update a document. |
+| `document/create` | `tenantId`, `collectionId`, `document` | Create a document (validates embedding dimensionality). An existing key fails with 409. |
+| `document/update` | `tenantId`, `collectionId`, `documentKey`, `document` | Replace a document's stored fields (send them all). Omitted `Labels`/`Tags` are kept; sent ones replace them. A missing key fails with 404. |
 | `document/delete` | `tenantId`, `collectionId`, `documentKey` | Delete a document and its labels/tags. |
-| `document/batchCreate` | `tenantId`, `collectionId`, `documents` | Transactional batch create. |
+| `document/batchCreate` | `tenantId`, `collectionId`, `documents` | Atomic batch create. A key repeated in the batch fails with 400, a key that already exists with 409, and nothing is stored. |
 | `document/batchDelete` | `tenantId`, `collectionId`, `batchDelete` | Batch delete by keys. |
 | `document/deleteByFilter` | `tenantId`, `collectionId`, `query?` | Delete all documents matching a filter. |
 | `document/stats` | `tenantId`, `collectionId`, `documentKey` | Per-document statistics. |
@@ -247,12 +249,14 @@ All authenticated tools take `bearerToken`. Listed below are the additional argu
 |------|-----------|---------|
 | `search/query` | `tenantId`, `collectionId`, `search` | Vector / full-text / hybrid search with filters and optional neighbor enrichment. |
 
-The `search` argument is a JSON-encoded `SearchQuery`, the same body the REST search endpoint takes (see [REST_API.md, Search Modes](REST_API.md#search-modes) for the full semantics). The mode follows from what you send: a non-empty `Vector.Embeddings` gives a vector leg, a non-blank `FullText.Query` gives a text leg, and both together give a hybrid search.
+The `search` argument is a JSON-encoded `SearchQuery`, the same body the REST search endpoint takes (see [REST_API.md, Search Modes](REST_API.md#search-modes) for the field semantics and [docs/RETRIEVAL.md](docs/RETRIEVAL.md) for how each mode ranks, filters, groups, and pages, including its known limits). The mode follows from what you send: a non-empty `Vector.Embeddings` gives a vector leg, a non-blank `FullText.Query` gives a text leg, and both together give a hybrid search.
 
 Fields that shape full-text and hybrid results:
 
 | Field | Type | Default | Notes |
 |-------|------|---------|-------|
+| `Vector.EfSearch` | int or null | null | HNSW candidate list size, clamped to 1-1000. Null means four times the page (at least 100) for vector-only searches and the candidate pool otherwise. Raise it for recall, deep pages, or selective filters |
+| `LabelFilter.RequiredMode` | string | `All` | `All` (every `Required` label) or `Any` (at least one). Also applies to `document/enumerate` and `document/deleteByFilter` |
 | `FullText.MatchMode` | string | `Any` | `Any` (any meaningful term), `All` (every term), `Phrase` (adjacent, in order), `WebSearch` (`"quoted phrase"`, `or`, `-exclude`) |
 | `FullText.TextWeight` | double | `0.5` | Text leg's share in hybrid, 0.0-1.0; the vector leg gets the rest |
 | `FullText.Language` | string | `english` | Must be a PostgreSQL text search configuration; only `english` uses the index |

@@ -62,7 +62,7 @@ namespace RecallDb.Core.Database.Interfaces
         /// <param name="collectionId">Collection ID.</param>
         /// <param name="document">Document record with updated values.</param>
         /// <param name="token">Cancellation token.</param>
-        /// <returns>The updated document record.</returns>
+        /// <returns>The updated document record, or null when no document has the key.</returns>
         Task<DocumentRecord> UpdateAsync(string collectionId, DocumentRecord document, CancellationToken token = default);
 
         /// <summary>
@@ -111,6 +111,15 @@ namespace RecallDb.Core.Database.Interfaces
         /// <param name="token">Cancellation token.</param>
         /// <returns>List of document records within the position range, ordered by position ascending.</returns>
         Task<List<DocumentRecord>> ReadByDocumentIdAndPositionRangeAsync(string collectionId, string documentId, int minPosition, int maxPosition, CancellationToken token = default);
+
+        /// <summary>
+        /// Return which of the given document keys already exist in a collection.
+        /// </summary>
+        /// <param name="collectionId">Collection ID.</param>
+        /// <param name="documentKeys">Document keys to check.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>The keys that exist, in no particular order.</returns>
+        Task<List<string>> GetExistingKeysAsync(string collectionId, List<string> documentKeys, CancellationToken token = default);
 
         /// <summary>
         /// Enumerate document records within a collection with pagination.

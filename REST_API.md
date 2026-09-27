@@ -2,6 +2,8 @@
 
 RecallDB is a multi-tenant RESTful vector database built on PostgreSQL with pgvector. All request and response bodies use JSON (`Content-Type: application/json`).
 
+This is the field-by-field reference. For how the pieces fit together, read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for what happens when data is written, [docs/INGESTION.md](docs/INGESTION.md); and for how each search mode ranks, filters, groups, and pages, with measured performance and known limits, [docs/RETRIEVAL.md](docs/RETRIEVAL.md).
+
 ## Base URL
 
 ```
@@ -72,7 +74,9 @@ Health check. No authentication required.
     "search.hybrid.recency",
     "search.collapse",
     "search.include-embeddings",
-    "search.fulltext.minimum-should-match"
+    "search.fulltext.minimum-should-match",
+    "search.vector.ef-search",
+    "search.label-filter.required-mode"
   ]
 }
 ```
@@ -86,6 +90,8 @@ Health check. No authentication required.
 | `search.collapse` | `SearchQuery.Collapse` is honored |
 | `search.include-embeddings` | `SearchQuery.IncludeEmbeddings` is honored |
 | `search.fulltext.minimum-should-match` | `FullText.MinimumShouldMatch` is honored |
+| `search.vector.ef-search` | `Vector.EfSearch` is honored, and vector-only searches size the HNSW candidate list to the page (earlier builds stopped at 40 hits) |
+| `search.label-filter.required-mode` | `LabelFilter.RequiredMode` is honored; several `Required` labels mean all of them unless `Any` is asked for (earlier builds treated them as any-of) |
 
 ### `HEAD /`
 
@@ -740,7 +746,7 @@ Create a new collection. This creates the backing document, label, and tag table
 }
 ```
 
-`Id` is auto-generated if not provided. When supplied, it must be 1-48 characters of letters, digits, underscore, hyphen, or dot; anything else is rejected with `400`. `Active` defaults to `true`. `Dimensionality` defaults to `384` and must be greater than `0`.
+`Id` is auto-generated if not provided. When supplied, it must be 1-48 characters of letters, digits, underscore, hyphen, or dot; anything else is rejected with `400`. `Active` defaults to `true`. `Dimensionality` defaults to `384` and must be between `1` and `2000` (the HNSW vector index on the shipped pgvector 0.5.1 supports up to 2000 dimensions); a larger value is rejected with `400`.
 
 **Response `201`**
 
@@ -817,18 +823,24 @@ Get statistics for a collection.
 
 ## Documents
 
-Documents are stored within a collection. Each document has a unique `DocumentKey` and can optionally share a `DocumentId` with other chunks of the same source document. The `Embeddings` array must match the collection's `Dimensionality`.
+Documents are stored within a collection. Each document has a unique `DocumentKey` and can optionally share a `DocumentId` with other chunks of the same source document. `Embeddings` is optional, but when present its length must equal the collection's `Dimensionality` (400 otherwise); a document without embeddings is still found by full-text search. [docs/INGESTION.md](docs/INGESTION.md) describes every write path and its guarantees.
 
 ### `GET /v1.0/tenants/{tid}/collections/{cid}/documents`
 
-List all documents in a collection.
+Return the first page (up to 100, newest first) of documents in a collection, in the same paged shape as [enumerate](#post-v10tenantstidcollectionsciddocumentsenumerate). Use enumerate to page further or to filter.
 
 **Auth:** Authenticated
 
-**Response `200`**
+**Response `200`** (`Objects` shown with one document)
 
 ```json
-[
+{
+  "Success": true,
+  "MaxResults": 100,
+  "EndOfResults": true,
+  "TotalRecords": 1,
+  "RecordsRemaining": 0,
+  "Objects": [
   {
     "Id": 1,
     "DocumentKey": "doc_01JEXAMPLE",
@@ -846,7 +858,9 @@ List all documents in a collection.
     "Labels": ["important", "ml"],
     "Tags": { "source": "arxiv", "year": "2024" }
   }
-]
+  ],
+  "TotalMs": 2.1
+}
 ```
 
 ### `GET /v1.0/tenants/{tid}/collections/{cid}/documents/{docKey}`
@@ -918,6 +932,7 @@ Enumerate documents with pagination and optional filtering.
   "DocumentIds": ["paper-123"],
   "LabelFilter": {
     "Required": ["important"],
+    "RequiredMode": "All",
     "Excluded": ["draft"]
   },
   "TagFilter": {
@@ -984,9 +999,13 @@ Create a new document with content and vector embeddings.
 }
 ```
 
-`DocumentKey` is auto-generated if not provided. `ContentType` defaults to `Text`. `Position` defaults to `0`.
+`DocumentKey` is auto-generated (`doc_...`) if not provided. `ContentType` defaults to `Text`. `Position` defaults to `0`. `CreatedUtc` defaults to the time of the request and may be supplied. `Labels` (string array) and `Tags` (object of string to string) may be included and are stored with the document.
 
-**Response `201`** — Returns the created document record with server-computed fields (`Id`, `ContentLength`, `Etag`, `Sha256`, `CreatedUtc`).
+**Response `201`** — Returns the created document record with its labels and tags. The server sets `Id`, fills `CreatedUtc` when it was not supplied, and computes `ContentLength` (UTF-8 bytes of `Content`, or the length of `BinaryData`) when it was not supplied. `Sha256` and `Etag` are stored exactly as sent; the server does not compute or verify them.
+
+**Response `400`** — Malformed body, empty `DocumentKey`, unknown `ContentType`, or `Embeddings` whose length differs from the collection's dimensionality.
+
+**Response `409`** — A document with this `DocumentKey` already exists in the collection; `Context` names the key. Nothing is written.
 
 ### `POST /v1.0/tenants/{tid}/collections/{cid}/documents/batch`
 
@@ -1015,27 +1034,39 @@ Create multiple documents in a single transactional batch.
 ]
 ```
 
-Each document must include `Embeddings` matching the collection dimensionality.
+Every document that includes `Embeddings` must match the collection dimensionality; one mismatch rejects the whole batch with a 400 naming the document. A `DocumentKey` that appears twice in the batch is rejected with a 400 naming it. All rows are inserted in one statement, so the batch is atomic: a `DocumentKey` that already exists in the collection fails the request with a `409` whose `Context` lists the existing keys (up to ten), and nothing is stored. Labels and tags are written after the rows.
 
 **Response `201`** — Returns the list of created document records.
 
 ### `PUT /v1.0/tenants/{tid}/collections/{cid}/documents/{docKey}`
 
-Update an existing document by its document key.
+Replace an existing document, identified by its document key.
 
 **Auth:** Authenticated
 
-**Request** — Full document record with updated fields.
+**Request** — The document's stored fields, complete; labels and tags optionally:
 
-**Response `200`** — Returns the updated document record.
+- Every column is set from the body. A field left out takes its default: `Embeddings` becomes null (the document leaves vector search), `DocumentId` null, `Position` `0`, `Content` null, `ContentType` `Text`.
+- `Labels` and `Tags` left out (or null) keep the document's current labels and tags. When sent, they replace them; `[]` or `{}` removes them all.
+- `Embeddings`, when sent, must match the collection's dimensionality.
+- `ContentLength` is not recomputed; send it or it is stored as `0`.
+- `CreatedUtc` keeps its original value.
+
+To change one stored field, read the document, modify it, and send the record back.
+
+**Response `200`** — Returns the updated document record with its labels and tags.
+
+**Response `400`** — `Embeddings` whose length differs from the collection's dimensionality.
+
+**Response `404`** — No document has this key. Nothing is created.
 
 ### `DELETE /v1.0/tenants/{tid}/collections/{cid}/documents/{docKey}`
 
-Delete a document by its document key.
+Delete a document by its document key, with its labels and tags.
 
 **Auth:** Authenticated
 
-**Response `204`** — No content.
+**Response `204`** — No content. Also returned when the key does not exist.
 
 ### `POST /v1.0/tenants/{tid}/collections/{cid}/documents/batch/delete`
 
@@ -1055,7 +1086,7 @@ Delete multiple documents by their document keys in a single operation. Associat
 
 ### `POST /v1.0/tenants/{tid}/collections/{cid}/documents/delete/filter`
 
-Delete all documents matching the specified filter criteria. Uses the same filter model as the enumerate endpoint. Associated labels and tags are also deleted. Pagination fields (`MaxResults`, `ContinuationToken`, `Ordering`) are ignored.
+Delete all documents matching the specified filter criteria. Uses the same filter model as the enumerate endpoint. Associated labels and tags are also deleted. Pagination fields (`MaxResults`, `ContinuationToken`, `Ordering`) are ignored. An empty filter matches, and deletes, every document in the collection.
 
 **Auth:** Authenticated
 
@@ -1068,6 +1099,7 @@ Delete all documents matching the specified filter criteria. Uses the same filte
   "CreatedAfter": "2025-01-01T00:00:00Z",
   "LabelFilter": {
     "Required": ["important"],
+    "RequiredMode": "All",
     "Excluded": ["draft"]
   },
   "TagFilter": {
@@ -1127,7 +1159,7 @@ Get statistics for a document. If the document has a `DocumentId`, stats aggrega
 
 ## Labels
 
-Labels are string tags attached to individual documents (by document key) within a collection. They are used for filtering in search and enumeration queries.
+Labels are string tags attached to individual documents (by document key) within a collection. They are used for filtering in search and enumeration queries. Labels are usually sent inline with a document; these endpoints add or remove them afterwards. They do not check that the document exists and do not prevent duplicates.
 
 ### `GET /v1.0/tenants/{tid}/collections/{cid}/labels`
 
@@ -1379,7 +1411,8 @@ Perform vector similarity, full-text, or hybrid search within a collection. Supp
     "MinimumScore": 0.7,
     "MaximumScore": null,
     "MinimumDistance": null,
-    "MaximumDistance": null
+    "MaximumDistance": null,
+    "EfSearch": null
   },
   "FullText": {
     "Query": "search terms",
@@ -1397,6 +1430,7 @@ Perform vector similarity, full-text, or hybrid search within a collection. Supp
   },
   "LabelFilter": {
     "Required": ["important"],
+    "RequiredMode": "All",
     "Excluded": ["draft"]
   },
   "TagFilter": {
@@ -1563,6 +1597,9 @@ The server picks a mode from what the request actually contains. A search has a 
 - `Score` is the vector similarity (or distance, depending on `Vector.SearchType`)
 - `VectorScore` carries the same raw similarity
 - `TextScore`, `VectorRank` and `TextRank` are omitted
+- Only `CosineSimilarity` and `CosineDistance` can use the collection's HNSW index; the other search types compute the distance for every row that passes the filters
+- pgvector's HNSW scan returns at most `hnsw.ef_search` rows. The server sets it per query to `Vector.EfSearch` when given (1-1000, clamped), and otherwise to four times the rows the page needs (offset plus `MaxResults`), at least 100 and at most 1000. So a vector-only search can page through at most the 1000 nearest neighbors, and a page never stops short because of the index unless `EfSearch` is set below what the page needs
+- Filters are applied to the index's candidates, so a selective filter can return fewer hits than exist; raise `Vector.EfSearch` toward 1000 for such searches. [docs/RETRIEVAL.md](docs/RETRIEVAL.md#65-filters-and-the-vector-index) has measurements
 
 **Full-text-only** (a text query, no vector)
 - `Score` is the PostgreSQL text rank (`ts_rank` or `ts_rank_cd`), and `TextScore` is the same value
@@ -1595,7 +1632,7 @@ In `Rrf` and `Linear` results, `Score` is the fused score, `VectorScore` is the 
 
 **Candidate pool and `TotalRecords`.** `Hybrid.CandidatePool` defaults to `max(MaxResults * 4, 100)`, capped at 1000. For `Rrf` and `Linear`, `TotalRecords` is the size of the fused candidate set, not a count of every document in the collection that matches in some way. It never exceeds `2 * CandidatePool`, and continuation tokens page within that set, so raise `CandidatePool` if you need to page deeper.
 
-**Thresholds.** `SearchQuery.MinimumScore` and `MaximumScore` are applied in SQL to the fused `Score` in hybrid searches and to the text score in full-text searches, which keeps `TotalRecords` and pagination consistent with the pages you get back. `FullText.MinimumScore` excludes documents in full-text-only and `Filter` searches. In `Rrf` and `Linear` it only gates the text leg, so a document below it can still be returned on the strength of its vector rank. Thresholds on vector-only searches work as they did before.
+**Thresholds.** `SearchQuery.MinimumScore` and `MaximumScore` are applied in SQL to the fused `Score` in hybrid searches and to the text score in full-text searches, which keeps `TotalRecords` and pagination consistent with the pages you get back. `FullText.MinimumScore` excludes documents in full-text-only and `Filter` searches. In `Rrf` and `Linear` it only gates the text leg, so a document below it can still be returned on the strength of its vector rank. On uncollapsed vector-only searches the thresholds are applied to each page after it is fetched, so a page can be shorter than `MaxResults` while `TotalRecords` counts every document that passed the filters; collapsed vector searches apply them in SQL.
 
 A `Hybrid` object on a search that lacks one of the legs is ignored, and the response's `Notice` says so.
 
@@ -1653,7 +1690,9 @@ The search endpoint answers `400 Bad Request` with a message naming the field wh
 | Field | Rule |
 |-------|------|
 | request body | Required |
-| `Vector.Embeddings` | Every value must be a finite number |
+| `Vector.Embeddings` | Every value must be a finite number, and the length must equal the collection's dimensionality |
+| `Vector.EfSearch` | A whole number; values outside 1-1000 are clamped, not rejected |
+| `LabelFilter.RequiredMode` | One of `All`, `Any` |
 | `FullText.Query` | Must be non-blank when there is no vector (`FullText.Query is required for a full-text search.`) |
 | `FullText.MatchMode` | One of `Any`, `All`, `Phrase`, `WebSearch` |
 | `FullText.SearchType` | One of `TsRank`, `TsRankCd` |
@@ -1681,6 +1720,9 @@ When `IncludeNeighbors` is set to `N` in the search query, each matched document
 - Neighbors are scoped to the same `DocumentId` as the matched chunk
 - Neighbors are ordered by `Position` ascending
 - Neighbors do **not** affect scoring, filtering, or pagination
+- Neighbors are **not filtered**: they are the adjacent chunks of the same `DocumentId` even when those chunks would not pass the search's label, tag, term, or date filters
+- A hit without a `DocumentId` gets no neighbors (`Neighbors` stays null)
+- Neighbors are full document records, including their stored `Embeddings`
 - The matched chunk itself is excluded from the `Neighbors` array
 - If two matched chunks are close together in the same document, their neighbor lists may overlap — each match carries its own self-contained context window
 
@@ -1843,6 +1885,31 @@ Each entry in `SearchResult.Documents` is a `DocumentRecord` with these search-s
 | `MaximumScore` | double | null | Maximum score threshold |
 | `MinimumDistance` | double | null | Minimum distance threshold |
 | `MaximumDistance` | double | null | Maximum distance threshold |
+| `EfSearch` | int (nullable) | null | HNSW candidate list size (`hnsw.ef_search`) for this search, clamped to 1-1000. Null means four times the rows the page needs (at least 100, at most 1000) for vector-only searches, and the candidate pool for hybrid and collapsed ones. Raise it for recall, deeper pages, or selective filters |
+
+### LabelFilter Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `Required` | string[] | [] | Labels the document must carry: all of them when `RequiredMode` is `All`, at least one when it is `Any` |
+| `RequiredMode` | string | `All` | How `Required` combines: `All` (every label) or `Any` (at least one). See LabelMatchModeEnum. Applies to search, enumeration, and delete-by-filter |
+| `Excluded` | string[] | [] | The document must carry none of these labels |
+
+Labels are exact, case-sensitive strings.
+
+### TermsFilter Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `Required` | string[] | [] | Every term must appear in `Content` (case-insensitive substring, `ILIKE '%term%'`) |
+| `Excluded` | string[] | [] | No term may appear in `Content` |
+
+### TagFilterSet Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `Required` | TagCondition[] | [] | Every condition must hold |
+| `Excluded` | TagCondition[] | [] | No condition may hold |
 
 ### TagCondition Fields
 
@@ -1908,6 +1975,13 @@ Each entry in `SearchResult.Documents` is a `DocumentRecord` with these search-s
 | `Linear` | Normalized score blend over the union of both legs. Scores in [0, 1] |
 | `Filter` | Legacy. The text query is a required filter and the score is the raw `(1 - w) * vector + w * text` blend |
 
+**LabelMatchModeEnum** (used in `LabelFilter.RequiredMode`):
+
+| Value | Description |
+|-------|-------------|
+| `All` | Default. The document must carry every required label |
+| `Any` | The document must carry at least one required label |
+
 **CollapseFieldEnum** (used in `CollapseQuery.Field`):
 
 | Value | Description |
@@ -1935,14 +2009,16 @@ Each entry in `SearchResult.Documents` is a `DocumentRecord` with these search-s
 |-------|-------------|
 | `Equals` | Exact match |
 | `NotEquals` | Not equal |
-| `GreaterThan` | Greater than (string comparison) |
-| `LessThan` | Less than (string comparison) |
-| `Contains` | Value contains substring |
-| `ContainsNot` | Value does not contain substring |
-| `StartsWith` | Value starts with prefix |
-| `EndsWith` | Value ends with suffix |
-| `IsNull` | Tag value is null |
-| `IsNotNull` | Tag value is not null |
+| `GreaterThan` | Greater than, compared as text (`"9"` is greater than `"50"`); zero-pad numbers or use ISO-8601 dates |
+| `LessThan` | Less than, compared as text |
+| `Contains` | Value contains substring (case-sensitive) |
+| `ContainsNot` | The key is present and its value does not contain the substring |
+| `StartsWith` | Value starts with prefix (case-sensitive) |
+| `EndsWith` | Value ends with suffix (case-sensitive) |
+| `IsNull` | The key is absent, or present with an empty value |
+| `IsNotNull` | The key is present with a non-empty value |
+
+`NotEquals` holds for a document that lacks the key. `Contains`, `ContainsNot`, `StartsWith`, `EndsWith`, `GreaterThan`, and `LessThan` require the key to be present.
 
 ### Pagination
 
@@ -1952,4 +2028,4 @@ Enumeration and search endpoints support cursor-based pagination using `Continua
 2. If the response has `EndOfResults: false`, use the returned `ContinuationToken` in the next request
 3. Repeat until `EndOfResults: true` or `ContinuationToken` is `null`
 
-The `RecordsRemaining` field indicates how many records are left after the current page. The `TotalRecords` field shows the total count matching the query.
+The `RecordsRemaining` field indicates how many records are left after the current page. The `TotalRecords` field shows the total count matching the query; for searches its meaning depends on the mode (see `SearchResult` above, and [docs/RETRIEVAL.md](docs/RETRIEVAL.md#82-what-totalrecords-counts)). The token is the offset of the next page, and each page re-runs the query, so writes between pages can shift results.

@@ -11,7 +11,7 @@ from urllib.parse import quote
 import requests
 
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 
 def _seg(value):
@@ -75,6 +75,8 @@ class Capabilities:
     COLLAPSE = "search.collapse"
     INCLUDE_EMBEDDINGS = "search.include-embeddings"
     FULLTEXT_MINIMUM_SHOULD_MATCH = "search.fulltext.minimum-should-match"
+    VECTOR_EF_SEARCH = "search.vector.ef-search"
+    LABEL_FILTER_REQUIRED_MODE = "search.label-filter.required-mode"
 
 
 class HybridStrategies:
@@ -123,6 +125,12 @@ class CollapseFields:
     """Values for Collapse.Field."""
     DOCUMENT_ID = "DocumentId"
     TAG = "Tag"
+
+
+class LabelMatchModes:
+    """Values for LabelFilter.RequiredMode."""
+    ALL = "All"
+    ANY = "Any"
 
 
 _DEFAULT_TIMEOUT = 100
@@ -903,7 +911,11 @@ class RecallDbClient:
                     "TextScoreDescending".
                 Vector (dict): Vector query with SearchType (see VectorSearchTypes),
                     Embeddings (list of float), MinimumScore, MaximumScore, MinimumDistance,
-                    MaximumDistance.
+                    MaximumDistance, and EfSearch (int): the HNSW candidate list size
+                    (hnsw.ef_search), clamped to 1-1000 by the server. Omit it to let the server
+                    cover four times the requested page (at least 100) for vector-only searches and
+                    the candidate pool for hybrid and collapsed ones.
+                    Capability: Capabilities.VECTOR_EF_SEARCH.
                 FullText (dict): Full-text search query parameters:
                     Query (str): Search text (required). Processed with stemming and stop word removal.
                     SearchType (str): Ranking function, "TsRank" (default) or "TsRankCd"
@@ -958,7 +970,10 @@ class RecallDbClient:
                     False. Vectors are sent as JSON numbers, which costs about 4 KB per hit at
                     384 dimensions and about 8 KB per hit at 768 dimensions, so request them only
                     when needed (for example for client-side reranking or deduplication).
-                LabelFilter (dict): Label filter with Required and Excluded lists.
+                LabelFilter (dict): Label filter: Required and Excluded lists, and RequiredMode
+                    (see LabelMatchModes): "All" (default, the document has every required label)
+                    or "Any" (at least one). Excluded labels must all be absent.
+                    Capability: Capabilities.LABEL_FILTER_REQUIRED_MODE.
                 TagFilter (dict): Tag filter with Required and Excluded condition lists.
                 Terms (dict): Terms filter for content matching,
                     e.g. {"Required": ["term1"], "Excluded": ["term2"]}.

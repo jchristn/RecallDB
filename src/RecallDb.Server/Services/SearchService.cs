@@ -109,6 +109,9 @@ namespace RecallDb.Server.Services
             if (col == null)
                 return ServiceResult.Fail(404, "Not found", "Collection not found.");
 
+            if (hasVector && query.Vector.Embeddings.Count != col.Dimensionality)
+                return ServiceResult.Fail(400, "Bad request", "Vector.Embeddings has " + query.Vector.Embeddings.Count + " dimensions, but the collection has " + col.Dimensionality + ".");
+
             string cid = ctx.CollectionId;
             string origin = ctx.Origin == RecallDb.Core.Enums.RequestOriginEnum.Mcp ? "mcp" : "rest";
             string mode = DeriveSearchMode(query);

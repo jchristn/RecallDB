@@ -207,7 +207,13 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                 countSb.Append(" WHERE " + string.Join(" AND ", conditions));
             }
 
-            DataTable selectResult = await _Driver.ExecuteQueryAsync(sb.ToString(), false, token).ConfigureAwait(false);
+            // pgvector returns at most hnsw.ef_search rows from an HNSW scan, so raise it to cover the page (and give a
+            // filter more candidates to keep); without this the page stops at 40 rows and deeper pages are empty.
+            List<string> setup = hasVector
+                ? GetHnswSetupStatements(query.Vector.EfSearch, GetDefaultVectorEfSearch(query, offset))
+                : null;
+
+            DataTable selectResult = await _Driver.ExecuteQueryAsync(sb.ToString(), setup, false, token).ConfigureAwait(false);
             DataTable countResult = await _Driver.ExecuteQueryAsync(countSb.ToString(), false, token).ConfigureAwait(false);
 
             List<DocumentRecord> documents = DocumentRecord.FromDataTable(selectResult);
@@ -428,7 +434,7 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                 "SELECT (SELECT COUNT(*) FROM " + source + " f" + whereThresholds + ") AS total_count, " +
                 "numnode(" + text.TsQueryExpression + ") AS term_count" + poolColumns;
 
-            List<string> setup = GetHnswSetupStatements(pool);
+            List<string> setup = GetHnswSetupStatements(query.Vector.EfSearch, pool);
 
             DataTable selectResult = await _Driver.ExecuteQueryAsync(selectQuery, setup, false, token).ConfigureAwait(false);
             List<DocumentRecord> documents = DocumentRecord.FromDataTable(selectResult);
@@ -505,7 +511,7 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                 cte.ToString() + " " +
                 "SELECT (SELECT COUNT(*) FROM best b" + whereThresholds + ") AS total_count" + poolColumns;
 
-            List<string> setup = GetHnswSetupStatements(pool);
+            List<string> setup = GetHnswSetupStatements(query.Vector.EfSearch, pool);
 
             DataTable selectResult = await _Driver.ExecuteQueryAsync(selectQuery, setup, false, token).ConfigureAwait(false);
             List<DocumentRecord> documents = DocumentRecord.FromDataTable(selectResult);
@@ -812,11 +818,7 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
                     {
                         sanitizedLabels.Add("'" + _Driver.Sanitize(label) + "'");
                     }
-                    conditions.Add(
-                        "document_key IN (" +
-                        "SELECT document_key FROM " + labelsTableName + " " +
-                        "WHERE label IN (" + string.Join(",", sanitizedLabels) + ")" +
-                        ")");
+                    conditions.Add(FilterQueries.BuildLabelRequiredCondition(labelsTableName, sanitizedLabels, query.LabelFilter.RequiredMode));
                 }
 
                 if (query.LabelFilter.Excluded != null && query.LabelFilter.Excluded.Count > 0)
@@ -911,12 +913,31 @@ namespace RecallDb.Core.Database.Postgresql.Implementations
             return result;
         }
 
-        private List<string> GetHnswSetupStatements(int pool)
+        private List<string> GetHnswSetupStatements(int? requested, int defaultEfSearch)
         {
-            // Only raise ef_search when the pool exceeds pgvector's default; SET LOCAL scopes it to this query.
-            if (pool <= _DefaultEfSearch) return null;
-            int efSearch = Math.Min(pool, _MaxEfSearch);
+            // A caller-supplied VectorQuery.EfSearch (already clamped to 1-1000) is applied as given. Otherwise raise
+            // ef_search only when the default exceeds pgvector's own; SET LOCAL scopes it to this query.
+            int efSearch;
+            if (requested.HasValue)
+            {
+                efSearch = requested.Value;
+            }
+            else
+            {
+                if (defaultEfSearch <= _DefaultEfSearch) return null;
+                efSearch = defaultEfSearch;
+            }
+
+            efSearch = Math.Min(Math.Max(efSearch, 1), _MaxEfSearch);
             return new List<string> { "SET LOCAL hnsw.ef_search = " + efSearch.ToString(CultureInfo.InvariantCulture) };
+        }
+
+        private static int GetDefaultVectorEfSearch(SearchQuery query, int offset)
+        {
+            // Four times the rows the page needs, at least 100, at most pgvector's limit of 1000: enough headroom for
+            // filters to keep a full page in most cases, mirroring the candidate pool default.
+            long needed = ((long)offset + query.MaxResults) * 4;
+            return (int)Math.Min(Math.Max(needed, 100), _MaxEfSearch);
         }
 
         private string GetRrfFusionSql(double vectorWeight, double textWeight, int k)

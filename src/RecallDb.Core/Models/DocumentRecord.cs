@@ -342,7 +342,9 @@ namespace RecallDb.Core.Models
         }
 
         /// <summary>
-        /// Labels associated with this document (populated by the server layer, not stored in the documents table).
+        /// Labels associated with this document (stored in the labels table, not the documents table).
+        /// In a request, null (omitted) means "not specified": a create stores none and an update keeps the existing
+        /// labels, while an empty list on an update removes them. Responses always carry the document's labels.
         /// </summary>
         public List<string> Labels
         {
@@ -373,7 +375,9 @@ namespace RecallDb.Core.Models
         }
 
         /// <summary>
-        /// Tags associated with this document (populated by the server layer, not stored in the documents table).
+        /// Tags associated with this document (stored in the tags table, not the documents table).
+        /// In a request, null (omitted) means "not specified": a create stores none and an update keeps the existing
+        /// tags, while an empty object on an update removes them. Responses always carry the document's tags.
         /// </summary>
         public Dictionary<string, string> Tags
         {
@@ -413,8 +417,8 @@ namespace RecallDb.Core.Models
         private string _GroupKey = null;
         private int? _GroupHits = null;
         private List<DocumentRecord> _Neighbors = null;
-        private List<string> _Labels = new List<string>();
-        private Dictionary<string, string> _Tags = new Dictionary<string, string>();
+        private List<string> _Labels = null;
+        private Dictionary<string, string> _Tags = null;
 
         #endregion
 

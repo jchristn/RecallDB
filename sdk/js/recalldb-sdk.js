@@ -11,7 +11,7 @@
  */
 
 /** SDK version. */
-const VERSION = "0.2.2";
+const VERSION = "0.2.3";
 
 /** Default per-request timeout in milliseconds. */
 const DEFAULT_TIMEOUT_MS = 100000;
@@ -25,7 +25,9 @@ const Capabilities = Object.freeze({
     HybridRecency: "search.hybrid.recency",
     Collapse: "search.collapse",
     IncludeEmbeddings: "search.include-embeddings",
-    FullTextMinimumShouldMatch: "search.fulltext.minimum-should-match"
+    FullTextMinimumShouldMatch: "search.fulltext.minimum-should-match",
+    VectorEfSearch: "search.vector.ef-search",
+    LabelFilterRequiredMode: "search.label-filter.required-mode"
 });
 
 /** Values for Hybrid.Strategy. */
@@ -74,6 +76,12 @@ const SortOrders = Object.freeze({
 const CollapseFields = Object.freeze({
     DocumentId: "DocumentId",
     Tag: "Tag"
+});
+
+/** Values for LabelFilter.RequiredMode. */
+const LabelMatchModes = Object.freeze({
+    All: "All",
+    Any: "Any"
 });
 
 /**
@@ -816,6 +824,9 @@ class RecallDbClient {
      * @param {number[]} [query.Vector.Embeddings] - Query vector; its length must match the collection dimensionality.
      * @param {number} [query.Vector.MinimumScore] - Minimum score threshold (also MaximumScore, MinimumDistance,
      *   MaximumDistance).
+     * @param {number} [query.Vector.EfSearch] - HNSW candidate list size (hnsw.ef_search), clamped to 1-1000 by the
+     *   server. Omit it to let the server cover four times the requested page (at least 100) for vector-only searches
+     *   and the candidate pool for hybrid and collapsed ones. Capability: Capabilities.VectorEfSearch.
      * @param {Object} [query.FullText] - Full-text search query parameters.
      * @param {string} query.FullText.Query - Search text (required). Processed with stemming and stop word removal.
      * @param {string} [query.FullText.SearchType] - Ranking function: "TsRank" (default) or "TsRankCd" (cover density).
@@ -853,7 +864,9 @@ class RecallDbClient {
      * @param {boolean} [query.IncludeEmbeddings=false] - Return each hit's stored vector in Embeddings. Vectors are JSON
      *   numbers, about 4 KB per hit at 384 dimensions and 8 KB at 768, so request them only when needed (for example
      *   for client-side reranking or deduplication). Capability: Capabilities.IncludeEmbeddings.
-     * @param {Object} [query.LabelFilter] - Label filter with Required and Excluded arrays.
+     * @param {Object} [query.LabelFilter] - Label filter: Required and Excluded arrays, and RequiredMode (see
+     *   LabelMatchModes): "All" (default, the document has every required label) or "Any" (at least one). Excluded
+     *   labels must all be absent. Capability: Capabilities.LabelFilterRequiredMode.
      * @param {Object} [query.TagFilter] - Tag filter with Required and Excluded condition arrays.
      * @param {Object} [query.Terms] - Terms filter for content matching, e.g. { Required: ["term1"], Excluded: ["term2"] }.
      * @param {string[]} [query.DocumentIds] - Restrict results to these document IDs.
@@ -986,5 +999,6 @@ module.exports = {
     FullTextSearchTypes,
     VectorSearchTypes,
     SortOrders,
-    CollapseFields
+    CollapseFields,
+    LabelMatchModes
 };

@@ -9,9 +9,9 @@ import ViewDocumentModal from '../components/ViewDocumentModal.jsx'
 import ErrorModal from '../components/ErrorModal.jsx'
 import {
   TAG_CONDITIONS, SEARCH_TYPES, SORT_ORDERS, TEXT_SEARCH_TYPES, MATCH_MODES, HYBRID_STRATEGIES, COLLAPSE_FIELDS,
-  MINIMUM_SHOULD_MATCH_OPTIONS, TEXT_WEIGHT_RANGE, NORMALIZATION_RANGE, RRF_K_RANGE, CANDIDATE_POOL_RANGE,
+  MINIMUM_SHOULD_MATCH_OPTIONS, LABEL_MATCH_MODES, EF_SEARCH_RANGE, TEXT_WEIGHT_RANGE, NORMALIZATION_RANGE, RRF_K_RANGE, CANDIDATE_POOL_RANGE,
   RECENCY_WEIGHT_RANGE, COLLAPSE_POOL_RANGE, TAG_KEY_MAX_LENGTH, DEFAULT_TEXT_WEIGHT, DEFAULT_NORMALIZATION,
-  DEFAULT_RECENCY_WEIGHT, parseCommaSep, searchShape, validateSearch, buildQuery, resultColumnFlags
+  DEFAULT_RECENCY_WEIGHT, parseCommaSep, searchShape, validateSearch, buildQuery, resultColumnFlags, buildLabelFilter
 } from './searchRequest.js'
 
 function CollapsibleSection({ title, children, defaultOpen = false }) {
@@ -33,6 +33,19 @@ const INVALID_STYLE = { borderColor: 'var(--danger)' }
 function FieldError({ message }) {
   if (!message) return null
   return <span role="alert" style={{ display: 'block', fontSize: 12, color: 'var(--danger)', marginTop: 4 }}>{message}</span>
+}
+
+function LabelModeSelect({ id, value, onChange }) {
+  const selected = LABEL_MATCH_MODES.find(m => m.value === value) || LABEL_MATCH_MODES[0]
+  return (
+    <div className="form-group" style={{ marginBottom: 8, maxWidth: 260 }}>
+      <label htmlFor={id} style={{ fontSize: 12 }}>Required labels must match</label>
+      <select id={id} value={value} onChange={(e) => onChange(e.target.value)} aria-describedby={id + '-help'}>
+        {LABEL_MATCH_MODES.map(m => <option key={m.value} value={m.value} title={m.help}>{m.label}</option>)}
+      </select>
+      <span id={id + '-help'} style={HINT_STYLE}>{selected.help}</span>
+    </div>
+  )
 }
 
 function TenantCollectionPicker({ selectedTenant, setSelectedTenant, selectedCollection, setSelectedCollection }) {
@@ -151,6 +164,8 @@ function SearchTab({ tenantId, collectionId }) {
   const [maxScore, setMaxScore] = useState('')
   const [minDistance, setMinDistance] = useState('')
   const [maxDistance, setMaxDistance] = useState('')
+  const [vectorEfSearch, setVectorEfSearch] = useState('')
+  const [labelRequiredMode, setLabelRequiredMode] = useState('All')
   const [requiredLabels, setRequiredLabels] = useState([])
   const [excludedLabels, setExcludedLabels] = useState([])
   const [requiredTags, setRequiredTags] = useState([])
@@ -205,8 +220,8 @@ function SearchTab({ tenantId, collectionId }) {
   const removeTagRow = (setter, index) => setter(prev => prev.filter((_, i) => i !== index))
 
   const form = {
-    embeddings, searchType, minScore, maxScore, minDistance, maxDistance,
-    requiredLabels, excludedLabels, requiredTags, excludedTags, requiredTerms, excludedTerms,
+    embeddings, searchType, minScore, maxScore, minDistance, maxDistance, vectorEfSearch,
+    requiredLabels, excludedLabels, labelRequiredMode, requiredTags, excludedTags, requiredTerms, excludedTerms,
     sortOrder, maxResults, includeNeighbors, includeEmbeddings, createdBefore, createdAfter, documentIds,
     fullTextQuery, fullTextSearchType, fullTextMatchMode, fullTextLanguage, fullTextNormalization, fullTextMinScore, fullTextWeight,
     fullTextMinimumShouldMatch,
@@ -345,10 +360,24 @@ function SearchTab({ tenantId, collectionId }) {
                 <input type="number" step="any" value={minDistance} onChange={(e) => setMinDistance(e.target.value)} placeholder="0.0" />
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               <div className="form-group">
                 <label>Max Distance</label>
                 <input type="number" step="any" value={maxDistance} onChange={(e) => setMaxDistance(e.target.value)} placeholder="1.0" style={{ maxWidth: 200 }} />
+              </div>
+              <div className="form-group">
+                <label htmlFor="vec-ef-search">EF Search (1-1000)</label>
+                <input
+                  id="vec-ef-search" type="number" step="1"
+                  min={EF_SEARCH_RANGE.min} max={EF_SEARCH_RANGE.max}
+                  value={vectorEfSearch}
+                  onChange={(e) => setVectorEfSearch(e.target.value)}
+                  placeholder="Auto"
+                  aria-invalid={!!fieldErrors.vectorEfSearch}
+                  style={fieldErrors.vectorEfSearch ? { ...INVALID_STYLE, maxWidth: 200 } : { maxWidth: 200 }}
+                />
+                <span style={HINT_STYLE}>HNSW candidate list size. Raise it for deeper pages or selective filters. Leave blank for automatic (four times the page, at least 100).</span>
+                <FieldError message={fieldErrors.vectorEfSearch} />
               </div>
             </div>
           </CollapsibleSection>
@@ -546,6 +575,7 @@ function SearchTab({ tenantId, collectionId }) {
           {/* Filters */}
           <CollapsibleSection title="Filters">
             {/* Labels */}
+            <LabelModeSelect id="sr-label-mode" value={labelRequiredMode} onChange={setLabelRequiredMode} />
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
               <div>
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Required Labels</label>
@@ -756,6 +786,7 @@ function QueryTab({ tenantId, collectionId }) {
   const [documentIds, setDocumentIds] = useState('')
   const [requiredLabels, setRequiredLabels] = useState([])
   const [excludedLabels, setExcludedLabels] = useState([])
+  const [labelRequiredMode, setLabelRequiredMode] = useState('All')
   const [requiredTags, setRequiredTags] = useState([])
   const [excludedTags, setExcludedTags] = useState([])
   const [requiredTerms, setRequiredTerms] = useState('')
@@ -787,13 +818,8 @@ function QueryTab({ tenantId, collectionId }) {
     const docIds = parseCommaSep(documentIds)
     if (docIds.length > 0) query.DocumentIds = docIds
 
-    const reqLabels = requiredLabels.filter(l => l.trim())
-    const excLabels = excludedLabels.filter(l => l.trim())
-    if (reqLabels.length > 0 || excLabels.length > 0) {
-      query.LabelFilter = {}
-      if (reqLabels.length > 0) query.LabelFilter.Required = reqLabels
-      if (excLabels.length > 0) query.LabelFilter.Excluded = excLabels
-    }
+    const labelFilter = buildLabelFilter(requiredLabels, excludedLabels, labelRequiredMode)
+    if (labelFilter) query.LabelFilter = labelFilter
 
     const validReqTags = requiredTags.filter(t => t.Key.trim())
     const validExcTags = excludedTags.filter(t => t.Key.trim())
@@ -902,6 +928,7 @@ function QueryTab({ tenantId, collectionId }) {
           </div>
 
           <CollapsibleSection title="Label Filter">
+            <LabelModeSelect id="en-label-mode" value={labelRequiredMode} onChange={setLabelRequiredMode} />
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
               <div>
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Required Labels</label>

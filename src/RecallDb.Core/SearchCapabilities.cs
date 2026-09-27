@@ -36,6 +36,17 @@ namespace RecallDb.Core
         public const string FullTextMinimumShouldMatch = "search.fulltext.minimum-should-match";
 
         /// <summary>
+        /// VectorQuery.EfSearch is honored, and vector-only searches raise hnsw.ef_search to cover the page (so they
+        /// are no longer limited to 40 hits).
+        /// </summary>
+        public const string VectorEfSearch = "search.vector.ef-search";
+
+        /// <summary>
+        /// LabelFilter.RequiredMode is honored (All, the default, or Any).
+        /// </summary>
+        public const string LabelFilterRequiredMode = "search.label-filter.required-mode";
+
+        /// <summary>
         /// Every capability this server supports, in a stable order. Returns a new list on each call.
         /// </summary>
         public static List<string> All
@@ -48,7 +59,9 @@ namespace RecallDb.Core
                     HybridRecency,
                     Collapse,
                     IncludeEmbeddings,
-                    FullTextMinimumShouldMatch
+                    FullTextMinimumShouldMatch,
+                    VectorEfSearch,
+                    LabelFilterRequiredMode
                 };
             }
         }

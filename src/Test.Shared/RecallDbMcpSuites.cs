@@ -459,6 +459,41 @@ namespace Test.Shared
                     AssertToolFailure(response, 404, "document/read for a missing document");
                 }),
 
+                // 18a. NEGATIVE: creating an existing key is a 409; updating a missing key is a 404
+                Case("McpDocumentConflictAndMissingUpdate", "MCP negative: duplicate document key is 409, update of a missing key is 404", async ct =>
+                {
+                    if (string.IsNullOrEmpty(_McpCollectionId) || string.IsNullOrEmpty(_McpDocumentKey)) return;
+                    string dupJson = JsonSerializer.Serialize(new { DocumentKey = _McpDocumentKey, Content = "again", Embeddings = new List<float> { 0.1f, 0.2f, 0.3f } }, JsonOptions);
+                    JsonRpcResponse dup = await CallToolRawAsync("document/create", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, document = dupJson }).ConfigureAwait(false);
+                    AssertToolFailure(dup, 409, "document/create with an existing key");
+
+                    string updJson = JsonSerializer.Serialize(new { Content = "x" }, JsonOptions);
+                    JsonRpcResponse upd = await CallToolRawAsync("document/update", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, documentKey = "does-not-exist", document = updJson }).ConfigureAwait(false);
+                    AssertToolFailure(upd, 404, "document/update of a missing key");
+                }),
+
+                // 18b. search/query honors LabelFilter.RequiredMode
+                Case("McpSearchLabelRequiredMode", "MCP: search/query LabelFilter.RequiredMode All and Any", async ct =>
+                {
+                    if (string.IsNullOrEmpty(_McpCollectionId)) return;
+                    string twoJson = JsonSerializer.Serialize(new { DocumentKey = "mcp-lab", Content = "two labels", Embeddings = new List<float> { 0.1f, 0.2f, 0.3f }, Labels = new[] { "mx", "my" } }, JsonOptions);
+                    string oneJson = JsonSerializer.Serialize(new { DocumentKey = "mcp-la", Content = "one label", Embeddings = new List<float> { 0.1f, 0.2f, 0.3f }, Labels = new[] { "mx" } }, JsonOptions);
+                    await CallAsync("document/create", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, document = twoJson }).ConfigureAwait(false);
+                    await CallAsync("document/create", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, document = oneJson }).ConfigureAwait(false);
+
+                    foreach ((string mode, int expected) in new[] { ("All", 1), ("Any", 2) })
+                    {
+                        string searchJson = JsonSerializer.Serialize(new
+                        {
+                            Vector = new { Embeddings = new List<float> { 0.1f, 0.2f, 0.3f } },
+                            LabelFilter = new { Required = new[] { "mx", "my" }, RequiredMode = mode },
+                            MaxResults = 10
+                        }, JsonOptions);
+                        JsonElement result = await CallAsync("search/query", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, search = searchJson }).ConfigureAwait(false);
+                        AssertEqual(expected, GetProperty(result, "Documents").GetArrayLength(), "RequiredMode " + mode + " hit count");
+                    }
+                }),
+
                 // 19. document cleanup via MCP delete
                 Case("McpDocumentDelete", "MCP: document/delete", async ct =>
                 {

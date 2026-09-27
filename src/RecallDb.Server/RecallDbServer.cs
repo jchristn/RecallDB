@@ -1307,7 +1307,8 @@ namespace RecallDb.Server
                         + "and MaxResults, TotalRecords, and continuation tokens count groups; not supported with Hybrid.Strategy Filter. "
                         + "FullText.MinimumShouldMatch (1-3, default 1, MatchMode Any only) requires that many distinct query terms. "
                         + "Check GET / Capabilities before relying on these options. "
-                        + "Filter results by labels, tags, date ranges, terms, and document IDs.")
+                        + "Vector.EfSearch (1-1000, clamped) sets the HNSW candidate list size; by default it covers four times the requested page (at least 100). "
+                        + "Filter results by labels, tags, date ranges, terms, and document IDs. LabelFilter.RequiredMode is All (default; every required label) or Any (at least one).")
                     .WithOperationId("search")
                     .WithParameter(OpenApiParameterMetadata.Path("tid", "Tenant ID"))
                     .WithParameter(OpenApiParameterMetadata.Path("cid", "Collection ID"))

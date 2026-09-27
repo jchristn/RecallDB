@@ -52,6 +52,12 @@ export const COLLAPSE_FIELDS = [
   { value: 'Tag', label: 'Tag', help: 'One hit per value of the named tag, its best-scoring chunk. Documents without the tag are their own group.' }
 ]
 
+// How LabelFilter.Required combines its labels; All is the server default.
+export const LABEL_MATCH_MODES = [
+  { value: 'All', label: 'All', help: 'A document must carry every required label.' },
+  { value: 'Any', label: 'Any', help: 'A document must carry at least one required label.' }
+]
+
 export const MINIMUM_SHOULD_MATCH_OPTIONS = [
   { value: 1, label: '1 (any term)' },
   { value: 2, label: '2 distinct terms' },
@@ -66,6 +72,7 @@ export const CANDIDATE_POOL_RANGE = { min: 1, max: 10000 }
 export const RECENCY_WEIGHT_RANGE = { min: 0, max: 1 }
 export const COLLAPSE_POOL_RANGE = { min: 1, max: 10000 }
 export const MINIMUM_SHOULD_MATCH_RANGE = { min: 1, max: 3 }
+export const EF_SEARCH_RANGE = { min: 1, max: 1000 }
 export const TAG_KEY_MAX_LENGTH = 256
 
 export const DEFAULT_TEXT_WEIGHT = 0.5
@@ -131,6 +138,8 @@ export function searchShape(form) {
 }
 
 export const FIELD_LABELS = {
+  vectorEfSearch: 'EF Search',
+  labelRequiredMode: 'Required Labels Match',
   fullTextWeight: 'Text Weight',
   fullTextNormalization: 'Normalization',
   fullTextMinimumShouldMatch: 'Min Terms to Match',
@@ -156,7 +165,10 @@ export function validateFields(form) {
     if (!COLLAPSE_FIELDS.some(f => f.value === shape.collapseField)) collapseField = 'Must be None, Document ID, or Tag.'
     else if (shape.isHybrid && shape.strategy === 'Filter') collapseField = 'Collapse is not supported with the Filter strategy.'
   }
+  const labelMode = form.labelRequiredMode || 'All'
   return {
+    vectorEfSearch: shape.hasVector ? rangeError(form.vectorEfSearch, EF_SEARCH_RANGE, true) : null,
+    labelRequiredMode: LABEL_MATCH_MODES.some(m => m.value === labelMode) ? null : 'Must be All or Any.',
     fullTextWeight: rangeError(form.fullTextWeight, TEXT_WEIGHT_RANGE, false),
     fullTextNormalization: rangeError(form.fullTextNormalization, NORMALIZATION_RANGE, true),
     fullTextMinimumShouldMatch: shape.showMinimumShouldMatch ? rangeError(form.fullTextMinimumShouldMatch, MINIMUM_SHOULD_MATCH_RANGE, true) : null,
@@ -190,8 +202,8 @@ export function validateSearch(form, dimensionality) {
 
 export function buildQuery(form) {
   const {
-    embeddings, searchType, minScore, maxScore, minDistance, maxDistance,
-    requiredLabels = [], excludedLabels = [], requiredTags = [], excludedTags = [], requiredTerms = '', excludedTerms = '',
+    embeddings, searchType, minScore, maxScore, minDistance, maxDistance, vectorEfSearch,
+    requiredLabels = [], excludedLabels = [], labelRequiredMode, requiredTags = [], excludedTags = [], requiredTerms = '', excludedTerms = '',
     sortOrder, maxResults, includeNeighbors, includeEmbeddings, createdBefore, createdAfter, documentIds = '',
     fullTextQuery, fullTextSearchType, fullTextMatchMode, fullTextLanguage, fullTextNormalization, fullTextMinScore, fullTextWeight,
     fullTextMinimumShouldMatch,
@@ -219,6 +231,7 @@ export function buildQuery(form) {
       if (maxScore) query.Vector.MaximumScore = parseFloat(maxScore)
       if (minDistance) query.Vector.MinimumDistance = parseFloat(minDistance)
       if (maxDistance) query.Vector.MaximumDistance = parseFloat(maxDistance)
+      if (!isBlank(vectorEfSearch)) query.Vector.EfSearch = Number(vectorEfSearch)
     }
   }
 
@@ -226,7 +239,10 @@ export function buildQuery(form) {
   const excLabels = Array.isArray(excludedLabels) ? excludedLabels.filter(Boolean) : parseCommaSep(excludedLabels)
   if (reqLabels.length > 0 || excLabels.length > 0) {
     query.LabelFilter = {}
-    if (reqLabels.length > 0) query.LabelFilter.Required = reqLabels
+    if (reqLabels.length > 0) {
+      query.LabelFilter.Required = reqLabels
+      query.LabelFilter.RequiredMode = labelRequiredMode || 'All'
+    }
     if (excLabels.length > 0) query.LabelFilter.Excluded = excLabels
   }
 
@@ -281,6 +297,20 @@ export function buildQuery(form) {
   }
 
   return query
+}
+
+// The LabelFilter part of an enumeration or delete-by-filter body, or null when no label is given.
+export function buildLabelFilter(requiredLabels, excludedLabels, requiredMode) {
+  const req = (requiredLabels || []).filter(l => l && l.trim())
+  const exc = (excludedLabels || []).filter(l => l && l.trim())
+  if (req.length === 0 && exc.length === 0) return null
+  const filter = {}
+  if (req.length > 0) {
+    filter.Required = req
+    filter.RequiredMode = requiredMode || 'All'
+  }
+  if (exc.length > 0) filter.Excluded = exc
+  return filter
 }
 
 // Result-table columns that only appear when some hit carries the field.
