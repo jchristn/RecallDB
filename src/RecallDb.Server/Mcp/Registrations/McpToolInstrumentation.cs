@@ -11,6 +11,8 @@ namespace RecallDb.Server.Mcp.Registrations
     using RecallDb.Server.Observability;
     using RecallDb.Server.Services;
 
+    using McpToolException = RecallDb.Server.Mcp.McpToolException;
+
     /// <summary>
     /// Wraps MCP tool registration with telemetry so every tool invocation is measured and traced uniformly. Each
     /// registration file calls <c>server.RegisterInstrumentedTool(...)</c> in place of <c>server.RegisterTool(...)</c>;
@@ -23,10 +25,24 @@ namespace RecallDb.Server.Mcp.Registrations
         #region Public-Methods
 
         /// <summary>
+        /// The published MCP tool name for a request type key: "family/operation" becomes "family_operation". MCP
+        /// tool names are limited to letters, digits, underscore, hyphen, and dot (Voltaic enforces this), and many
+        /// model APIs reject dots, so the slash is replaced with an underscore. Telemetry and the operation-scope
+        /// map keep using the request type key.
+        /// </summary>
+        /// <param name="requestType">Request type key (e.g. "search/query").</param>
+        /// <returns>Tool name (e.g. "search_query").</returns>
+        public static string ToolName(string requestType)
+        {
+            if (string.IsNullOrEmpty(requestType)) throw new ArgumentNullException(nameof(requestType));
+            return requestType.Replace('/', '_');
+        }
+
+        /// <summary>
         /// Register an asynchronous MCP tool with telemetry instrumentation.
         /// </summary>
         /// <param name="server">MCP HTTP server.</param>
-        /// <param name="name">Tool name.</param>
+        /// <param name="name">Request type key (e.g. "tenant/create"); the tool is published as <see cref="ToolName"/>.</param>
         /// <param name="description">Tool description.</param>
         /// <param name="schema">Tool input schema.</param>
         /// <param name="handler">Asynchronous handler.</param>
@@ -35,7 +51,7 @@ namespace RecallDb.Server.Mcp.Registrations
             if (server == null) throw new ArgumentNullException(nameof(server));
             if (handler == null) throw new ArgumentNullException(nameof(handler));
 
-            server.RegisterTool(name, description, schema, async (RpcParameters args) =>
+            server.RegisterTool(ToolName(name), description, schema, async (RpcParameters args) =>
             {
                 using (Activity activity = ServerTelemetry.ActivitySource.StartActivity("mcp " + name, ActivityKind.Server))
                 {
@@ -68,7 +84,7 @@ namespace RecallDb.Server.Mcp.Registrations
         /// Register a synchronous MCP tool with telemetry instrumentation.
         /// </summary>
         /// <param name="server">MCP HTTP server.</param>
-        /// <param name="name">Tool name.</param>
+        /// <param name="name">Request type key (e.g. "tenant/create"); the tool is published as <see cref="ToolName"/>.</param>
         /// <param name="description">Tool description.</param>
         /// <param name="schema">Tool input schema.</param>
         /// <param name="handler">Synchronous handler.</param>
@@ -77,7 +93,7 @@ namespace RecallDb.Server.Mcp.Registrations
             if (server == null) throw new ArgumentNullException(nameof(server));
             if (handler == null) throw new ArgumentNullException(nameof(handler));
 
-            server.RegisterTool(name, description, schema, (RpcParameters args) =>
+            server.RegisterTool(ToolName(name), description, schema, (RpcParameters args) =>
             {
                 using (Activity activity = ServerTelemetry.ActivitySource.StartActivity("mcp " + name, ActivityKind.Server))
                 {

@@ -3,7 +3,7 @@ namespace RecallDb.Core
     using System.Collections.Generic;
 
     /// <summary>
-    /// Capability strings the server advertises in GET / and the MCP server/info tool, so clients can detect
+    /// Capability strings the server advertises in GET / and the MCP server_info tool, so clients can detect
     /// search features on servers that report the same version.
     /// </summary>
     public static class SearchCapabilities

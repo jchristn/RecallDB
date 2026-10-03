@@ -45,7 +45,7 @@ command-line flags. The defaults are `http://127.0.0.1:8600` and `recalldbadmin`
 - **RecallDbCollectionIntegrity** (`CollectionIntegritySuites`): collection
   creation, index naming, and the startup schema repair.
 - **RecallDbMcp**: the MCP tool surface, including hybrid and collapsed,
-  recency-weighted `search/query` cases and the `server/info` capability list.
+  recency-weighted `search_query` cases and the `server_info` capability list.
 
 The main suite also checks that `GET /` reports every capability in
 `RecallDb.Core.SearchCapabilities` (`HealthReportsCapabilities`), and that the

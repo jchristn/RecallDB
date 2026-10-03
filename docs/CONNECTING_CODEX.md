@@ -63,12 +63,12 @@ The header/token above authenticates the transport. **Every authenticated Recall
 ```markdown
 ## RecallDB MCP
 Use the recalldb MCP tools. Pass `bearerToken="recalldbadmin"` on every authenticated call.
-Listing is paginated via `*/enumerate` (optional `query` JSON string). `server/info` needs no token.
+Listing is paginated via `*/enumerate` (optional `query` JSON string). `server_info` needs no token.
 ```
 
 ## Verify
 
-Start Codex, confirm `recalldb` appears among MCP servers, and ask it to call `server/info`.
+Start Codex, confirm `recalldb` appears among MCP servers, and ask it to call `server_info`.
 
 ## Uninstall
 

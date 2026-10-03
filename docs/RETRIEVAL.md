@@ -555,7 +555,7 @@ constants for every enum string and a capability check (`SupportsAsync(Capabilit
 confirm a server honors collapse, recency, embeddings, or minimum-should-match before relying on them. See
 [sdk/](../sdk/).
 
-Agents search with the MCP `search/query` tool, which takes the same `SearchQuery` as a JSON string and returns the
+Agents search with the MCP `search_query` tool, which takes the same `SearchQuery` as a JSON string and returns the
 same `SearchResult`. See [MCP_API.md](../MCP_API.md#search).
 
 The dashboard's Search page builds the same requests interactively, including hybrid ranking, recency, collapse, minimum

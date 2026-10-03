@@ -278,6 +278,6 @@ The SDKs wrap every call above (`CreateDocumentAsync`, `CreateDocumentBatchAsync
 path segments, and surface errors as `RecallDbException` with the server's status and message. See the READMEs under
 [sdk/](../sdk/).
 
-Agents can ingest through MCP with the `document/create`, `document/batchCreate`, `document/update`, `document/delete`,
-`document/batchDelete`, `document/deleteByFilter`, `label/create`, and `tag/create` tools; the behavior is identical
+Agents can ingest through MCP with the `document_create`, `document_batchCreate`, `document_update`, `document_delete`,
+`document_batchDelete`, `document_deleteByFilter`, `label_create`, and `tag_create` tools; the behavior is identical
 to REST. See [MCP_API.md](../MCP_API.md#document).

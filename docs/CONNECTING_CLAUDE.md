@@ -62,11 +62,11 @@ The auto-installed agent (`~/.claude/agents/recalldb.md`) instructs the model to
 
 > Use the recalldb MCP tools. Pass `bearerToken="recalldbadmin"` on every call.
 
-`server/info` and `auth/authenticate` require no token.
+`server_info` and `auth_authenticate` require no token.
 
 ## Verify
 
-In Claude Code, run `/mcp` to see `recalldb` listed and connected, then ask Claude to call `server/info` (no token needed). Then try `tenant/enumerate` with your token.
+In Claude Code, run `/mcp` to see `recalldb` listed and connected, then ask Claude to call `server_info` (no token needed). Then try `tenant_enumerate` with your token.
 
 ## Uninstall
 

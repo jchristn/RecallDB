@@ -47,7 +47,7 @@ is RecallDB's job.
 |---|---|---|
 | **RecallDb.Server** | `src/RecallDb.Server` | The server process. Hosts the REST API, the MCP server, the service layer, and the OpenTelemetry host. |
 | **REST API** | `RecallDbServer.cs` (routes) | Watson Webserver on port 8600. About 60 routes under `/v1.0/...`, plus `GET /` (health and capabilities) and an OpenAPI document at `/openapi.json`. |
-| **MCP server** | `src/RecallDb.Server/Mcp` | Voltaic, in the same process, Streamable HTTP on port 8620 (`/mcp`). Exposes the same operations as tools (`document/create`, `search/query`, ...). |
+| **MCP server** | `src/RecallDb.Server/Mcp` | Voltaic, in the same process, Streamable HTTP on port 8620 (`/mcp`). Exposes the same operations as tools (`document_create`, `search_query`, ...). |
 | **Service layer** | `src/RecallDb.Server/Services` | One service per resource (`DocumentService`, `SearchService`, `CollectionService`, ...). Both transports call the same methods, so REST and MCP behave identically. Services enforce tenant access, cross-field validation, and label/tag stitching. |
 | **Database driver** | `src/RecallDb.Core/Database/Postgresql` | Builds and runs SQL. `DocumentMethods` (writes and enumeration), `SearchMethods` (every search mode), `CollectionMethods` (DDL), `LabelMethods`, `TagMethods`, and the startup schema pass in `PostgresqlDatabaseDriver`. |
 | **Models** | `src/RecallDb.Core/Models` | Request and record types. Range checks live in the property setters, so an out-of-range value fails while the body is deserialized and becomes a 400. |
@@ -195,7 +195,7 @@ MCP server, and the observability host start.
 ## 7. Capabilities
 
 Builds that share a version number can differ in which search features they support, so the server advertises them:
-`GET /` and the MCP `server/info` tool return a `Capabilities` list.
+`GET /` and the MCP `server_info` tool return a `Capabilities` list.
 
 | Capability | Meaning |
 |---|---|

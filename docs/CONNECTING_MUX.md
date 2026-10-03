@@ -61,8 +61,8 @@ This writes the `recalldb` entry into `~/.mux/mcp-servers.json` (honoring `MUX_C
 
 ## Authentication
 
-The `auth.bearerToken` authenticates the transport. **Every authenticated RecallDB tool call must also include a `bearerToken` argument.** Instruct Mux's model to pass `bearerToken="<your token>"` on every RecallDB call (for example in your project instructions). `server/info` and `auth/authenticate` need no token.
+The `auth.bearerToken` authenticates the transport. **Every authenticated RecallDB tool call must also include a `bearerToken` argument.** Instruct Mux's model to pass `bearerToken="<your token>"` on every RecallDB call (for example in your project instructions). `server_info` and `auth_authenticate` need no token.
 
 ## Verify
 
-Run `/mcp list` to confirm `recalldb` is connected, then ask Mux to call `server/info`.
+Run `/mcp list` to confirm `recalldb` is connected, then ask Mux to call `server_info`.

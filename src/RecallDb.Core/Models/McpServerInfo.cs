@@ -3,7 +3,7 @@ namespace RecallDb.Core.Models
     using System.Collections.Generic;
 
     /// <summary>
-    /// MCP server information returned by the server/info tool: product identity plus the enabled MCP endpoint.
+    /// MCP server information returned by the server_info tool: product identity plus the enabled MCP endpoint.
     /// </summary>
     public class McpServerInfo
     {

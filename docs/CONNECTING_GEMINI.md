@@ -42,12 +42,12 @@ The `headers` value authenticates the transport. **Every authenticated RecallDB 
 ```markdown
 ## RecallDB MCP
 Use the recalldb MCP tools. Pass `bearerToken="recalldbadmin"` on every authenticated call.
-Listing is paginated via `*/enumerate` (optional `query` JSON string). `server/info` needs no token.
+Listing is paginated via `*/enumerate` (optional `query` JSON string). `server_info` needs no token.
 ```
 
 ## Verify
 
-Start Gemini and run `/mcp` (or `/mcp list`) to confirm `recalldb` is connected, then ask it to call `server/info`.
+Start Gemini and run `/mcp` (or `/mcp list`) to confirm `recalldb` is connected, then ask it to call `server_info`.
 
 ## Uninstall
 

@@ -57,15 +57,10 @@ namespace Test.Shared
                 beforeSuiteAsync: async ct =>
                 {
                     _Mcp = new McpHttpClient();
-                    await _Mcp.ConnectStreamableAsync(McpEndpoint, "/mcp", ct).ConfigureAwait(false);
-                    await _Mcp.CallAsync<JsonElement>("initialize", new
-                    {
-                        protocolVersion = "2025-11-25",
-                        capabilities = new { },
-                        clientInfo = new { name = "recalldb-tests", version = "0.2.0" }
-                    }).ConfigureAwait(false);
-                    try { await _Mcp.NotifyAsync("notifications/initialized", null).ConfigureAwait(false); }
-                    catch { }
+                    // Voltaic 2.1.5+ clients send initialize (and notifications/initialized) on connect; a second
+                    // initialize on the same session is rejected.
+                    bool connected = await _Mcp.ConnectStreamableAsync(McpEndpoint, "/mcp", ct).ConfigureAwait(false);
+                    if (!connected) throw new InvalidOperationException("Unable to connect to the MCP server at " + McpEndpoint);
                 },
                 afterSuiteAsync: async ct =>
                 {
@@ -76,7 +71,7 @@ namespace Test.Shared
                         {
                             try
                             {
-                                await CallAsync("collection/delete", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId }).ConfigureAwait(false);
+                                await CallAsync("collection_delete", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId }).ConfigureAwait(false);
                             }
                             catch { }
                         }
@@ -85,7 +80,7 @@ namespace Test.Shared
                         {
                             try
                             {
-                                await CallAsync("tenant/delete", new { bearerToken = ApiKey, tenantId = _McpTenantId }).ConfigureAwait(false);
+                                await CallAsync("tenant_delete", new { bearerToken = ApiKey, tenantId = _McpTenantId }).ConfigureAwait(false);
                             }
                             catch { }
                         }
@@ -134,11 +129,19 @@ namespace Test.Shared
                     foreach (string demo in DemoToolNames)
                         AssertFalse(names.Contains(demo), "Voltaic demo tool should not be published: " + demo);
 
+                    // MCP tool names are 1-128 characters of letters, digits, '_', '-', and '.'; RecallDB publishes
+                    // "family_operation" (the request type key with '/' replaced by '_').
                     foreach (string name in names)
-                        AssertTrue(name.Contains('/'), "Every RecallDB tool is namespaced with '/': " + name);
+                    {
+                        AssertTrue(System.Text.RegularExpressions.Regex.IsMatch(name, "^[A-Za-z0-9_-]{1,64}$"), "Tool name should be portable (letters, digits, '_', '-'): " + name);
+                        AssertTrue(name.Contains('_'), "Every RecallDB tool is namespaced as family_operation: " + name);
+                        AssertFalse(name.Contains('/'), "No tool name should contain '/': " + name);
+                    }
 
-                    AssertTrue(names.Contains("server/info"), "server/info should be published");
-                    AssertTrue(names.Contains("search/query"), "search/query should be published");
+                    AssertFalse(names.Contains("server/info"), "the former name server/info should no longer be published");
+
+                    AssertTrue(names.Contains("server_info"), "server/info should be published");
+                    AssertTrue(names.Contains("search_query"), "search/query should be published");
                 }),
 
                 // 1c. protocol ping returns an empty object, not "pong"
@@ -155,7 +158,7 @@ namespace Test.Shared
                 // 1d. tools/call wraps the tool payload in an MCP tool result
                 Case("McpToolCallEnvelope", "MCP: tools/call returns a text content block", async ct =>
                 {
-                    JsonRpcResponse response = await CallToolRawAsync("server/info", new { }).ConfigureAwait(false);
+                    JsonRpcResponse response = await CallToolRawAsync("server_info", new { }).ConfigureAwait(false);
                     AssertTrue(response.Error == null, "server/info should succeed");
                     JsonElement result = ToElement(response.Result);
                     JsonElement content = GetProperty(result, "content");
@@ -169,7 +172,7 @@ namespace Test.Shared
                 // 2. server/info (no auth)
                 Case("McpServerInfo", "MCP: server/info", async ct =>
                 {
-                    JsonElement info = await CallAsync("server/info", new { }).ConfigureAwait(false);
+                    JsonElement info = await CallAsync("server_info", new { }).ConfigureAwait(false);
                     AssertEqual("RecallDB", GetString(info, "Name"), "server/info Name");
                     AssertNotNullOrEmpty(GetString(info, "Version"), "server/info Version");
                 }),
@@ -177,7 +180,7 @@ namespace Test.Shared
                 // 2b. server/info reports search capabilities
                 Case("McpServerInfoCapabilities", "MCP: server/info reports search capabilities", async ct =>
                 {
-                    JsonElement info = await CallAsync("server/info", new { }).ConfigureAwait(false);
+                    JsonElement info = await CallAsync("server_info", new { }).ConfigureAwait(false);
                     JsonElement caps = GetProperty(info, "Capabilities");
                     AssertTrue(caps.ValueKind == JsonValueKind.Array, "server/info Capabilities should be an array");
                     List<string> names = caps.EnumerateArray().Select(c => c.GetString()).ToList();
@@ -188,7 +191,7 @@ namespace Test.Shared
                 // 3. auth/authenticate with a valid bearer token
                 Case("McpAuthenticate", "MCP: auth/authenticate", async ct =>
                 {
-                    JsonElement resp = await CallAsync("auth/authenticate", new { bearerToken = ApiKey }).ConfigureAwait(false);
+                    JsonElement resp = await CallAsync("auth_authenticate", new { bearerToken = ApiKey }).ConfigureAwait(false);
                     AssertTrue(GetBool(resp, "Success"), "auth/authenticate should succeed with the admin key");
                 }),
 
@@ -196,7 +199,7 @@ namespace Test.Shared
                 Case("McpTenantCreate", "MCP: tenant/create", async ct =>
                 {
                     string tenantJson = JsonSerializer.Serialize(new { Name = "MCP Test Tenant" }, JsonOptions);
-                    JsonElement tenant = await CallAsync("tenant/create", new { bearerToken = ApiKey, tenant = tenantJson }).ConfigureAwait(false);
+                    JsonElement tenant = await CallAsync("tenant_create", new { bearerToken = ApiKey, tenant = tenantJson }).ConfigureAwait(false);
                     _McpTenantId = GetString(tenant, "Id");
                     AssertNotNullOrEmpty(_McpTenantId, "Created tenant Id");
                     AssertEqual("MCP Test Tenant", GetString(tenant, "Name"), "Created tenant Name");
@@ -206,7 +209,7 @@ namespace Test.Shared
                 Case("McpTenantRead", "MCP: tenant/read", async ct =>
                 {
                     if (string.IsNullOrEmpty(_McpTenantId)) return;
-                    JsonElement tenant = await CallAsync("tenant/read", new { bearerToken = ApiKey, tenantId = _McpTenantId }).ConfigureAwait(false);
+                    JsonElement tenant = await CallAsync("tenant_read", new { bearerToken = ApiKey, tenantId = _McpTenantId }).ConfigureAwait(false);
                     AssertEqual("MCP Test Tenant", GetString(tenant, "Name"), "Read tenant Name");
                 }),
 
@@ -214,21 +217,21 @@ namespace Test.Shared
                 Case("McpTenantExists", "MCP: tenant/exists", async ct =>
                 {
                     if (string.IsNullOrEmpty(_McpTenantId)) return;
-                    JsonElement exists = await CallAsync("tenant/exists", new { bearerToken = ApiKey, tenantId = _McpTenantId }).ConfigureAwait(false);
+                    JsonElement exists = await CallAsync("tenant_exists", new { bearerToken = ApiKey, tenantId = _McpTenantId }).ConfigureAwait(false);
                     AssertTrue(exists.ValueKind == JsonValueKind.True, "tenant/exists should be true for created tenant");
                 }),
 
                 // 6b. tenant/exists for a missing tenant is false, not an error
                 Case("McpTenantExistsFalse", "MCP: tenant/exists false for missing tenant", async ct =>
                 {
-                    JsonElement exists = await CallAsync("tenant/exists", new { bearerToken = ApiKey, tenantId = "ten_does_not_exist_xyz" }).ConfigureAwait(false);
+                    JsonElement exists = await CallAsync("tenant_exists", new { bearerToken = ApiKey, tenantId = "ten_does_not_exist_xyz" }).ConfigureAwait(false);
                     AssertTrue(exists.ValueKind == JsonValueKind.False, "tenant/exists should be false for a missing tenant");
                 }),
 
                 // 7. tenant/enumerate returns pagination shape
                 Case("McpTenantEnumerate", "MCP: tenant/enumerate", async ct =>
                 {
-                    JsonElement result = await CallAsync("tenant/enumerate", new { bearerToken = ApiKey, query = "{\"MaxResults\":100}" }).ConfigureAwait(false);
+                    JsonElement result = await CallAsync("tenant_enumerate", new { bearerToken = ApiKey, query = "{\"MaxResults\":100}" }).ConfigureAwait(false);
                     AssertTrue(GetBool(result, "Success"), "enumerate Success");
                     AssertTrue(result.TryGetProperty("Objects", out JsonElement objs), "enumerate should contain Objects");
                     AssertTrue(objs.ValueKind == JsonValueKind.Array, "Objects should be an array");
@@ -239,7 +242,7 @@ namespace Test.Shared
                 Case("McpCollectionCreate", "MCP: collection/create", async ct =>
                 {
                     string collectionJson = JsonSerializer.Serialize(new { Name = "MCP Test Collection", Dimensionality = 3 }, JsonOptions);
-                    JsonElement col = await CallAsync("collection/create", new { bearerToken = ApiKey, tenantId = "default", collection = collectionJson }).ConfigureAwait(false);
+                    JsonElement col = await CallAsync("collection_create", new { bearerToken = ApiKey, tenantId = "default", collection = collectionJson }).ConfigureAwait(false);
                     _McpCollectionId = GetString(col, "Id");
                     AssertNotNullOrEmpty(_McpCollectionId, "Created collection Id");
                 }),
@@ -254,7 +257,7 @@ namespace Test.Shared
                         Content = "hello from mcp",
                         Embeddings = new List<float> { 0.1f, 0.2f, 0.3f }
                     }, JsonOptions);
-                    JsonElement doc = await CallAsync("document/create", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, document = docJson }).ConfigureAwait(false);
+                    JsonElement doc = await CallAsync("document_create", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, document = docJson }).ConfigureAwait(false);
                     _McpDocumentKey = GetString(doc, "DocumentKey");
                     AssertEqual("mcp-doc-1", _McpDocumentKey, "Created document key");
                 }),
@@ -263,7 +266,7 @@ namespace Test.Shared
                 Case("McpDocumentEnumerate", "MCP: document/enumerate", async ct =>
                 {
                     if (string.IsNullOrEmpty(_McpCollectionId)) return;
-                    JsonElement result = await CallAsync("document/enumerate", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, query = "{\"MaxResults\":10}" }).ConfigureAwait(false);
+                    JsonElement result = await CallAsync("document_enumerate", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, query = "{\"MaxResults\":10}" }).ConfigureAwait(false);
                     AssertTrue(result.TryGetProperty("Objects", out JsonElement objs), "document enumerate Objects");
                     AssertTrue(objs.GetArrayLength() >= 1, "Expected at least one document");
                 }),
@@ -272,7 +275,7 @@ namespace Test.Shared
                 Case("McpDocumentRead", "MCP: document/read", async ct =>
                 {
                     if (string.IsNullOrEmpty(_McpCollectionId) || string.IsNullOrEmpty(_McpDocumentKey)) return;
-                    JsonElement doc = await CallAsync("document/read", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, documentKey = _McpDocumentKey }).ConfigureAwait(false);
+                    JsonElement doc = await CallAsync("document_read", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, documentKey = _McpDocumentKey }).ConfigureAwait(false);
                     AssertEqual("mcp-doc-1", GetString(doc, "DocumentKey"), "Read document key");
                 }),
 
@@ -286,7 +289,7 @@ namespace Test.Shared
                         Vector = new { Embeddings = new List<float> { 0.1f, 0.2f, 0.3f } },
                         MaxResults = 5
                     }, JsonOptions);
-                    JsonElement result = await CallAsync("search/query", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, search = searchJson }).ConfigureAwait(false);
+                    JsonElement result = await CallAsync("search_query", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, search = searchJson }).ConfigureAwait(false);
                     AssertTrue(result.ValueKind == JsonValueKind.Object, "search should return an object");
                 }),
 
@@ -302,7 +305,7 @@ namespace Test.Shared
                         Collapse = new { Field = "DocumentId" },
                         MaxResults = 5
                     }, JsonOptions);
-                    JsonElement result = await CallAsync("search/query", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, search = searchJson }).ConfigureAwait(false);
+                    JsonElement result = await CallAsync("search_query", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, search = searchJson }).ConfigureAwait(false);
                     JsonElement docs = GetProperty(result, "Documents");
                     AssertTrue(docs.ValueKind == JsonValueKind.Array && docs.GetArrayLength() > 0, "Collapsed hybrid search should return the MCP document");
                     JsonElement top = docs[0];
@@ -322,7 +325,7 @@ namespace Test.Shared
                         Hybrid = new { Strategy = "Rrf", RrfK = 60 },
                         MaxResults = 5
                     }, JsonOptions);
-                    JsonElement result = await CallAsync("search/query", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, search = searchJson }).ConfigureAwait(false);
+                    JsonElement result = await CallAsync("search_query", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, search = searchJson }).ConfigureAwait(false);
                     AssertTrue(result.ValueKind == JsonValueKind.Object, "search should return an object");
                     JsonElement docs = GetProperty(result, "Documents");
                     AssertTrue(docs.ValueKind == JsonValueKind.Array && docs.GetArrayLength() > 0, "Hybrid search should return the MCP document");
@@ -335,7 +338,7 @@ namespace Test.Shared
                 // 13. requestHistory/enumerate (admin)
                 Case("McpRequestHistoryEnumerate", "MCP: requestHistory/enumerate", async ct =>
                 {
-                    JsonElement result = await CallAsync("requestHistory/enumerate", new { bearerToken = ApiKey }).ConfigureAwait(false);
+                    JsonElement result = await CallAsync("requestHistory_enumerate", new { bearerToken = ApiKey }).ConfigureAwait(false);
                     AssertTrue(GetBool(result, "Success"), "requestHistory enumerate Success");
                 }),
 
@@ -343,10 +346,10 @@ namespace Test.Shared
                 Case("McpInvalidBearerDenied", "MCP negative: invalid bearer token denied", async ct =>
                 {
                     await AssertMcpDenied(
-                        () => CallAsync("tenant/read", new { bearerToken = "not-a-real-token", tenantId = "default" }),
+                        () => CallAsync("tenant_read", new { bearerToken = "not-a-real-token", tenantId = "default" }),
                         "tenant/read with an invalid token should be denied");
 
-                    JsonRpcResponse response = await CallToolRawAsync("tenant/read", new { bearerToken = "not-a-real-token", tenantId = "default" }).ConfigureAwait(false);
+                    JsonRpcResponse response = await CallToolRawAsync("tenant_read", new { bearerToken = "not-a-real-token", tenantId = "default" }).ConfigureAwait(false);
                     AssertToolFailure(response, 403, "tenant/read with an invalid token");
                 }),
 
@@ -354,24 +357,24 @@ namespace Test.Shared
                 Case("McpNonAdminEnumerateDenied", "MCP negative: admin-only enumerate denied for invalid token", async ct =>
                 {
                     await AssertMcpDenied(
-                        () => CallAsync("tenant/enumerate", new { bearerToken = "not-a-real-token" }),
+                        () => CallAsync("tenant_enumerate", new { bearerToken = "not-a-real-token" }),
                         "tenant/enumerate with a non-admin/invalid token should be denied");
                 }),
 
                 // 16. NEGATIVE: missing required argument is rejected by input-schema validation
                 Case("McpMissingArg", "MCP negative: missing required argument", async ct =>
                 {
-                    JsonRpcResponse response = await CallToolRawAsync("tenant/read", new { bearerToken = ApiKey }).ConfigureAwait(false);
-                    AssertRpcError(response, -32602, "tenantId", "tenant/read without tenantId should fail validation");
+                    JsonRpcResponse response = await CallToolRawAsync("tenant_read", new { bearerToken = ApiKey }).ConfigureAwait(false);
+                    AssertToolInputError(response, "tenantId", "tenant/read without tenantId should fail validation");
                 }),
 
                 // 16b. NEGATIVE: a tool can no longer be invoked as a bare JSON-RPC method
                 Case("McpBareToolCallRejected", "MCP negative: bare tool method returns -32601", async ct =>
                 {
-                    JsonRpcResponse bare = await _Mcp.CallAsync("server/info", new { }, 0, ct).ConfigureAwait(false);
+                    JsonRpcResponse bare = await _Mcp.CallAsync("server_info", new { }, 0, ct).ConfigureAwait(false);
                     AssertRpcError(bare, -32601, null, "server/info called as a bare method should be method-not-found");
 
-                    JsonRpcResponse bareAuth = await _Mcp.CallAsync("tenant/read", new { bearerToken = ApiKey, tenantId = "default" }, 0, ct).ConfigureAwait(false);
+                    JsonRpcResponse bareAuth = await _Mcp.CallAsync("tenant_read", new { bearerToken = ApiKey, tenantId = "default" }, 0, ct).ConfigureAwait(false);
                     AssertRpcError(bareAuth, -32601, null, "tenant/read called as a bare method should be method-not-found");
                 }),
 
@@ -394,7 +397,7 @@ namespace Test.Shared
                 // 16d. NEGATIVE: unknown tool and missing tool name
                 Case("McpUnknownTool", "MCP negative: unknown tool and missing name", async ct =>
                 {
-                    JsonRpcResponse unknown = await CallToolRawAsync("tenant/nope", new { bearerToken = ApiKey }).ConfigureAwait(false);
+                    JsonRpcResponse unknown = await CallToolRawAsync("tenant_nope", new { bearerToken = ApiKey }).ConfigureAwait(false);
                     AssertRpcError(unknown, -32602, "not found", "an unknown tool should be rejected");
 
                     JsonRpcResponse noName = await _Mcp.CallAsync("tools/call", new { arguments = new { } }, 0, ct).ConfigureAwait(false);
@@ -404,38 +407,54 @@ namespace Test.Shared
                 // 16e. NEGATIVE: wrong argument type is rejected by input-schema validation
                 Case("McpWrongArgType", "MCP negative: wrong argument type", async ct =>
                 {
-                    JsonRpcResponse response = await CallToolRawAsync("tenant/read", new { bearerToken = ApiKey, tenantId = 12345 }).ConfigureAwait(false);
-                    AssertRpcError(response, -32602, "tenantId", "a numeric tenantId should fail validation");
+                    JsonRpcResponse response = await CallToolRawAsync("tenant_read", new { bearerToken = ApiKey, tenantId = 12345 }).ConfigureAwait(false);
+                    AssertToolInputError(response, "tenantId", "a numeric tenantId should fail validation");
                 }),
 
                 // 16f. Transport auth: an invalid Authorization header is rejected with 401, a valid one is accepted,
                 // and the protocol ping still bypasses authentication.
-                Case("McpTransportAuthHeader", "MCP: Authorization header gates tools/call, not ping", async ct =>
+                Case("McpTransportAuthHeader", "MCP: Authorization header gates the session, including initialize and ping", async ct =>
                 {
+                    // Since Voltaic 2.1.4 every request except discovery must authenticate (the MCP authorization
+                    // specification requires a 401 for a missing or invalid token), so a client with a bad token
+                    // cannot open a session at all.
                     using (McpHttpClient bad = new McpHttpClient())
                     {
                         bad.SetRequestHeader("Authorization", "Bearer not-a-real-token");
-                        bool connected = await bad.ConnectStreamableAsync(McpEndpoint, "/mcp", ct).ConfigureAwait(false);
-                        AssertTrue(connected, "ping-based connect should bypass authentication");
-                        await bad.PingAsync(0, ct).ConfigureAwait(false);
-
-                        bool rejected = false;
+                        bool connected;
                         try
                         {
-                            await bad.CallAsync("tools/call", new { name = "server/info", arguments = new { } }, 0, ct).ConfigureAwait(false);
+                            connected = await bad.ConnectStreamableAsync(McpEndpoint, "/mcp", ct).ConfigureAwait(false);
                         }
-                        catch (HttpRequestException e)
+                        catch (HttpRequestException)
                         {
-                            rejected = e.StatusCode == HttpStatusCode.Unauthorized;
+                            connected = false;
                         }
-                        AssertTrue(rejected, "tools/call with an invalid Authorization header should be rejected with 401");
+                        AssertFalse(connected, "connect (initialize) with an invalid Authorization header should fail");
+                    }
+
+                    using (HttpClient http = new HttpClient())
+                    {
+                        string initialize = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"recalldb-tests\",\"version\":\"1\"}}}";
+                        using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, McpEndpoint + "/mcp"))
+                        {
+                            request.Headers.TryAddWithoutValidation("Authorization", "Bearer not-a-real-token");
+                            request.Headers.TryAddWithoutValidation("Accept", "application/json, text/event-stream");
+                            request.Content = new StringContent(initialize, System.Text.Encoding.UTF8, "application/json");
+                            using (HttpResponseMessage response = await http.SendAsync(request, ct).ConfigureAwait(false))
+                            {
+                                AssertEqual(401, (int)response.StatusCode, "initialize with an invalid Authorization header should be rejected with 401");
+                            }
+                        }
                     }
 
                     using (McpHttpClient good = new McpHttpClient())
                     {
                         good.SetRequestHeader("Authorization", "Bearer " + ApiKey);
-                        await good.ConnectStreamableAsync(McpEndpoint, "/mcp", ct).ConfigureAwait(false);
-                        JsonRpcResponse response = await good.CallAsync("tools/call", new { name = "tenant/read", arguments = new { bearerToken = ApiKey, tenantId = "default" } }, 0, ct).ConfigureAwait(false);
+                        bool connected = await good.ConnectStreamableAsync(McpEndpoint, "/mcp", ct).ConfigureAwait(false);
+                        AssertTrue(connected, "connect with a valid Authorization header should succeed");
+                        await good.PingAsync(0, ct).ConfigureAwait(false);
+                        JsonRpcResponse response = await good.CallAsync("tools/call", new { name = "tenant_read", arguments = new { bearerToken = ApiKey, tenantId = "default" } }, 0, ct).ConfigureAwait(false);
                         AssertTrue(response.Error == null, "tools/call with a valid Authorization header should succeed");
                     }
                 }),
@@ -444,10 +463,10 @@ namespace Test.Shared
                 Case("McpUnknownTenant", "MCP negative: unknown tenant not found", async ct =>
                 {
                     await AssertMcpThrows(
-                        () => CallAsync("tenant/read", new { bearerToken = ApiKey, tenantId = "ten_does_not_exist_xyz" }),
+                        () => CallAsync("tenant_read", new { bearerToken = ApiKey, tenantId = "ten_does_not_exist_xyz" }),
                         "tenant/read for a missing tenant should fail");
 
-                    JsonRpcResponse response = await CallToolRawAsync("tenant/read", new { bearerToken = ApiKey, tenantId = "ten_does_not_exist_xyz" }).ConfigureAwait(false);
+                    JsonRpcResponse response = await CallToolRawAsync("tenant_read", new { bearerToken = ApiKey, tenantId = "ten_does_not_exist_xyz" }).ConfigureAwait(false);
                     AssertToolFailure(response, 404, "tenant/read for a missing tenant");
                 }),
 
@@ -455,7 +474,7 @@ namespace Test.Shared
                 Case("McpUnknownDocument", "MCP negative: unknown document not found", async ct =>
                 {
                     if (string.IsNullOrEmpty(_McpCollectionId)) return;
-                    JsonRpcResponse response = await CallToolRawAsync("document/read", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, documentKey = "does-not-exist" }).ConfigureAwait(false);
+                    JsonRpcResponse response = await CallToolRawAsync("document_read", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, documentKey = "does-not-exist" }).ConfigureAwait(false);
                     AssertToolFailure(response, 404, "document/read for a missing document");
                 }),
 
@@ -464,11 +483,11 @@ namespace Test.Shared
                 {
                     if (string.IsNullOrEmpty(_McpCollectionId) || string.IsNullOrEmpty(_McpDocumentKey)) return;
                     string dupJson = JsonSerializer.Serialize(new { DocumentKey = _McpDocumentKey, Content = "again", Embeddings = new List<float> { 0.1f, 0.2f, 0.3f } }, JsonOptions);
-                    JsonRpcResponse dup = await CallToolRawAsync("document/create", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, document = dupJson }).ConfigureAwait(false);
+                    JsonRpcResponse dup = await CallToolRawAsync("document_create", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, document = dupJson }).ConfigureAwait(false);
                     AssertToolFailure(dup, 409, "document/create with an existing key");
 
                     string updJson = JsonSerializer.Serialize(new { Content = "x" }, JsonOptions);
-                    JsonRpcResponse upd = await CallToolRawAsync("document/update", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, documentKey = "does-not-exist", document = updJson }).ConfigureAwait(false);
+                    JsonRpcResponse upd = await CallToolRawAsync("document_update", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, documentKey = "does-not-exist", document = updJson }).ConfigureAwait(false);
                     AssertToolFailure(upd, 404, "document/update of a missing key");
                 }),
 
@@ -478,8 +497,8 @@ namespace Test.Shared
                     if (string.IsNullOrEmpty(_McpCollectionId)) return;
                     string twoJson = JsonSerializer.Serialize(new { DocumentKey = "mcp-lab", Content = "two labels", Embeddings = new List<float> { 0.1f, 0.2f, 0.3f }, Labels = new[] { "mx", "my" } }, JsonOptions);
                     string oneJson = JsonSerializer.Serialize(new { DocumentKey = "mcp-la", Content = "one label", Embeddings = new List<float> { 0.1f, 0.2f, 0.3f }, Labels = new[] { "mx" } }, JsonOptions);
-                    await CallAsync("document/create", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, document = twoJson }).ConfigureAwait(false);
-                    await CallAsync("document/create", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, document = oneJson }).ConfigureAwait(false);
+                    await CallAsync("document_create", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, document = twoJson }).ConfigureAwait(false);
+                    await CallAsync("document_create", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, document = oneJson }).ConfigureAwait(false);
 
                     foreach ((string mode, int expected) in new[] { ("All", 1), ("Any", 2) })
                     {
@@ -489,7 +508,7 @@ namespace Test.Shared
                             LabelFilter = new { Required = new[] { "mx", "my" }, RequiredMode = mode },
                             MaxResults = 10
                         }, JsonOptions);
-                        JsonElement result = await CallAsync("search/query", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, search = searchJson }).ConfigureAwait(false);
+                        JsonElement result = await CallAsync("search_query", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, search = searchJson }).ConfigureAwait(false);
                         AssertEqual(expected, GetProperty(result, "Documents").GetArrayLength(), "RequiredMode " + mode + " hit count");
                     }
                 }),
@@ -498,7 +517,7 @@ namespace Test.Shared
                 Case("McpDocumentDelete", "MCP: document/delete", async ct =>
                 {
                     if (string.IsNullOrEmpty(_McpCollectionId) || string.IsNullOrEmpty(_McpDocumentKey)) return;
-                    JsonElement result = await CallAsync("document/delete", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, documentKey = _McpDocumentKey }).ConfigureAwait(false);
+                    JsonElement result = await CallAsync("document_delete", new { bearerToken = ApiKey, tenantId = "default", collectionId = _McpCollectionId, documentKey = _McpDocumentKey }).ConfigureAwait(false);
                     AssertTrue(GetBool(result, "Success"), "document/delete should report success");
                 })
             };
@@ -563,6 +582,20 @@ namespace Test.Shared
                 return;
             }
             throw new InvalidOperationException(message + " should have been denied.");
+        }
+
+        /// <summary>
+        /// Assert an input-schema failure. Since Voltaic 2.1.2, tools/call reports invalid arguments as a tool result
+        /// with isError set (so the model can correct the call), not as a -32602 JSON-RPC error.
+        /// </summary>
+        private static void AssertToolInputError(JsonRpcResponse response, string expectedText, string message)
+        {
+            AssertTrue(response.Error == null, message + " (expected an isError tool result, got RPC error " + (response.Error != null ? response.Error.Code + ": " + ErrorText(response.Error) : "") + ")");
+            JsonElement result = ToElement(response.Result);
+            AssertTrue(GetBool(result, "isError"), message + " (isError should be set, got: " + Truncate(result.GetRawText()) + ")");
+            JsonElement content = GetProperty(result, "content");
+            string text = content.ValueKind == JsonValueKind.Array && content.GetArrayLength() > 0 ? GetString(content[0], "text") : null;
+            AssertTrue(text != null && text.Contains(expectedText, StringComparison.OrdinalIgnoreCase), message + " (error text: " + Truncate(text) + ")");
         }
 
         private static void AssertRpcError(JsonRpcResponse response, int expectedCode, string expectedText, string message)

@@ -3,7 +3,7 @@ namespace RecallDb.Core.Models
     using System.Collections.Generic;
 
     /// <summary>
-    /// Server health information returned by the health endpoint and the MCP server/info tool.
+    /// Server health information returned by the health endpoint and the MCP server_info tool.
     /// </summary>
     public class HealthInfo
     {

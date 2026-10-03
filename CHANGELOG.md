@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.2.1 rebuild (2026-10-03): dependency updates
+
+The v0.2.1 server and dashboard images are rebuilt in place with updated NuGet dependencies. The SDKs are unchanged (still 0.2.3).
+
+- Server: Voltaic 2.0.0 → 2.2.1, IpMatcher 1.0.6 → 1.1.0, Watson 7.2.1 → 7.2.2, SyslogLogging 2.2.2 → 2.3.1, Timestamps 1.0.12 → 1.0.13 (both projects)
+- Tests: Touchstone.Core, Touchstone.Cli, Touchstone.XunitAdapter, Touchstone.NunitAdapter 0.1.12 → 0.2.0, NUnit 4.6.1 → 5.0.0, coverlet.collector 10.0.1 → 10.1.0
+- **Breaking (MCP):** tools are now named `family_operation` (`search_query`, `server_info`, `document_batchCreate`) instead of `family/operation`. Voltaic 2.2 rejects tool names outside letters, digits, `_`, `-`, and `.`, and many model APIs also reject `.`. Clients that discover tools through `tools/list` need no change; clients that hard-code tool names must use the new names. Metrics, traces, and the operation-scope map keep the `family/operation` request type
+- **Behavior change (MCP, from Voltaic 2.1/2.2):** arguments that fail a tool's input schema return a tool result with `isError: true` instead of a `-32602` JSON-RPC error; every request except `initialize` needs a session, and an invalid `Authorization` header is rejected with 401 on every request, including `initialize` and `ping`; browser requests from non-loopback origins get 403, and a loopback `Mcp.Hostname` serves loopback clients only. RecallDB's own tool failures (400/403/404/409) are still `-32603` JSON-RPC errors carrying `data.statusCode`
+- `McpToolInstrumentation` aliases RecallDB's `McpToolException`, which now collides with the new `Voltaic.Mcp.McpToolException`
+- The MCP test suite connects without a second `initialize` (the Voltaic client now initializes on connect), checks that every tool name is portable, asserts `isError` results for schema failures, and checks that `initialize` with an invalid `Authorization` header is rejected with 401
+
 ## SDKs v0.2.3 (C#, JavaScript, Python)
 
 The three SDKs move to 0.2.3 together. They target the v0.2.1 server described below.

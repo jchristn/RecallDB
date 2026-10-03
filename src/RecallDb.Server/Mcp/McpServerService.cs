@@ -149,7 +149,7 @@ namespace RecallDb.Server.Mcp
         private async Task<VoltaicAuth> AuthenticateAsync(HttpListenerRequest request)
         {
             // Absent Authorization header: allow through. Authenticated tools require the bearerToken argument,
-            // which the service layer authorizes; unauthenticated tools (server/info, auth/authenticate) are open.
+            // which the service layer authorizes; unauthenticated tools (server_info, auth_authenticate) are open.
             string header = request != null && request.Headers != null ? request.Headers["Authorization"] : null;
             if (string.IsNullOrEmpty(header))
                 return new VoltaicAuth { IsAuthenticated = true };

@@ -386,7 +386,7 @@ dotnet build src/RecallDb.sln
 
 RecallDB ships an in-process **Model Context Protocol (MCP)** server so agents can drive the database directly. It is hosted inside `RecallDB.Server` (no separate container) over Streamable HTTP at `http://127.0.0.1:8620/mcp` (POST for JSON-RPC, GET for the SSE stream).
 
-- The full REST operation set is exposed as MCP tools (`tenant/*`, `user/*`, `credential/*`, `collection/*`, `document/*`, `label/*`, `tag/*`, `search/query`, `requestHistory/*`, `auth/authenticate`, `server/info`).
+- The full REST operation set is exposed as MCP tools (`tenant_*`, `user_*`, `credential_*`, `collection_*`, `document_*`, `label_*`, `tag_*`, `search_query`, `requestHistory_*`, `auth_authenticate`, `server_info`).
 - Listing is always paginated (`*/enumerate`) — there are no "get all" tools.
 - Authentication is per-caller bearer, identical to REST: pass your admin API key or credential bearer token as the `bearerToken` tool argument.
 

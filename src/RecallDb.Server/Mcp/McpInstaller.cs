@@ -438,8 +438,8 @@ namespace RecallDb.Server.Mcp
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("RecallDB is a multi-tenant vector database exposed over MCP. The tools are named");
-            sb.AppendLine("`tenant/*`, `user/*`, `credential/*`, `collection/*`, `document/*`, `label/*`, `tag/*`,");
-            sb.AppendLine("`search/query`, `requestHistory/*`, plus `auth/authenticate` and `server/info`.");
+            sb.AppendLine("`tenant_*`, `user_*`, `credential_*`, `collection_*`, `document_*`, `label_*`, `tag_*`,");
+            sb.AppendLine("`search_query`, `requestHistory_*`, plus `auth_authenticate` and `server_info`.");
             sb.AppendLine();
             sb.AppendLine("IMPORTANT: every authenticated RecallDB tool call must include a `bearerToken` argument.");
             sb.AppendLine("Use this token unless told otherwise:");
@@ -447,11 +447,11 @@ namespace RecallDb.Server.Mcp
             sb.AppendLine("    bearerToken = \"" + token + "\"");
             sb.AppendLine();
             sb.AppendLine("Guidelines:");
-            sb.AppendLine("- Listing is always paginated: use `*/enumerate` with an optional `query` (an EnumerationQuery");
+            sb.AppendLine("- Listing is always paginated: use `*_enumerate` with an optional `query` (an EnumerationQuery");
             sb.AppendLine("  JSON string, e.g. `{\"MaxResults\":50}`); page with the returned `ContinuationToken`.");
             sb.AppendLine("- Identifiers are camelCase strings: `tenantId`, `collectionId`, `documentKey`, etc.");
             sb.AppendLine("- Complex bodies are passed as JSON strings: `tenant`, `document`, `search`, `query`, etc.");
-            sb.AppendLine("- Use `server/info` to confirm connectivity; it needs no token.");
+            sb.AppendLine("- Use `server_info` to confirm connectivity; it needs no token.");
             sb.AppendLine();
             return sb.ToString();
         }

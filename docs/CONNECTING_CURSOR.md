@@ -41,12 +41,12 @@ The `headers` value authenticates the transport. **Every authenticated RecallDB 
 ```markdown
 ## RecallDB MCP
 Use the recalldb MCP tools. Pass `bearerToken="recalldbadmin"` on every authenticated call.
-Listing is paginated via `*/enumerate` (optional `query` JSON string). `server/info` needs no token.
+Listing is paginated via `*/enumerate` (optional `query` JSON string). `server_info` needs no token.
 ```
 
 ## Verify
 
-Open Cursor's MCP settings and confirm `recalldb` shows a green/connected status and lists its tools, then ask Cursor to call `server/info`.
+Open Cursor's MCP settings and confirm `recalldb` shows a green/connected status and lists its tools, then ask Cursor to call `server_info`.
 
 ## Uninstall
 
